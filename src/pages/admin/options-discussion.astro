@@ -1,0 +1,190 @@
+---
+import Admin from '@/layouts/Admin.astro';
+import { createContext, requireAuth } from '@/lib/context';
+import { hasPermission } from '@/lib/auth';
+
+const ctx = await createContext(Astro.locals, Astro.request);
+const authCheck = requireAuth(ctx);
+if (authCheck) return authCheck;
+
+if (!hasPermission(ctx.user!.group || 'visitor', 'administrator')) {
+  return new Response('Forbidden', { status: 403 });
+}
+
+const { options, urls, user } = ctx;
+
+// Convert commentsPostTimeout from seconds to days for display
+const commentsPostTimeoutDays = options.commentsPostTimeout
+  ? Math.round(Number(options.commentsPostTimeout) / (24 * 3600))
+  : 14;
+
+// Convert commentsPostInterval from seconds to minutes for display
+const commentsPostIntervalMinutes = options.commentsPostInterval
+  ? Math.round(Number(options.commentsPostInterval) / 60)
+  : 1;
+---
+<Admin title="评论设置" options={options} urls={urls} user={user} activeMenu="options-discussion">
+  <div class="col-mb-12 col-tb-8 col-tb-offset-2" role="form">
+    <form method="post" action="/api/admin/options">
+      <ul class="typecho-option">
+        <li>
+          <label class="typecho-label" for="commentDateFormat">评论日期格式</label>
+          <input type="text" id="commentDateFormat" name="commentDateFormat" class="w-40 mono"
+            value={options.commentDateFormat || 'F jS, Y \\a\\t h:i a'} />
+          <p class="description">
+            这是一个默认的日期格式, 当你在评论中调用显示日期函数时, 如果没有指定日期格式, 将使用此格式输出
+          </p>
+        </li>
+      </ul>
+
+      <ul class="typecho-option">
+        <li>
+          <label class="typecho-label" for="commentsListSize">评论列表数目</label>
+          <input type="text" id="commentsListSize" name="commentsListSize" class="w-20"
+            value={options.commentsListSize || '10'} />
+          <p class="description">
+            此数目用于指定显示在侧边栏中的评论列表数目
+          </p>
+        </li>
+      </ul>
+
+      <ul class="typecho-option">
+        <li>
+          <label class="typecho-label">评论显示</label>
+          <ul>
+            <li>
+              <input type="checkbox" id="commentsShowCommentOnly" name="commentsShowCommentOnly" value="1"
+                checked={!!options.commentsShowCommentOnly && options.commentsShowCommentOnly !== '0'} />
+              <label for="commentsShowCommentOnly">仅显示评论, 不显示 Pingback/Trackback</label>
+            </li>
+            <li>
+              <input type="checkbox" id="commentsMarkdown" name="commentsMarkdown" value="1"
+                checked={!!options.commentsMarkdown && options.commentsMarkdown !== '0'} />
+              <label for="commentsMarkdown">在评论中使用 Markdown 语法</label>
+            </li>
+            <li>
+              <input type="checkbox" id="commentsShowUrl" name="commentsShowUrl" value="1"
+                checked={options.commentsShowUrl !== false && options.commentsShowUrl !== '0'} />
+              <label for="commentsShowUrl">评论者名称自动加上其个人主页链接</label>
+            </li>
+            <li>
+              <input type="checkbox" id="commentsUrlNofollow" name="commentsUrlNofollow" value="1"
+                checked={!!options.commentsUrlNofollow && options.commentsUrlNofollow !== '0'} />
+              <label for="commentsUrlNofollow">对评论者个人主页链接使用 <code>nofollow</code> 属性</label>
+            </li>
+            <li>
+              <input type="checkbox" id="commentsAvatar" name="commentsAvatar" value="1"
+                checked={options.commentsAvatar !== false && options.commentsAvatar !== '0'} />
+              <label for="commentsAvatar">启用 <a href="http://www.gravatar.com">Gravatar</a> 头像服务, 最高显示评级为</label>
+              <select name="commentsAvatarRating" id="commentsAvatarRating">
+                <option value="G" selected={!options.commentsAvatarRating || options.commentsAvatarRating === 'G'}>G - 普遍级</option>
+                <option value="PG" selected={options.commentsAvatarRating === 'PG'}>PG - 辅导级</option>
+                <option value="R" selected={options.commentsAvatarRating === 'R'}>R - 限制级</option>
+                <option value="X" selected={options.commentsAvatarRating === 'X'}>X - 更高限制</option>
+              </select>
+            </li>
+            <li>
+              <input type="checkbox" id="commentsPageBreak" name="commentsPageBreak" value="1"
+                checked={!!options.commentsPageBreak && options.commentsPageBreak !== '0'} />
+              <label for="commentsPageBreak">启用评论分页, 每页显示</label>
+              <input type="text" id="commentsPageSize" name="commentsPageSize" class="text-s"
+                value={options.commentsPageSize || '20'} style="width: 40px;" />
+              篇评论, 在列出时将
+              <select name="commentsPageDisplay" id="commentsPageDisplay">
+                <option value="last" selected={!options.commentsPageDisplay || options.commentsPageDisplay === 'last'}>最后</option>
+                <option value="first" selected={options.commentsPageDisplay === 'first'}>最前</option>
+              </select>
+              的页面作为默认显示
+            </li>
+            <li>
+              <input type="checkbox" id="commentsThreaded" name="commentsThreaded" value="1"
+                checked={!!options.commentsThreaded && options.commentsThreaded !== '0'} />
+              <label for="commentsThreaded">启用对评论的回复, 以</label>
+              <select id="commentsMaxNestingLevels" name="commentsMaxNestingLevels">
+                {[2, 3, 4, 5, 6, 7].map(n => (
+                  <option value={String(n)} selected={Number(options.commentsMaxNestingLevels) === n}>{n}</option>
+                ))}
+              </select>
+              层作为每个评论最多的回复层数
+              <br />
+              将
+              <select name="commentsOrder" id="commentsOrder">
+                <option value="DESC" selected={options.commentsOrder === 'DESC'}>较新的</option>
+                <option value="ASC" selected={!options.commentsOrder || options.commentsOrder === 'ASC'}>较旧的</option>
+              </select>
+              评论显示在前面
+            </li>
+          </ul>
+        </li>
+      </ul>
+
+      <ul class="typecho-option">
+        <li>
+          <label class="typecho-label">评论提交</label>
+          <ul>
+            <li>
+              <input type="checkbox" id="commentsRequireModeration" name="commentsRequireModeration" value="1"
+                checked={!!options.commentsRequireModeration && options.commentsRequireModeration !== '0'} />
+              <label for="commentsRequireModeration">所有评论必须经过审核</label>
+            </li>
+            <li>
+              <input type="checkbox" id="commentsWhitelist" name="commentsWhitelist" value="1"
+                checked={!!options.commentsWhitelist && options.commentsWhitelist !== '0'} />
+              <label for="commentsWhitelist">评论者之前须有评论通过了审核</label>
+            </li>
+            <li>
+              <input type="checkbox" id="commentsRequireMail" name="commentsRequireMail" value="1"
+                checked={!!options.commentsRequireMail && options.commentsRequireMail !== '0'} />
+              <label for="commentsRequireMail">评论者必须填写邮箱</label>
+            </li>
+            <li>
+              <input type="checkbox" id="commentsRequireURL" name="commentsRequireURL" value="1"
+                checked={!!options.commentsRequireURL && options.commentsRequireURL !== '0'} />
+              <label for="commentsRequireURL">评论者必须填写网址</label>
+            </li>
+            <li>
+              <input type="checkbox" id="commentsCheckReferer" name="commentsCheckReferer" value="1"
+                checked={!!options.commentsCheckReferer && options.commentsCheckReferer !== '0'} />
+              <label for="commentsCheckReferer">检查评论来源页 URL 是否与文章链接一致</label>
+            </li>
+            <li>
+              <input type="checkbox" id="commentsAntiSpam" name="commentsAntiSpam" value="1"
+                checked={!!options.commentsAntiSpam && options.commentsAntiSpam !== '0'} />
+              <label for="commentsAntiSpam">开启反垃圾保护</label>
+            </li>
+            <li>
+              <input type="checkbox" id="commentsAutoClose" name="commentsAutoClose" value="1"
+                checked={!!options.commentsAutoClose && options.commentsAutoClose !== '0'} />
+              <label for="commentsAutoClose">在文章发布</label>
+              <input type="text" id="commentsPostTimeout" name="commentsPostTimeout" class="text-s"
+                value={String(commentsPostTimeoutDays)} style="width: 40px;" />
+              天以后自动关闭评论
+            </li>
+            <li>
+              <input type="checkbox" id="commentsPostIntervalEnable" name="commentsPostIntervalEnable" value="1"
+                checked={!!options.commentsPostIntervalEnable && options.commentsPostIntervalEnable !== '0'} />
+              <label for="commentsPostIntervalEnable">同一 IP 发布评论的时间间隔限制为</label>
+              <input type="text" id="commentsPostInterval" name="commentsPostInterval" class="text-s"
+                value={String(commentsPostIntervalMinutes)} style="width: 40px;" />
+              分钟
+            </li>
+          </ul>
+        </li>
+      </ul>
+
+      <ul class="typecho-option">
+        <li>
+          <label for="commentsHTMLTagAllowed" class="typecho-label">允许使用的 HTML 标签和属性</label>
+          <p><textarea id="commentsHTMLTagAllowed" name="commentsHTMLTagAllowed" class="w-100 mono" rows="3">{options.commentsHTMLTagAllowed ?? '<a href=""> <img src=""> <em> <strong> <cite> <blockquote> <code> <pre>'}</textarea></p>
+          <p class="description">默认的用户评论不允许填写任何的 HTML 标签, 你可以在这里填写允许使用的 HTML 标签.<br />例如: <code>&lt;a href=&quot;&quot;&gt; &lt;img src=&quot;&quot;&gt; &lt;em&gt; &lt;strong&gt;</code></p>
+        </li>
+      </ul>
+
+      <ul class="typecho-option typecho-option-submit">
+        <li>
+          <button type="submit" class="btn primary">保存设置</button>
+        </li>
+      </ul>
+    </form>
+  </div>
+</Admin>

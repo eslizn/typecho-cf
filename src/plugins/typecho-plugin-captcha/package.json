@@ -1,0 +1,10 @@
+{
+  "name": "typecho-plugin-captcha",
+  "version": "1.0.0",
+  "description": "Typecho 验证码插件 - 集成 Google reCAPTCHA v3 / Cloudflare Turnstile 保护评论",
+  "keywords": ["typecho", "plugin", "captcha", "recaptcha", "turnstile"],
+  "author": "eslizn",
+  "license": "MIT",
+  "type": "module",
+  "main": "index.js"
+}

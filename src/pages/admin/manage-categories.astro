@@ -1,0 +1,133 @@
+---
+import Admin from '@/layouts/Admin.astro';
+import { createContext, requireAuth } from '@/lib/context';
+import { hasPermission } from '@/lib/auth';
+import { eq } from 'drizzle-orm';
+import { schema } from '@/db';
+
+const ctx = await createContext(Astro.locals, Astro.request);
+const authCheck = requireAuth(ctx);
+if (authCheck) return authCheck;
+
+if (!hasPermission(ctx.user!.group || 'visitor', 'editor')) {
+  return new Response('Forbidden', { status: 403 });
+}
+
+const { db, options, urls, user } = ctx;
+
+const categories = await db.select().from(schema.metas)
+  .where(eq(schema.metas.type, 'category'))
+  .orderBy(schema.metas.order);
+
+// Editing
+const editMid = Astro.url.searchParams.get('mid');
+let editCat: any = null;
+if (editMid) {
+  editCat = await db.query.metas.findFirst({
+    where: eq(schema.metas.mid, parseInt(editMid, 10)),
+  });
+}
+
+const isDefault = (mid: number) => options.defaultCategory === mid;
+---
+<Admin title="管理分类" options={options} urls={urls} user={user} activeMenu="manage-categories">
+  <div class="col-mb-12" role="main">
+    <form method="post" name="manage_categories" class="operate-form">
+      <div class="typecho-list-operate clearfix">
+        <div class="operate">
+          <label><i class="sr-only">全选</i><input type="checkbox" class="typecho-table-select-all" /></label>
+          <div class="btn-group btn-drop">
+            <button class="btn dropdown-toggle btn-s" type="button"><i class="sr-only">操作</i>选中项 <i class="i-caret-down"></i></button>
+            <ul class="dropdown-menu">
+              <li><a href="/api/admin/meta?action=delete&type=category">删除</a></li>
+              <li><a href="/api/admin/meta?action=refresh&type=category">刷新</a></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <div class="typecho-table-wrap">
+        <table class="typecho-list-table">
+          <colgroup>
+            <col width="20" class="kit-hidden-mb" />
+            <col width="" />
+            <col width="25%" class="kit-hidden-mb" />
+            <col width="15%" />
+            <col width="10%" class="kit-hidden-mb" />
+          </colgroup>
+          <thead>
+            <tr class="nodrag">
+              <th class="kit-hidden-mb"></th>
+              <th>名称</th>
+              <th class="kit-hidden-mb">缩略名</th>
+              <th></th>
+              <th class="kit-hidden-mb">文章数</th>
+            </tr>
+          </thead>
+          <tbody>
+            {categories.length === 0 ? (
+              <tr>
+                <td colspan="5"><h6 class="typecho-list-table-title">没有任何分类</h6></td>
+              </tr>
+            ) : (
+              categories.map((cat) => (
+                <tr id={`mid-${cat.mid}`}>
+                  <td class="kit-hidden-mb"><input type="checkbox" value={String(cat.mid)} name="mid[]" /></td>
+                  <td>
+                    <a href={`/admin/manage-categories?mid=${cat.mid}`}>{cat.name}</a>
+                    <a href={`/category/${cat.slug}/`} title={`浏览 ${cat.name}`}><i class="i-exlink"></i></a>
+                  </td>
+                  <td class="kit-hidden-mb">{cat.slug}</td>
+                  <td>
+                    {isDefault(cat.mid) ? (
+                      <span>默认</span>
+                    ) : (
+                      <a class="hidden-by-mouse"
+                        href={`/api/admin/meta?action=default&mid=${cat.mid}&type=category`}
+                        title="设为默认">默认</a>
+                    )}
+                  </td>
+                  <td class="kit-hidden-mb">
+                    <a class="balloon-button left size-small" href={`/admin/manage-posts?category=${cat.mid}`}>{cat.count || 0}</a>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </form>
+
+    <div class="typecho-mini-panel" style="margin-top: 20px;">
+      <form method="post" action="/api/admin/meta">
+        <input type="hidden" name="action" value={editCat ? 'update' : 'create'} />
+        <input type="hidden" name="type" value="category" />
+        {editCat && <input type="hidden" name="mid" value={String(editCat.mid)} />}
+
+        <h4>{editCat ? '编辑分类' : '新增分类'}</h4>
+
+        <ul class="typecho-option">
+          <li>
+            <label for="name" class="typecho-label">名称 *</label>
+            <input type="text" id="name" name="name" class="text w-100" value={editCat?.name || ''} required />
+          </li>
+          <li>
+            <label for="slug" class="typecho-label">缩略名</label>
+            <input type="text" id="slug" name="slug" class="text w-100" value={editCat?.slug || ''} placeholder="留空自动生成" />
+            <p class="description">分类缩略名用于创建友好的链接形式, 建议使用字母、数字、下划线和连字符</p>
+          </li>
+          <li>
+            <label for="description" class="typecho-label">描述</label>
+            <textarea id="description" name="description" class="w-100 mono" rows="3">{editCat?.description || ''}</textarea>
+            <p class="description">此文字用于描述分类, 在有些主题中它会被显示</p>
+          </li>
+        </ul>
+
+        <p>
+          <button type="submit" class="btn primary">{editCat ? '更新分类' : '增加分类'}</button>
+          {editCat && <a href="/admin/manage-categories" class="btn">取消</a>}
+        </p>
+      </form>
+    </div>
+  </div>
+</Admin>

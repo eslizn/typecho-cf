@@ -1,0 +1,158 @@
+---
+import Admin from '@/layouts/Admin.astro';
+import { createContext, requireAuth } from '@/lib/context';
+import { hasPermission } from '@/lib/auth';
+import { eq } from 'drizzle-orm';
+import { schema } from '@/db';
+import { formatDate } from '@/lib/content';
+
+const ctx = await createContext(Astro.locals, Astro.request);
+const authCheck = requireAuth(ctx);
+if (authCheck) return authCheck;
+
+if (!hasPermission(ctx.user!.group || 'visitor', 'editor')) {
+  return new Response('Forbidden', { status: 403 });
+}
+
+const { db, options, urls, user } = ctx;
+const cid = parseInt(Astro.url.searchParams.get('cid') || '0', 10);
+
+if (!cid) {
+  return new Response(null, { status: 302, headers: { Location: '/admin/manage-medias' } });
+}
+
+const attachment = await db.query.contents.findFirst({
+  where: eq(schema.contents.cid, cid),
+});
+
+if (!attachment || attachment.type !== 'attachment') {
+  return new Response(null, { status: 302, headers: { Location: '/admin/manage-medias' } });
+}
+
+let meta: any = {};
+try { meta = JSON.parse(attachment.text || '{}'); } catch {}
+
+// Normalize meta fields for compatibility with legacy data
+// Legacy format: {"name":"img.jpg","path":"usr/uploads/...","size":"12345","type":"jpg"}
+// New format:    {"name":"img.jpg","path":"usr/uploads/...","size":12345,"type":"image/jpeg","url":"https://..."}
+const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'avif'];
+const mimeType = meta.type || '';
+const isImage = mimeType.startsWith('image/')
+  || imageExtensions.includes(mimeType.toLowerCase())
+  || imageExtensions.some(ext => (meta.name || '').toLowerCase().endsWith('.' + ext));
+
+// Build file URL: prefer meta.url, fallback to constructing from meta.path
+let fileUrl = meta.url || '';
+if (!fileUrl && meta.path) {
+  fileUrl = '/' + meta.path.replace(/^\//, '');
+}
+
+// Convert absolute URL to relative path for the link input
+let relativeUrl = fileUrl;
+try {
+  if (relativeUrl && relativeUrl.startsWith('http')) {
+    relativeUrl = new URL(relativeUrl).pathname;
+  }
+} catch {}
+
+// Get author
+const author = attachment.authorId
+  ? await db.query.users.findFirst({ where: eq(schema.users.uid, attachment.authorId) })
+  : null;
+
+// Get parent content
+const parentContent = attachment.parent
+  ? await db.query.contents.findFirst({ where: eq(schema.contents.cid, attachment.parent) })
+  : null;
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return Math.ceil(bytes / 1024) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+---
+<Admin title="编辑文件" options={options} urls={urls} user={user} activeMenu="manage-medias">
+  <div class="col-mb-12 col-tb-4" role="complementary">
+    {isImage && fileUrl ? (
+      <p><a href={fileUrl} target="_blank" rel="noopener noreferrer">
+        <img src={fileUrl} alt={attachment.title || ''} style="max-width: 100%; border: 1px solid #D9D9D6; border-radius: 2px;" />
+      </a></p>
+    ) : (
+      <div style="padding: 40px; text-align: center; background: #F6F6F3; border: 1px solid #D9D9D6; border-radius: 2px;">
+        <strong style="font-size: 24px;">{(meta.type || 'file').split('/').pop()?.toUpperCase() || 'FILE'}</strong>
+      </div>
+    )}
+
+    <ul class="typecho-option" style="margin-top: 15px;">
+      <li>
+        <span class="typecho-label">文件名</span>
+        <p>{meta.name || attachment.title || '未知'}</p>
+      </li>
+      <li>
+        <span class="typecho-label">类型</span>
+        <p>{mimeType || '未知'}</p>
+      </li>
+      <li>
+        <span class="typecho-label">大小</span>
+        <p>{formatBytes(parseInt(String(meta.size || '0'), 10) || 0)}</p>
+      </li>
+      <li>
+        <span class="typecho-label">上传者</span>
+        <p>{author?.screenName || author?.name || '未知'}</p>
+      </li>
+      <li>
+        <span class="typecho-label">上传日期</span>
+        <p>{formatDate(attachment.created || 0, 'Y-m-d H:i', options.timezone)}</p>
+      </li>
+      {parentContent && (
+        <li>
+          <span class="typecho-label">所属内容</span>
+          <p><a href={`/admin/write-post?cid=${parentContent.cid}`}>{parentContent.title || '无标题'}</a></p>
+        </li>
+      )}
+    </ul>
+  </div>
+
+  <div class="col-mb-12 col-tb-6 col-tb-offset-1" role="form">
+    <form method="post" action="/api/admin/media">
+      <input type="hidden" name="cid" value={String(cid)} />
+
+      <ul class="typecho-option">
+        <li>
+          <label for="name" class="typecho-label">文件标题</label>
+          <p><input type="text" id="name" name="name" class="text w-100" value={attachment.title || ''} /></p>
+          <p class="description">文件标题用于前台展示，可自行修改</p>
+        </li>
+        <li>
+          <label for="slug" class="typecho-label">缩略名</label>
+          <p><input type="text" id="slug" name="slug" class="text w-100" value={attachment.slug || ''} /></p>
+        </li>
+        <li>
+          <label class="typecho-label">文件链接</label>
+          <p><input type="text" class="text w-100 mono" value={relativeUrl} readonly onclick="this.select();" /></p>
+          <p class="description">此链接可直接被引用, 使用相对路径便于切换网址后使用</p>
+        </li>
+      </ul>
+
+      <ul class="typecho-option typecho-option-submit">
+        <li>
+          <button type="submit" class="btn primary">保存修改</button>
+          <a href="/admin/manage-medias" class="btn">返回</a>
+        </li>
+      </ul>
+    </form>
+
+    <br />
+
+    <form method="post" action="/api/admin/media" style="margin-top: 20px;">
+      <input type="hidden" name="cid" value={String(cid)} />
+      <input type="hidden" name="do" value="delete" />
+      <p>
+        <button type="submit" class="btn btn-warn"
+          onclick="return confirm('你确认要删除此文件吗? 此操作无法撤销.');">
+          删除此文件
+        </button>
+      </p>
+    </form>
+  </div>
+</Admin>

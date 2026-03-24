@@ -1,0 +1,64 @@
+---
+/**
+ * Default theme — Recursive comment list component
+ *
+ * Renders a flat or nested comment tree using Astro's component recursion.
+ */
+import type { CommentNode, CommentOptions } from '@/lib/theme-props';
+import { formatDate } from '@/lib/content';
+
+interface Props {
+  comments: CommentNode[];
+  commentOptions: CommentOptions;
+  gravatarMap: Record<number, string>;
+  permalink: string;
+}
+
+const { comments, commentOptions, gravatarMap, permalink } = Astro.props;
+---
+{comments.map((node) => (
+  <li class="comment-body" id={`comment-${node.coid}`}>
+    <div class="comment-author">
+      {commentOptions.showAvatar && (
+        <img
+          class="avatar"
+          src={gravatarMap[node.coid] || `https://gravatar.com/avatar/?d=identicon&s=40`}
+          alt={node.author}
+          width="40"
+          height="40"
+        />
+      )}
+      <cite class="fn">
+        {node.url && commentOptions.showUrl ? (
+          <a href={node.url} rel="external nofollow">{node.author}</a>
+        ) : (
+          node.author
+        )}
+      </cite>
+    </div>
+    <div class="comment-meta">
+      <time datetime={new Date(node.created * 1000).toISOString()}>
+        {formatDate(node.created, commentOptions.dateFormat, commentOptions.timezone)}
+      </time>
+    </div>
+    <div class="comment-content" set:html={node.text} />
+    {commentOptions.allowComment && (
+      <div class="comment-reply">
+        <a href="#respond" data-coid={node.coid} class="comment-reply-link" rel="nofollow"
+          onclick={`return TypechoComment.reply('comment-${node.coid}', ${node.coid})`}>回复</a>
+      </div>
+    )}
+    {node.children.length > 0 && (
+      <div class="comment-children">
+        <ol class="comment-list">
+          <Astro.self
+            comments={node.children}
+            commentOptions={commentOptions}
+            gravatarMap={gravatarMap}
+            permalink={permalink}
+          />
+        </ol>
+      </div>
+    )}
+  </li>
+))}

@@ -1,0 +1,127 @@
+---
+import Admin from '@/layouts/Admin.astro';
+import { createContext, requireAuth } from '@/lib/context';
+import { hasPermission } from '@/lib/auth';
+import { eq, and, sql, desc } from 'drizzle-orm';
+import { schema } from '@/db';
+import { buildPermalink, formatDate } from '@/lib/content';
+
+const ctx = await createContext(Astro.locals, Astro.request);
+const authCheck = requireAuth(ctx);
+if (authCheck) return authCheck;
+
+const { db, options, urls, user } = ctx;
+const uid = user!.uid;
+
+// Stats
+const postCount = await db.select({ count: sql<number>`count(*)` }).from(schema.contents)
+  .where(and(eq(schema.contents.type, 'post'), eq(schema.contents.status, 'publish'), eq(schema.contents.authorId, uid)));
+
+const commentCount = await db.select({ count: sql<number>`count(*)` }).from(schema.comments)
+  .where(eq(schema.comments.ownerId, uid));
+
+const catCount = await db.select({ count: sql<number>`count(*)` }).from(schema.metas)
+  .where(eq(schema.metas.type, 'category'));
+
+const waitingComments = await db.select({ count: sql<number>`count(*)` }).from(schema.comments)
+  .where(eq(schema.comments.status, 'waiting'));
+
+const spamComments = await db.select({ count: sql<number>`count(*)` }).from(schema.comments)
+  .where(eq(schema.comments.status, 'spam'));
+
+// Recent posts
+const recentPosts = await db.select().from(schema.contents)
+  .where(and(eq(schema.contents.type, 'post'), eq(schema.contents.status, 'publish')))
+  .orderBy(desc(schema.contents.created))
+  .limit(10);
+
+// Recent comments
+const recentComments = await db.select().from(schema.comments)
+  .where(eq(schema.comments.status, 'approved'))
+  .orderBy(desc(schema.comments.created))
+  .limit(10);
+
+const isAdmin = hasPermission(user!.group || 'visitor', 'administrator');
+const isContributor = hasPermission(user!.group || 'visitor', 'contributor');
+---
+<Admin title="控制台" options={options} urls={urls} user={user} activeMenu="dashboard" bodyClass="typecho-dashboard">
+  <div class="col-mb-12 welcome-board" role="main">
+    <p>
+      目前有 <em>{postCount[0]?.count || 0}</em> 篇文章, 并有 <em>{commentCount[0]?.count || 0}</em>
+      条关于你的评论在 <em>{catCount[0]?.count || 0}</em> 个分类中.
+      <br />点击下面的链接快速开始:
+    </p>
+    <ul id="start-link" class="clearfix">
+      {isContributor && <li><a href="/admin/write-post">撰写新文章</a></li>}
+      {(waitingComments[0]?.count || 0) > 0 && (
+        <li>
+          <a href="/admin/manage-comments?status=waiting">待审核评论</a>
+          <span class="balloon">{waitingComments[0]?.count}</span>
+        </li>
+      )}
+      {(spamComments[0]?.count || 0) > 0 && (
+        <li>
+          <a href="/admin/manage-comments?status=spam">垃圾评论</a>
+          <span class="balloon">{spamComments[0]?.count}</span>
+        </li>
+      )}
+      {isAdmin && (
+        <>
+          <li><a href="/admin/options-general">系统设置</a></li>
+        </>
+      )}
+    </ul>
+  </div>
+
+  <div class="col-mb-12 col-tb-4" role="complementary">
+    <section class="latest-link">
+      <h3>最近发布的文章</h3>
+      <ul>
+        {recentPosts.length === 0 ? (
+          <li><em>暂时没有文章</em></li>
+        ) : (
+          recentPosts.map((post) => (
+            <li>
+              <span>{formatDate(post.created || 0, 'n.j', options.timezone)}</span>
+              <a href={buildPermalink({ cid: post.cid, slug: post.slug, type: post.type, created: post.created }, urls.siteUrl, options.permalinkPattern as string | undefined)} class="title">
+                {post.title || '无标题'}
+              </a>
+            </li>
+          ))
+        )}
+      </ul>
+    </section>
+  </div>
+
+  <div class="col-mb-12 col-tb-4" role="complementary">
+    <section class="latest-link">
+      <h3>最近得到的回复</h3>
+      <ul>
+        {recentComments.length === 0 ? (
+          <li>暂时没有回复</li>
+        ) : (
+          recentComments.map((comment) => (
+            <li>
+              <span>{formatDate(comment.created || 0, 'n.j', options.timezone)}</span>
+              <a href={`/archives/${comment.cid}/#comment-${comment.coid}`} class="title">
+                {comment.author || '匿名'}
+              </a>:
+              {(comment.text || '').replace(/<[^>]+>/g, '').substring(0, 35)}...
+            </li>
+          ))
+        )}
+      </ul>
+    </section>
+  </div>
+
+  <div class="col-mb-12 col-tb-4" role="complementary">
+    <section class="latest-link">
+      <h3>关于 Typecho</h3>
+      <ul>
+        <li><a href="https://github.com/eslizn/typecho-cf" target="_blank">项目主页</a></li>
+        <li>Astro + Cloudflare Workers</li>
+        <li>Typecho 数据兼容</li>
+      </ul>
+    </section>
+  </div>
+</Admin>

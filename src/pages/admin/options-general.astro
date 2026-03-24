@@ -1,0 +1,73 @@
+---
+import Admin from '@/layouts/Admin.astro';
+import { createContext, requireAuth } from '@/lib/context';
+import { hasPermission } from '@/lib/auth';
+
+const ctx = await createContext(Astro.locals, Astro.request);
+const authCheck = requireAuth(ctx);
+if (authCheck) return authCheck;
+
+if (!hasPermission(ctx.user!.group || 'visitor', 'administrator')) {
+  return new Response('Forbidden', { status: 403 });
+}
+
+const { options, urls, user } = ctx;
+---
+<Admin title="基本设置" options={options} urls={urls} user={user} activeMenu="options">
+  <div class="col-mb-12 col-tb-8 col-tb-offset-2" role="form">
+    <form method="post" action="/api/admin/options">
+      <ul class="typecho-option">
+        <li>
+          <label for="title" class="typecho-label">站点名称</label>
+          <p><input type="text" id="title" name="title" class="text w-100" value={options.title} /></p>
+          <p class="description">站点的名称将显示在网页的标题处</p>
+        </li>
+        <li>
+          <label for="description" class="typecho-label">站点描述</label>
+          <p><input type="text" id="description" name="description" class="text w-100" value={options.description} /></p>
+          <p class="description">站点的描述将显示在网页代码的头部</p>
+        </li>
+        <li>
+          <label for="keywords" class="typecho-label">关键词</label>
+          <p><input type="text" id="keywords" name="keywords" class="text w-100" value={options.keywords} placeholder="多个关键词用逗号分隔" /></p>
+          <p class="description">请以半角逗号 "," 分割多个关键字</p>
+        </li>
+        <li>
+          <label for="siteUrl" class="typecho-label">站点地址</label>
+          <p><input type="url" id="siteUrl" name="siteUrl" class="text w-100" value={options.siteUrl} /></p>
+          <p class="description">站点地址将作为你的博客的URL标识, 请包含 <code>http://</code> 或 <code>https://</code> 前缀</p>
+        </li>
+        <li>
+          <label class="typecho-label">时区</label>
+          <p>
+            <select name="timezone" id="timezone">
+              <option value="28800" selected={options.timezone === 28800}>UTC+8 (中国标准时间)</option>
+              <option value="0" selected={options.timezone === 0}>UTC</option>
+              <option value="-18000" selected={options.timezone === -18000}>UTC-5 (美国东部)</option>
+              <option value="32400" selected={options.timezone === 32400}>UTC+9 (日本/韩国)</option>
+              <option value="3600" selected={options.timezone === 3600}>UTC+1 (中欧)</option>
+            </select>
+          </p>
+        </li>
+        <li>
+          <label class="typecho-label">
+            <input type="checkbox" name="allowRegister" value="1" checked={!!options.allowRegister} />
+            允许注册
+          </label>
+          <p class="description">是否允许访客注册到你的博客</p>
+        </li>
+        <li>
+          <label for="attachmentTypes" class="typecho-label">允许上传的文件类型</label>
+          <p><input type="text" id="attachmentTypes" name="attachmentTypes" class="text w-100"
+            value={options.attachmentTypes || '@image@'} /></p>
+          <p class="description">使用逗号分隔, 如: <code>@image@</code> 代表所有图片类型, 支持 <code>jpg,png,gif,webp,svg,zip,pdf,mp3,mp4</code> 等扩展名. <code>@image@</code> 等同于 jpg,jpeg,png,gif,webp,bmp,tiff</p>
+        </li>
+      </ul>
+      <ul class="typecho-option typecho-option-submit">
+        <li>
+          <button type="submit" class="btn primary">保存设置</button>
+        </li>
+      </ul>
+    </form>
+  </div>
+</Admin>

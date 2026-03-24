@@ -1,0 +1,289 @@
+---
+import Admin from '@/layouts/Admin.astro';
+import { createContext, requireAuth } from '@/lib/context';
+import { hasPermission } from '@/lib/auth';
+import { getAvailablePlugins, getPluginCount, isPluginActive, pluginHasConfig, parseActivatedPlugins } from '@/lib/plugin';
+
+const ctx = await createContext(Astro.locals, Astro.request);
+const authCheck = requireAuth(ctx);
+if (authCheck) return authCheck;
+
+if (!hasPermission(ctx.user!.group || 'visitor', 'administrator')) {
+  return new Response('Forbidden', { status: 403 });
+}
+
+const { options, urls, user, db } = ctx;
+
+// Handle plugin activation/deactivation via POST
+let message = '';
+let messageType = '';
+
+if (Astro.request.method === 'POST') {
+  try {
+    const formData = await Astro.request.formData();
+    const action = formData.get('action') as string;
+    const pluginId = formData.get('plugin') as string;
+
+    if (pluginId && (action === 'activate' || action === 'deactivate')) {
+      const { pluginExists, serializeActivatedPlugins, setActivatedPlugins, getPluginConfigDefaults } = await import('@/lib/plugin');
+      const { setOption, deleteOption } = await import('@/lib/options');
+
+      if (!pluginExists(pluginId)) {
+        message = `插件 "${pluginId}" 不存在`;
+        messageType = 'error';
+      } else {
+        // Get current activated list
+        const currentIds = parseActivatedPlugins(options.activatedPlugins as string | undefined);
+        const idSet = new Set(currentIds);
+
+        if (action === 'activate') {
+          idSet.add(pluginId);
+
+          // Save default config values on activation (like PHP Typecho's Edit::activate)
+          if (pluginHasConfig(pluginId)) {
+            const defaults = getPluginConfigDefaults(pluginId);
+            if (Object.keys(defaults).length > 0) {
+              // Only save defaults if no config exists yet
+              const existing = options[`plugin:${pluginId}`];
+              if (!existing) {
+                await setOption(db, `plugin:${pluginId}`, JSON.stringify(defaults));
+                (options as any)[`plugin:${pluginId}`] = JSON.stringify(defaults);
+              }
+            }
+          }
+
+          message = `插件 "${pluginId}" 已启用`;
+          messageType = 'success';
+        } else {
+          idSet.delete(pluginId);
+
+          // Delete plugin config on deactivation (like PHP Typecho's Edit::deactivate)
+          await deleteOption(db, `plugin:${pluginId}`);
+          delete (options as any)[`plugin:${pluginId}`];
+
+          message = `插件 "${pluginId}" 已禁用`;
+          messageType = 'success';
+        }
+
+        // Save to DB
+        const newIds = Array.from(idSet);
+        setActivatedPlugins(newIds);
+        const serialized = JSON.stringify(newIds);
+        await setOption(db, 'activatedPlugins', serialized);
+        (options as any).activatedPlugins = serialized;
+      }
+    }
+  } catch (e) {
+    message = '操作失败';
+    messageType = 'error';
+  }
+}
+
+const plugins = getAvailablePlugins();
+const pluginCount = getPluginCount();
+---
+<Admin title="插件管理" options={options} urls={urls} user={user} activeMenu="plugins">
+  <div class="col-mb-12" role="main">
+    {message && (
+      <div class={`typecho-option-tabs notice ${messageType === 'error' ? 'notice-error' : 'notice-success'}`}
+        style={`padding: 10px 15px; margin-bottom: 20px; border-radius: 3px; ${messageType === 'error' ? 'background: #ffeaea; color: #c33;' : 'background: #e7f5e7; color: #3a3;'}`}>
+        <p>{message}</p>
+      </div>
+    )}
+
+    <div class="typecho-option-tabs">
+      <ul class="typecho-option-tabs-nav clearfix" style="margin-bottom: 20px;">
+        <li class="current"><a href="/admin/plugins">已安装插件</a></li>
+      </ul>
+    </div>
+
+    {pluginCount === 0 ? (
+      <div class="typecho-mini-panel" style="text-align: center; padding: 40px 20px;">
+        <h3>暂无插件</h3>
+        <p class="description" style="max-width: 500px; margin: 15px auto;">
+          Typecho 的插件系统通过 npm 包分发。安装新插件：在 npm 搜索 keywords 包含
+          <code>typecho</code> 和 <code>plugin</code> 的包，<code>pnpm add 包名</code> 安装后重新构建即可。
+        </p>
+      </div>
+    ) : (
+      <>
+        <p class="description" style="margin-bottom: 20px;">
+          当前共有 {pluginCount} 个可用插件。安装新插件：在 npm 搜索 keywords 包含 <code>typecho</code> 和 <code>plugin</code> 的包，<code>pnpm add 包名</code> 安装后重新构建即可。
+        </p>
+
+        <div class="typecho-list-operate clearfix">
+          <div class="operate">
+            <span>已发现 {pluginCount} 个插件</span>
+          </div>
+        </div>
+
+        <div class="typecho-table-wrap">
+          <table class="typecho-list-table">
+            <colgroup>
+              <col width="30%" />
+              <col width="35%" />
+              <col width="15%" />
+              <col width="20%" />
+            </colgroup>
+            <thead>
+              <tr>
+                <th>插件</th>
+                <th>描述</th>
+                <th>版本</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {plugins.map((plugin) => (
+                <tr id={`plugin-${plugin.id}`}>
+                  <td>
+                    <strong>
+                      {plugin.manifest.homepage ? (
+                        <a href={plugin.manifest.homepage} target="_blank" rel="noopener noreferrer">
+                          {plugin.manifest.name || plugin.id}
+                        </a>
+                      ) : (
+                        plugin.manifest.name || plugin.id
+                      )}
+                    </strong>
+                    {plugin.isActive && (
+                      <span style="margin-left: 8px; background: #467B96; color: white; padding: 1px 8px; border-radius: 3px; font-size: 11px;">
+                        已启用
+                      </span>
+                    )}
+                    <br />
+                    <small style="color: #999;">
+                      {plugin.manifest.author && (
+                        <span>
+                          作者: {plugin.manifest.authorUrl ? (
+                            <a href={plugin.manifest.authorUrl} target="_blank" rel="noopener noreferrer">{plugin.manifest.author}</a>
+                          ) : (
+                            plugin.manifest.author
+                          )}
+                        </span>
+                      )}
+                      {' · '}npm: {plugin.packageName}
+                    </small>
+                  </td>
+                  <td>
+                    <span class="description">
+                      {plugin.manifest.description || '暂无描述'}
+                    </span>
+                  </td>
+                  <td>
+                    {plugin.manifest.version || '-'}
+                  </td>
+                  <td>
+                    <form method="post" action="/admin/plugins" style="display: inline;">
+                      <input type="hidden" name="plugin" value={plugin.id} />
+                      {plugin.isActive ? (
+                        <>
+                          {pluginHasConfig(plugin.id) && (
+                            <>
+                              <a href={`/admin/plugin-config?id=${plugin.id}`}>设置</a>
+                              {' · '}
+                            </>
+                          )}
+                          <input type="hidden" name="action" value="deactivate" />
+                          <button type="submit" class="btn btn-s">禁用</button>
+                        </>
+                      ) : (
+                        <>
+                          <input type="hidden" name="action" value="activate" />
+                          <button type="submit" class="btn btn-s primary">启用</button>
+                        </>
+                      )}
+                    </form>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </>
+    )}
+
+    {/* Plugin development guide */}
+    <div class="typecho-mini-panel" style="margin-top: 30px; padding: 20px;">
+      <h3 style="margin: 0 0 15px 0;">如何安装新插件</h3>
+      <ol style="margin: 0; padding-left: 20px; line-height: 2;">
+        <li>在 npm 搜索 keywords 同时包含 <code>typecho</code> 和 <code>plugin</code> 的包</li>
+        <li>在项目根目录运行 <code>pnpm add 包名</code> 安装</li>
+        <li>重新构建/部署项目：<code>pnpm build</code></li>
+        <li>在此页面选择并启用新插件</li>
+      </ol>
+
+      <h4 style="margin: 20px 0 10px 0;">创建自定义插件</h4>
+      <p class="description" style="margin: 0; line-height: 1.8;">
+        创建一个 npm 包，在 <code>package.json</code> 的 <code>keywords</code> 中包含 <code>"typecho"</code> 和 <code>"plugin"</code>，并包含以下文件：
+      </p>
+      <pre style="background: #f5f5f5; padding: 12px; border-radius: 4px; margin-top: 10px; overflow-x: auto;"><code>typecho-plugin-myname/
+  ├── plugin.json          # 插件描述文件 (必须)
+  ├── index.ts             # 插件入口 (必须)
+  └── package.json         # keywords: ["typecho", "plugin"]
+
+// plugin.json 示例:
+{'{'}"id": "myname",
+  "name": "我的插件",
+  "description": "一个示例插件",
+  "author": "Your Name",
+  "version": "1.0.0"
+{'}'}
+
+// index.ts 示例:
+export default function ({'{'} addHook, HookPoints, pluginId {'}'}) {'{'
+}  // 注册内容过滤 hook
+  addHook('content:content', pluginId, (html) =&gt; {'{'
+}    return html + '&lt;!-- powered by my plugin --&gt;';
+  {'}'});
+  
+  // 注册评论提交 hook  
+  addHook('feedback:finishComment', pluginId, (comment) =&gt; {'{'
+}    console.log('New comment from:', comment.author);
+  {'}'});
+{'}'}</code></pre>
+
+      <h4 style="margin: 20px 0 10px 0;">可用 Hook 列表</h4>
+      <div style="max-height: 300px; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 4px; padding: 10px;">
+        <table class="typecho-list-table" style="margin: 0;">
+          <thead>
+            <tr>
+              <th>Hook 名称</th>
+              <th>类型</th>
+              <th>说明</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><code>system:begin</code></td><td>call</td><td>系统启动时调用</td></tr>
+            <tr><td><code>admin:header</code></td><td>call</td><td>后台头部注入 CSS/meta</td></tr>
+            <tr><td><code>admin:footer</code></td><td>call</td><td>后台底部注入 JS</td></tr>
+            <tr><td><code>admin:navBar</code></td><td>call</td><td>后台导航栏扩展</td></tr>
+            <tr><td><code>admin:writePost:option</code></td><td>call</td><td>文章编辑侧边栏选项</td></tr>
+            <tr><td><code>admin:writePage:option</code></td><td>call</td><td>页面编辑侧边栏选项</td></tr>
+            <tr><td><code>content:markdown</code></td><td>filter</td><td>过滤 Markdown 原文</td></tr>
+            <tr><td><code>content:content</code></td><td>filter</td><td>过滤渲染后的 HTML</td></tr>
+            <tr><td><code>content:title</code></td><td>filter</td><td>过滤内容标题</td></tr>
+            <tr><td><code>content:excerpt</code></td><td>filter</td><td>过滤内容摘要</td></tr>
+            <tr><td><code>comment:content</code></td><td>filter</td><td>过滤评论渲染内容</td></tr>
+            <tr><td><code>post:write</code></td><td>filter</td><td>过滤文章写入数据</td></tr>
+            <tr><td><code>post:finishPublish</code></td><td>call</td><td>文章发布完成</td></tr>
+            <tr><td><code>post:finishSave</code></td><td>call</td><td>文章保存完成</td></tr>
+            <tr><td><code>post:delete</code></td><td>call</td><td>文章删除前</td></tr>
+            <tr><td><code>post:finishDelete</code></td><td>call</td><td>文章删除后</td></tr>
+            <tr><td><code>page:write</code></td><td>filter</td><td>过滤页面写入数据</td></tr>
+            <tr><td><code>page:finishPublish</code></td><td>call</td><td>页面发布完成</td></tr>
+            <tr><td><code>feedback:comment</code></td><td>filter</td><td>过滤评论数据（保存前）</td></tr>
+            <tr><td><code>feedback:finishComment</code></td><td>call</td><td>评论提交完成</td></tr>
+            <tr><td><code>user:login</code></td><td>call</td><td>登录尝试</td></tr>
+            <tr><td><code>user:loginSucceed</code></td><td>call</td><td>登录成功</td></tr>
+            <tr><td><code>user:logout</code></td><td>call</td><td>用户登出</td></tr>
+            <tr><td><code>upload:beforeUpload</code></td><td>call</td><td>文件上传前</td></tr>
+            <tr><td><code>upload:upload</code></td><td>call</td><td>文件上传后</td></tr>
+            <tr><td><code>feed:item</code></td><td>filter</td><td>过滤 RSS/Atom 项</td></tr>
+            <tr><td><code>widget:sidebar</code></td><td>filter</td><td>过滤侧边栏数据</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</Admin>

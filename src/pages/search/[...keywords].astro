@@ -1,0 +1,20 @@
+---
+import { themeTemplates } from 'virtual:theme-templates';
+import { createContext } from '@/lib/context';
+import { prepareSearchData } from '@/lib/page-data';
+
+const { keywords } = Astro.params;
+const searchKeywords = decodeURIComponent(keywords || '');
+if (!searchKeywords) return Astro.redirect('/');
+
+const ctx = await createContext(Astro.locals, Astro.request);
+const { options } = ctx;
+
+const result = await prepareSearchData(ctx, searchKeywords, Astro.request.url, Astro.locals, Astro.url);
+
+const activeTheme = options.theme || 'typecho-theme-minimal';
+const templates = themeTemplates[activeTheme] ?? {};
+const defaultTemplates = themeTemplates['typecho-theme-minimal']!;
+const ArchiveComponent = templates.Archive ?? defaultTemplates.Archive!;
+---
+<ArchiveComponent {...result} />

@@ -1,0 +1,96 @@
+---
+import Admin from '@/layouts/Admin.astro';
+import { createContext, requireAuth } from '@/lib/context';
+import { hasPermission } from '@/lib/auth';
+
+const ctx = await createContext(Astro.locals, Astro.request);
+const authCheck = requireAuth(ctx);
+if (authCheck) return authCheck;
+
+if (!hasPermission(ctx.user!.group || 'visitor', 'administrator')) {
+  return new Response('Forbidden', { status: 403 });
+}
+
+const { options, urls, user } = ctx;
+---
+<Admin title="阅读设置" options={options} urls={urls} user={user} activeMenu="options-reading">
+  <div class="col-mb-12 col-tb-8 col-tb-offset-2" role="form">
+    <form method="post" action="/api/admin/options">
+      <ul class="typecho-option">
+        <li>
+          <label for="postDateFormat" class="typecho-label">文章日期格式</label>
+          <p><input type="text" id="postDateFormat" name="postDateFormat" class="text w-100 mono"
+            value={options.postDateFormat || 'Y-m-d'} /></p>
+          <p class="description">此格式用于文章列表中的日期显示, 使用 <a href="https://www.php.net/manual/zh/function.date.php" target="_blank" rel="noopener noreferrer">PHP 日期格式</a> 语法</p>
+        </li>
+        <li>
+          <label for="commentDateFormat" class="typecho-label">评论日期格式</label>
+          <p><input type="text" id="commentDateFormat" name="commentDateFormat" class="text w-100 mono"
+            value={options.commentDateFormat || 'Y-m-d H:i'} /></p>
+          <p class="description">此格式用于评论列表中的日期显示</p>
+        </li>
+      </ul>
+
+      <ul class="typecho-option">
+        <li>
+          <label class="typecho-label">文章列表数目</label>
+          <p>
+            设定每页文章列表数目为
+            <input type="text" id="pageSize" name="pageSize" class="text-s mono"
+              value={options.pageSize || '5'} style="width: 40px;" />
+            篇
+          </p>
+        </li>
+      </ul>
+
+      <ul class="typecho-option">
+        <li>
+          <label class="typecho-label">聚合</label>
+          <ul>
+            <li>
+              <input type="checkbox" id="feedFullText" name="feedFullText" value="1"
+                checked={!!options.feedFullText} />
+              <label for="feedFullText">全文输出 (如果取消, 聚合只输出摘要)</label>
+            </li>
+          </ul>
+          <p>
+            聚合中输出
+            <input type="text" id="postsListSize" name="postsListSize" class="text-s mono"
+              value={options.postsListSize || '10'} style="width: 40px;" />
+            篇文章
+          </p>
+        </li>
+      </ul>
+
+      <ul class="typecho-option">
+        <li>
+          <label class="typecho-label">其他设置</label>
+          <ul>
+            <li>
+              <input type="checkbox" id="markdown" name="markdown" value="1"
+                checked={!!options.markdown} />
+              <label for="markdown">对文章使用 Markdown 语法</label>
+            </li>
+          </ul>
+        </li>
+      </ul>
+
+      <ul class="typecho-option">
+        <li>
+          <label for="editorSize" class="typecho-label">编辑器默认高度</label>
+          <p>
+            <input type="text" id="editorSize" name="editorSize" class="text-s mono"
+              value={String(options.editorSize || 350)} style="width: 60px;" /> 像素
+          </p>
+          <p class="description">文章编辑器的默认高度, 建议 200 - 800 之间</p>
+        </li>
+      </ul>
+
+      <ul class="typecho-option typecho-option-submit">
+        <li>
+          <button type="submit" class="btn primary">保存设置</button>
+        </li>
+      </ul>
+    </form>
+  </div>
+</Admin>

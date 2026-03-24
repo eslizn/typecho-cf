@@ -1,0 +1,119 @@
+---
+import Admin from '@/layouts/Admin.astro';
+import { createContext, requireAuth } from '@/lib/context';
+import { hasPermission } from '@/lib/auth';
+import { eq } from 'drizzle-orm';
+import { schema } from '@/db';
+
+const ctx = await createContext(Astro.locals, Astro.request);
+const authCheck = requireAuth(ctx);
+if (authCheck) return authCheck;
+
+if (!hasPermission(ctx.user!.group || 'visitor', 'editor')) {
+  return new Response('Forbidden', { status: 403 });
+}
+
+const { db, options, urls, user } = ctx;
+
+// Fetch all tags with count
+const tags = await db.select().from(schema.metas)
+  .where(eq(schema.metas.type, 'tag'))
+  .orderBy(schema.metas.mid);
+
+// Editing
+const editMid = Astro.url.searchParams.get('mid');
+let editTag: any = null;
+if (editMid) {
+  editTag = await db.query.metas.findFirst({
+    where: eq(schema.metas.mid, parseInt(editMid, 10)),
+  });
+}
+---
+<Admin title="管理标签" options={options} urls={urls} user={user} activeMenu="manage-tags">
+  <div class="col-mb-12 col-tb-8" role="main">
+    <form method="post" name="manage_tags" class="operate-form">
+      <div class="typecho-list-operate clearfix">
+        <div class="operate">
+          <label><i class="sr-only">全选</i><input type="checkbox" class="typecho-table-select-all" /></label>
+          <div class="btn-group btn-drop">
+            <button class="btn dropdown-toggle btn-s" type="button"><i class="sr-only">操作</i>选中项 <i class="i-caret-down"></i></button>
+            <ul class="dropdown-menu">
+              <li><a href="/api/admin/meta?action=delete&type=tag">删除</a></li>
+              <li><a href="/api/admin/meta?action=refresh&type=tag">刷新</a></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <div class="typecho-table-wrap">
+        <table class="typecho-list-table">
+          <colgroup>
+            <col width="20" class="kit-hidden-mb" />
+            <col width="" />
+            <col width="25%" class="kit-hidden-mb" />
+            <col width="15%" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th class="kit-hidden-mb"></th>
+              <th>名称</th>
+              <th class="kit-hidden-mb">缩略名</th>
+              <th>文章数</th>
+            </tr>
+          </thead>
+          <tbody>
+            {tags.length === 0 ? (
+              <tr>
+                <td colspan="4"><h6 class="typecho-list-table-title">没有任何标签</h6></td>
+              </tr>
+            ) : (
+              tags.map((tag) => (
+                <tr id={`mid-${tag.mid}`}>
+                  <td class="kit-hidden-mb"><input type="checkbox" value={String(tag.mid)} name="mid[]" /></td>
+                  <td>
+                    <a href={`/admin/manage-tags?mid=${tag.mid}`}>{tag.name}</a>
+                    <a href={`/tag/${tag.slug}/`} title={`浏览 ${tag.name}`}><i class="i-exlink"></i></a>
+                  </td>
+                  <td class="kit-hidden-mb">{tag.slug}</td>
+                  <td>
+                    <a class="balloon-button left size-small" href={`/admin/manage-posts?tag=${tag.slug}`}>{tag.count || 0}</a>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </form>
+  </div>
+
+  <div class="col-mb-12 col-tb-4" role="form">
+    <div class="typecho-mini-panel">
+      <form method="post" action="/api/admin/meta">
+        <input type="hidden" name="action" value={editTag ? 'update' : 'create'} />
+        <input type="hidden" name="type" value="tag" />
+        {editTag && <input type="hidden" name="mid" value={String(editTag.mid)} />}
+
+        <h4>{editTag ? '编辑标签' : '新增标签'}</h4>
+
+        <ul class="typecho-option">
+          <li>
+            <label for="name" class="typecho-label">标签名称 *</label>
+            <input type="text" id="name" name="name" class="text w-100" value={editTag?.name || ''} required />
+            <p class="description">标签名称将在前台显示</p>
+          </li>
+          <li>
+            <label for="slug" class="typecho-label">缩略名</label>
+            <input type="text" id="slug" name="slug" class="text w-100" value={editTag?.slug || ''} placeholder="留空自动生成" />
+            <p class="description">标签缩略名用于创建友好的链接形式</p>
+          </li>
+        </ul>
+
+        <p>
+          <button type="submit" class="btn primary">{editTag ? '更新标签' : '增加标签'}</button>
+          {editTag && <a href="/admin/manage-tags" class="btn">取消</a>}
+        </p>
+      </form>
+    </div>
+  </div>
+</Admin>

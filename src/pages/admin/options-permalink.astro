@@ -1,0 +1,93 @@
+---
+import Admin from '@/layouts/Admin.astro';
+import { createContext, requireAuth } from '@/lib/context';
+import { hasPermission } from '@/lib/auth';
+
+const ctx = await createContext(Astro.locals, Astro.request);
+const authCheck = requireAuth(ctx);
+if (authCheck) return authCheck;
+
+if (!hasPermission(ctx.user!.group || 'visitor', 'administrator')) {
+  return new Response('Forbidden', { status: 403 });
+}
+
+const { options, urls, user } = ctx;
+
+// Typecho post permalink patterns
+const postPatterns = [
+  { value: '/archives/{cid}/', label: '默认风格', example: '/archives/1/' },
+  { value: '/archives/{slug}.html', label: '文件名风格', example: '/archives/hello-world.html' },
+  { value: '/{year}/{month}/{day}/{slug}.html', label: '日期和文件名风格', example: '/2026/03/23/hello-world.html' },
+  { value: '/{category}/{slug}.html', label: '分类和文件名风格', example: '/coding/hello-world.html' },
+];
+
+const currentPostPattern = options.permalinkPattern || '/archives/{cid}/';
+const isCustomPost = !postPatterns.some(p => p.value === currentPostPattern);
+
+const currentPagePattern = (options.pagePattern as string) || '/{slug}.html';
+const currentCategoryPattern = (options.categoryPattern as string) || '/category/{slug}/';
+---
+<Admin title="永久链接设置" options={options} urls={urls} user={user} activeMenu="options-permalink">
+  <div class="col-mb-12 col-tb-8 col-tb-offset-2" role="form">
+    <form method="post" action="/api/admin/options">
+      <ul class="typecho-option">
+        <li>
+          <label class="typecho-label">自定义文章路径</label>
+          <div>
+            {postPatterns.map((p) => (
+              <p>
+                <input type="radio" name="permalinkPattern" value={p.value}
+                  id={`post-pattern-${p.value}`}
+                  checked={currentPostPattern === p.value} />
+                <label for={`post-pattern-${p.value}`}>
+                  {p.label}: <code>{p.example}</code>
+                </label>
+              </p>
+            ))}
+            <p>
+              <input type="radio" name="permalinkPattern" value="custom"
+                id="post-pattern-custom"
+                checked={isCustomPost} />
+              <label for="post-pattern-custom">自定义:</label>
+              <input type="text" name="customPattern" class="text mono"
+                value={isCustomPost ? currentPostPattern : ''} style="width: 300px;" />
+            </p>
+          </div>
+          <p class="description">
+            可用变量: <code>{'{cid}'}</code> 文章 ID, <code>{'{slug}'}</code> 缩略名,
+            <code>{'{category}'}</code> 分类, <code>{'{year}'}</code> 年,
+            <code>{'{month}'}</code> 月, <code>{'{day}'}</code> 日
+          </p>
+        </li>
+      </ul>
+
+      <ul class="typecho-option">
+        <li>
+          <label class="typecho-label" for="pagePattern">独立页面路径</label>
+          <input type="text" name="pagePattern" id="pagePattern" class="text mono"
+            value={currentPagePattern} style="width: 300px;" />
+          <p class="description">
+            可用变量: <code>{'{slug}'}</code> 缩略名, <code>{'{cid}'}</code> 页面 ID
+          </p>
+        </li>
+      </ul>
+
+      <ul class="typecho-option">
+        <li>
+          <label class="typecho-label" for="categoryPattern">分类路径</label>
+          <input type="text" name="categoryPattern" id="categoryPattern" class="text mono"
+            value={currentCategoryPattern} style="width: 300px;" />
+          <p class="description">
+            可用变量: <code>{'{slug}'}</code> 分类缩略名, <code>{'{mid}'}</code> 分类 ID
+          </p>
+        </li>
+      </ul>
+
+      <ul class="typecho-option typecho-option-submit">
+        <li>
+          <button type="submit" class="btn primary">保存设置</button>
+        </li>
+      </ul>
+    </form>
+  </div>
+</Admin>

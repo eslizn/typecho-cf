@@ -1,0 +1,104 @@
+---
+import Admin from '@/layouts/Admin.astro';
+import { createContext, requireAuth } from '@/lib/context';
+import { hasPermission } from '@/lib/auth';
+import { eq, and, sql } from 'drizzle-orm';
+import { schema } from '@/db';
+
+const ctx = await createContext(Astro.locals, Astro.request);
+const authCheck = requireAuth(ctx);
+if (authCheck) return authCheck;
+
+const { db, options, urls, user } = ctx;
+
+// Stats
+const postCount = await db.select({ count: sql<number>`count(*)` }).from(schema.contents)
+  .where(and(eq(schema.contents.type, 'post'), eq(schema.contents.status, 'publish'), eq(schema.contents.authorId, user!.uid)));
+
+const commentCount = await db.select({ count: sql<number>`count(*)` }).from(schema.comments)
+  .where(eq(schema.comments.ownerId, user!.uid));
+
+const catCount = await db.select({ count: sql<number>`count(*)` }).from(schema.metas)
+  .where(eq(schema.metas.type, 'category'));
+
+// Gravatar URL
+const mailHash = user!.mail ? user!.mail.trim().toLowerCase() : '';
+const gravatarUrl = `https://www.gravatar.com/avatar/?s=220&d=mm`;
+---
+<Admin title="个人设置" options={options} urls={urls} user={user} activeMenu="profile">
+  <div class="col-mb-12 col-tb-3">
+    <p>
+      <a href="https://gravatar.com/emails/" title="在 Gravatar 上修改头像">
+        <img class="profile-avatar" src={gravatarUrl} alt={user!.screenName || user!.name || ''} />
+      </a>
+    </p>
+    <h2>{user!.screenName || user!.name}</h2>
+    <p>{user!.name}</p>
+    <p>
+      目前有 <em>{postCount[0]?.count || 0}</em> 篇日志, 并有 <em>{commentCount[0]?.count || 0}</em>
+      条关于你的评论在 <em>{catCount[0]?.count || 0}</em> 个分类中.
+    </p>
+  </div>
+
+  <div class="col-mb-12 col-tb-6 col-tb-offset-1 typecho-content-panel" role="form">
+    <section>
+      <h3>个人资料</h3>
+      <form method="post" action="/api/admin/profile">
+        <ul class="typecho-option">
+          <li>
+            <label class="typecho-label">用户名</label>
+            <p><input type="text" class="text w-100" value={user!.name || ''} disabled /></p>
+            <p class="description">用户名作为用户登录标识, 创建后不可修改</p>
+          </li>
+          <li>
+            <label for="screenName" class="typecho-label">昵称</label>
+            <p><input type="text" id="screenName" name="screenName" class="text w-100" value={user!.screenName || ''} /></p>
+            <p class="description">昵称可以与用户名不同, 用于前台显示</p>
+          </li>
+          <li>
+            <label for="mail" class="typecho-label">邮件地址</label>
+            <p><input type="email" id="mail" name="mail" class="text w-100" value={user!.mail || ''} required /></p>
+            <p class="description">邮件地址将作为此用户的联系方式</p>
+          </li>
+          <li>
+            <label for="url" class="typecho-label">个人主页地址</label>
+            <p><input type="url" id="url" name="url" class="text w-100" value={user!.url || ''} /></p>
+            <p class="description">此用户的个人主页地址, 请用 <code>http://</code> 或 <code>https://</code> 开头</p>
+          </li>
+        </ul>
+        <ul class="typecho-option typecho-option-submit">
+          <li>
+            <button type="submit" class="btn primary">更新我的档案</button>
+          </li>
+        </ul>
+      </form>
+    </section>
+
+    <br />
+
+    <section id="change-password">
+      <h3>密码修改</h3>
+      <form method="post" action="/api/admin/profile">
+        <ul class="typecho-option">
+          <li>
+            <label for="password" class="typecho-label">用户密码</label>
+            <p><input type="password" id="password" name="password" class="text w-100" autocomplete="new-password" /></p>
+            <p class="description">为此用户分配一个新密码.建议密码长度大于6位, 不要使用容易被猜到的密码</p>
+          </li>
+          <li>
+            <label for="confirm" class="typecho-label">用户密码确认</label>
+            <p><input type="password" id="confirm" name="passwordConfirm" class="text w-100" autocomplete="new-password" /></p>
+            <p class="description">请再次输入你的密码以确认</p>
+          </li>
+        </ul>
+        <input type="hidden" name="screenName" value={user!.screenName || ''} />
+        <input type="hidden" name="mail" value={user!.mail || ''} />
+        <ul class="typecho-option typecho-option-submit">
+          <li>
+            <button type="submit" class="btn primary">更新密码</button>
+          </li>
+        </ul>
+      </form>
+    </section>
+  </div>
+</Admin>

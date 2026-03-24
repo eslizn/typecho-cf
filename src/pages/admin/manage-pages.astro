@@ -1,0 +1,120 @@
+---
+import Admin from '@/layouts/Admin.astro';
+import { createContext, requireAuth } from '@/lib/context';
+import { hasPermission } from '@/lib/auth';
+import { eq, sql, desc } from 'drizzle-orm';
+import { schema } from '@/db';
+import { formatDate, buildPermalink } from '@/lib/content';
+
+const ctx = await createContext(Astro.locals, Astro.request);
+const authCheck = requireAuth(ctx);
+if (authCheck) return authCheck;
+if (!hasPermission(ctx.user!.group || 'visitor', 'editor')) {
+  return new Response('Forbidden', { status: 403 });
+}
+
+const { db, options, urls, user } = ctx;
+const keywords = Astro.url.searchParams.get('keywords') || '';
+
+const conditions: any[] = [
+  sql`${schema.contents.type} IN ('page', 'page_draft')`,
+];
+if (keywords) {
+  conditions.push(sql`${schema.contents.title} LIKE ${'%' + keywords + '%'}`);
+}
+
+const pages = await db.select().from(schema.contents)
+  .where(sql.join(conditions, sql` AND `))
+  .orderBy(schema.contents.order, desc(schema.contents.created));
+
+// Authors
+const authorIds = [...new Set(pages.map(p => p.authorId).filter(Boolean))];
+const authors = authorIds.length > 0
+  ? await db.select().from(schema.users).where(sql`${schema.users.uid} IN (${sql.join(authorIds.map(id => sql`${id}`), sql`, `)})`)
+  : [];
+const authorMap = new Map(authors.map(a => [a.uid, a]));
+---
+<Admin title="管理页面" options={options} urls={urls} user={user} activeMenu="manage-pages">
+  <div class="col-mb-12 typecho-list">
+    <div class="typecho-list-operate clearfix">
+      <form method="get">
+        <div class="operate">
+          <label><i class="sr-only">全选</i><input type="checkbox" class="typecho-table-select-all" /></label>
+          <div class="btn-group btn-drop">
+            <button class="btn dropdown-toggle btn-s" type="button"><i class="sr-only">操作</i>选中项 <i class="i-caret-down"></i></button>
+            <ul class="dropdown-menu">
+              <li><a href="/api/admin/content-batch?do=delete&type=page">删除</a></li>
+              <li><a href="/api/admin/content-batch?do=mark&status=publish&type=page">标记为<strong>公开</strong></a></li>
+              <li><a href="/api/admin/content-batch?do=mark&status=hidden&type=page">标记为<strong>隐藏</strong></a></li>
+            </ul>
+          </div>
+        </div>
+        <div class="search" role="search">
+          {keywords && <a href="/admin/manage-pages">&laquo; 取消筛选</a>}
+          <input type="text" class="text-s" placeholder="请输入关键字" value={keywords} name="keywords" />
+          <button type="submit" class="btn btn-s">筛选</button>
+        </div>
+      </form>
+    </div>
+
+    <form method="post" name="manage_pages" class="operate-form">
+      <div class="typecho-table-wrap">
+        <table class="typecho-list-table">
+          <colgroup>
+            <col width="20" class="kit-hidden-mb" />
+            <col width="6%" class="kit-hidden-mb" />
+            <col width="30%" />
+            <col width="30%" />
+            <col width="" class="kit-hidden-mb" />
+            <col width="16%" />
+          </colgroup>
+          <thead>
+            <tr class="nodrag">
+              <th class="kit-hidden-mb"></th>
+              <th class="kit-hidden-mb"></th>
+              <th>标题</th>
+              <th>缩略名</th>
+              <th class="kit-hidden-mb">作者</th>
+              <th>日期</th>
+            </tr>
+          </thead>
+          <tbody>
+            {pages.length === 0 ? (
+              <tr>
+                <td colspan="6"><h6 class="typecho-list-table-title">没有任何页面</h6></td>
+              </tr>
+            ) : (
+              pages.map((pg) => {
+                const author = authorMap.get(pg.authorId || 0);
+                const isDraft = pg.type === 'page_draft';
+                return (
+                  <tr>
+                    <td class="kit-hidden-mb"><input type="checkbox" value={String(pg.cid)} name="cid[]" /></td>
+                    <td class="kit-hidden-mb">
+                      <a href={`/admin/manage-comments?cid=${pg.cid}`}
+                        class="balloon-button size-small"
+                        title={`${pg.commentsNum || 0} 评论`}>{pg.commentsNum || 0}</a>
+                    </td>
+                    <td>
+                      <a href={`/admin/write-page?cid=${pg.cid}`}>{pg.title || '无标题'}</a>
+                      {isDraft && <em class="status">草稿</em>}
+                      {pg.status === 'hidden' && <em class="status">隐藏</em>}
+                      <a href={`/admin/write-page?cid=${pg.cid}`} title={`编辑 ${pg.title}`}><i class="i-edit"></i></a>
+                      {!isDraft && (
+                        <a href={buildPermalink({ cid: pg.cid, slug: pg.slug, type: pg.type, created: pg.created }, urls.siteUrl, undefined, options.pagePattern as string | undefined)}
+                          title={`浏览 ${pg.title}`}><i class="i-exlink"></i></a>
+                      )}
+                    </td>
+                    <td>{pg.slug}</td>
+                    <td class="kit-hidden-mb">{author?.screenName || author?.name || '未知'}</td>
+                    <td>{formatDate(pg.created || 0, 'Y-m-d', options.timezone)}</td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+    </form>
+  </div>
+</Admin>

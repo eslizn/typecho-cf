@@ -1,0 +1,101 @@
+---
+import Admin from '@/layouts/Admin.astro';
+import { createContext, requireAuth } from '@/lib/context';
+import { hasPermission } from '@/lib/auth';
+import { eq } from 'drizzle-orm';
+import { schema } from '@/db';
+
+const ctx = await createContext(Astro.locals, Astro.request);
+const authCheck = requireAuth(ctx);
+if (authCheck) return authCheck;
+
+if (!hasPermission(ctx.user!.group || 'visitor', 'administrator')) {
+  return new Response('Forbidden', { status: 403 });
+}
+
+const { db, options, urls, user } = ctx;
+const uid = parseInt(Astro.url.searchParams.get('uid') || '0', 10);
+
+let editUser: any = null;
+let isEdit = false;
+
+if (uid) {
+  editUser = await db.query.users.findFirst({
+    where: eq(schema.users.uid, uid),
+  });
+  if (editUser) isEdit = true;
+}
+
+const groups = [
+  { value: 'administrator', label: '管理员' },
+  { value: 'editor', label: '编辑' },
+  { value: 'contributor', label: '贡献者' },
+  { value: 'subscriber', label: '关注者' },
+];
+---
+<Admin title={isEdit ? '编辑用户' : '增加用户'} options={options} urls={urls} user={user} activeMenu="manage-users">
+  <div class="col-mb-12 col-tb-8 col-tb-offset-2" role="form">
+    <form method="post" action="/api/admin/user">
+      <input type="hidden" name="do" value={isEdit ? 'update' : 'create'} />
+      {isEdit && <input type="hidden" name="uid" value={String(editUser.uid)} />}
+
+      <ul class="typecho-option">
+        <li>
+          <label for="name" class="typecho-label">用户名 *</label>
+          <p><input type="text" id="name" name="name" class="text w-100" value={editUser?.name || ''}
+            {isEdit ? 'readonly' : ''} required /></p>
+          <p class="description">{isEdit ? '用户名创建后不可修改' : '此用户用于登录的名称'}</p>
+        </li>
+        <li>
+          <label for="mail" class="typecho-label">邮件地址 *</label>
+          <p><input type="email" id="mail" name="mail" class="text w-100" value={editUser?.mail || ''} required /></p>
+          <p class="description">此邮件地址将作为该用户的联系方式</p>
+        </li>
+        <li>
+          <label for="screenName" class="typecho-label">用户昵称</label>
+          <p><input type="text" id="screenName" name="screenName" class="text w-100" value={editUser?.screenName || ''} /></p>
+          <p class="description">用户昵称可以与用户名不同, 用于前台显示. 如果留空, 将使用用户名</p>
+        </li>
+        <li>
+          <label for="url" class="typecho-label">个人主页地址</label>
+          <p><input type="url" id="url" name="url" class="text w-100" value={editUser?.url || ''} /></p>
+          <p class="description">此用户的个人主页地址, 请用 <code>http://</code> 或 <code>https://</code> 开头</p>
+        </li>
+        <li>
+          <label for="group" class="typecho-label">用户组</label>
+          <p>
+            <select id="group" name="group">
+              {groups.map(g => (
+                <option value={g.value} selected={editUser?.group === g.value}>{g.label}</option>
+              ))}
+            </select>
+          </p>
+        </li>
+      </ul>
+
+      <section>
+        <h3>密码</h3>
+        <ul class="typecho-option">
+          <li>
+            <label for="password" class="typecho-label">{isEdit ? '新密码' : '用户密码 *'}</label>
+            <p><input type="password" id="password" name="password" class="text w-100" autocomplete="new-password"
+              {!isEdit ? 'required' : ''} /></p>
+            <p class="description">{isEdit ? '如果不修改密码, 请留空' : '为此用户设置一个密码, 建议密码长度大于6位'}</p>
+          </li>
+          <li>
+            <label for="confirm" class="typecho-label">密码确认</label>
+            <p><input type="password" id="confirm" name="confirm" class="text w-100" autocomplete="new-password" /></p>
+            <p class="description">请再次输入密码进行确认</p>
+          </li>
+        </ul>
+      </section>
+
+      <ul class="typecho-option typecho-option-submit">
+        <li>
+          <button type="submit" class="btn primary">{isEdit ? '更新用户' : '增加用户'}</button>
+          <a href="/admin/manage-users" class="btn">返回</a>
+        </li>
+      </ul>
+    </form>
+  </div>
+</Admin>

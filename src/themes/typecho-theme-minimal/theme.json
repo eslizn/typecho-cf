@@ -1,0 +1,13 @@
+{
+  "id": "typecho-theme-minimal",
+  "name": "Typecho Minimal",
+  "description": "经典的 Typecho 默认主题，简洁优雅。",
+  "author": "Typecho Team",
+  "authorUrl": "https://typecho.org/",
+  "version": "1.0.0",
+  "stylesheet": "style.css",
+  "stylesheets": ["normalize.css", "grid.css"],
+  "homepage": "https://github.com/eslizn/typecho-cf",
+  "license": "GPL-2.0",
+  "tags": ["minimal", "classic", "typecho"]
+}

@@ -1,0 +1,19 @@
+{
+  "name": "typecho-theme-minimal",
+  "version": "1.0.0",
+  "description": "Typecho 经典默认主题，简洁优雅",
+  "author": "Typecho Team",
+  "license": "GPL-2.0",
+  "keywords": [
+    "typecho",
+    "theme",
+    "minimal"
+  ],
+  "files": [
+    "theme.json",
+    "normalize.css",
+    "grid.css",
+    "style.css",
+    "components/"
+  ]
+}

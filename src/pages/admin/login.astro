@@ -1,0 +1,65 @@
+---
+import { createContext } from '@/lib/context';
+
+let options: any = { title: 'Blog', charset: 'UTF-8', lang: 'zh_CN', description: '' };
+let urls: any = { siteUrl: '' };
+
+try {
+  const ctx = await createContext(Astro.locals, Astro.request);
+  options = ctx.options;
+  urls = ctx.urls;
+
+  // If already logged in, redirect to admin
+  if (ctx.isLoggedIn) {
+    return Astro.redirect('/admin/');
+  }
+} catch {
+  // DB not initialized - redirect to install
+  return Astro.redirect('/install');
+}
+
+const error = Astro.url.searchParams.get('error') || '';
+---
+<!DOCTYPE html>
+<html lang={options.lang === 'zh_CN' ? 'zh-CN' : 'en'}>
+<head>
+  <meta charset={options.charset || 'UTF-8'} />
+  <meta name="renderer" content="webkit" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <title>{`登录 - ${options.title}`}</title>
+  <meta name="robots" content="noindex, nofollow" />
+  <link rel="stylesheet" href="/css/normalize.css" />
+  <link rel="stylesheet" href="/css/grid.css" />
+  <link rel="stylesheet" href="/css/admin.css" />
+</head>
+<body class="body-100">
+  <div class="typecho-login-wrap">
+    <div class="typecho-login">
+      <h1>{options.title}</h1>
+      {error && <p class="message error">{error}</p>}
+      <form action="/api/users/login" method="post" name="login" role="form">
+        <p>
+          <label for="name" class="sr-only">用户名</label>
+          <input type="text" id="name" name="name" placeholder="用户名" class="text-l w-100" autofocus required />
+        </p>
+        <p>
+          <label for="password" class="sr-only">密码</label>
+          <input type="password" id="password" name="password" placeholder="密码" class="text-l w-100" required />
+        </p>
+        <p class="submit">
+          <button type="submit" class="btn btn-l w-100 primary">登录</button>
+          <input type="hidden" name="referer" value="/admin/" />
+        </p>
+        <p>
+          <label for="remember">
+            <input type="checkbox" name="remember" class="checkbox" value="1" id="remember" /> 下次自动登录
+          </label>
+        </p>
+      </form>
+      <p class="more-link">
+        <a href={urls.siteUrl + '/'}>返回首页</a>
+      </p>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,281 @@
+---
+import Admin from '@/layouts/Admin.astro';
+import { createContext, requireAuth } from '@/lib/context';
+import { hasPermission } from '@/lib/auth';
+import { eq, and, desc, sql } from 'drizzle-orm';
+import { schema } from '@/db';
+import { formatDate, buildPermalink } from '@/lib/content';
+
+const ctx = await createContext(Astro.locals, Astro.request);
+const authCheck = requireAuth(ctx);
+if (authCheck) return authCheck;
+
+const { db, options, urls, user } = ctx;
+const isAdmin = hasPermission(user!.group || 'visitor', 'administrator');
+const isEditor = hasPermission(user!.group || 'visitor', 'editor');
+
+const page = parseInt(Astro.url.searchParams.get('page') || '1', 10) || 1;
+const status = Astro.url.searchParams.get('status') || '';
+const keywords = Astro.url.searchParams.get('keywords') || '';
+const category = Astro.url.searchParams.get('category') || '';
+const pageSize = 20;
+
+// Build where conditions
+const conditions: any[] = [
+  sql`${schema.contents.type} IN ('post', 'post_draft')`,
+];
+
+if (!isAdmin) {
+  conditions.push(eq(schema.contents.authorId, user!.uid));
+}
+
+if (status === 'draft') {
+  conditions.push(eq(schema.contents.type, 'post_draft'));
+} else if (status === 'waiting') {
+  conditions.push(eq(schema.contents.status, 'waiting'));
+} else if (status === 'private') {
+  conditions.push(eq(schema.contents.status, 'private'));
+}
+
+if (keywords) {
+  conditions.push(sql`${schema.contents.title} LIKE ${'%' + keywords + '%'}`);
+}
+
+// Category filter via relationship join
+let categoryFilter: number | null = null;
+if (category) {
+  categoryFilter = parseInt(category, 10) || null;
+}
+
+const where = and(...conditions);
+
+// Count
+let totalPosts: number;
+let posts: any[];
+
+if (categoryFilter) {
+  // Filter by category: get cids from relationships, then filter contents
+  const relCids = await db.select({ cid: schema.relationships.cid })
+    .from(schema.relationships)
+    .where(eq(schema.relationships.mid, categoryFilter));
+  const filterCids = relCids.map(r => r.cid);
+
+  if (filterCids.length > 0) {
+    const catCondition = sql`${schema.contents.cid} IN (${sql.join(filterCids.map(id => sql`${id}`), sql`, `)})`;
+    const countResult = await db.select({ count: sql<number>`count(*)` })
+      .from(schema.contents)
+      .where(and(where, catCondition));
+    totalPosts = countResult[0]?.count || 0;
+
+    posts = await db.select().from(schema.contents)
+      .where(and(where, catCondition))
+      .orderBy(desc(schema.contents.created))
+      .limit(pageSize)
+      .offset((page - 1) * pageSize);
+  } else {
+    totalPosts = 0;
+    posts = [];
+  }
+} else {
+  const countResult = await db.select({ count: sql<number>`count(*)` })
+    .from(schema.contents)
+    .where(where);
+  totalPosts = countResult[0]?.count || 0;
+
+  posts = await db.select().from(schema.contents)
+    .where(where)
+    .orderBy(desc(schema.contents.created))
+    .limit(pageSize)
+    .offset((page - 1) * pageSize);
+}
+const totalPages = Math.max(1, Math.ceil(totalPosts / pageSize));
+
+// Authors
+const authorIds = [...new Set(posts.map(p => p.authorId).filter(Boolean))];
+const authors = authorIds.length > 0
+  ? await db.select().from(schema.users).where(sql`${schema.users.uid} IN (${sql.join(authorIds.map(id => sql`${id}`), sql`, `)})`)
+  : [];
+const authorMap = new Map(authors.map(a => [a.uid, a]));
+
+// Categories for posts
+const postIds = posts.map(p => p.cid);
+const catData = postIds.length > 0
+  ? await db.select({ cid: schema.relationships.cid, name: schema.metas.name, mid: schema.metas.mid })
+      .from(schema.relationships)
+      .innerJoin(schema.metas, eq(schema.relationships.mid, schema.metas.mid))
+      .where(and(
+        sql`${schema.relationships.cid} IN (${sql.join(postIds.map(id => sql`${id}`), sql`, `)})`,
+        eq(schema.metas.type, 'category')
+      ))
+  : [];
+const postCats = new Map<number, { name: string; mid: number }[]>();
+for (const row of catData) {
+  if (!postCats.has(row.cid)) postCats.set(row.cid, []);
+  if (row.name) postCats.get(row.cid)!.push({ name: row.name, mid: row.mid });
+}
+
+// All categories for filter
+const allCategories = await db.select().from(schema.metas)
+  .where(eq(schema.metas.type, 'category'))
+  .orderBy(schema.metas.order);
+
+// Counts for tabs
+const draftCount = await db.select({ count: sql<number>`count(*)` }).from(schema.contents)
+  .where(and(eq(schema.contents.type, 'post_draft'), ...(!isAdmin ? [eq(schema.contents.authorId, user!.uid)] : [])));
+const waitingCount = await db.select({ count: sql<number>`count(*)` }).from(schema.contents)
+  .where(and(eq(schema.contents.type, 'post'), eq(schema.contents.status, 'waiting'), ...(!isAdmin ? [eq(schema.contents.authorId, user!.uid)] : [])));
+---
+<Admin title="管理文章" options={options} urls={urls} user={user} activeMenu="manage-posts">
+  <div class="col-mb-12 typecho-list">
+    <div class="clearfix">
+      <ul class="typecho-option-tabs">
+        <li class:list={[{ current: !status }]}>
+          <a href="/admin/manage-posts">可用</a>
+        </li>
+        <li class:list={[{ current: status === 'waiting' }]}>
+          <a href="/admin/manage-posts?status=waiting">待审核
+            {(waitingCount[0]?.count || 0) > 0 && <span class="balloon">{waitingCount[0]?.count}</span>}
+          </a>
+        </li>
+        <li class:list={[{ current: status === 'draft' }]}>
+          <a href="/admin/manage-posts?status=draft">草稿
+            {(draftCount[0]?.count || 0) > 0 && <span class="balloon">{draftCount[0]?.count}</span>}
+          </a>
+        </li>
+      </ul>
+    </div>
+
+    <div class="typecho-list-operate clearfix">
+      <form method="get">
+        <div class="operate">
+          <label><i class="sr-only">全选</i><input type="checkbox" class="typecho-table-select-all" /></label>
+          <div class="btn-group btn-drop">
+            <button class="btn dropdown-toggle btn-s" type="button"><i class="sr-only">操作</i>选中项 <i class="i-caret-down"></i></button>
+            <ul class="dropdown-menu">
+              <li><a href="/api/admin/content-batch?do=delete">删除</a></li>
+              {isEditor && (
+                <>
+                  <li><a href="/api/admin/content-batch?do=mark&status=publish">标记为<strong>公开</strong></a></li>
+                  <li><a href="/api/admin/content-batch?do=mark&status=waiting">标记为<strong>待审核</strong></a></li>
+                  <li><a href="/api/admin/content-batch?do=mark&status=hidden">标记为<strong>隐藏</strong></a></li>
+                  <li><a href="/api/admin/content-batch?do=mark&status=private">标记为<strong>私密</strong></a></li>
+                </>
+              )}
+            </ul>
+          </div>
+        </div>
+        <div class="search" role="search">
+          {(keywords || category) && <a href={`/admin/manage-posts${status ? '?status=' + status : ''}`}>&laquo; 取消筛选</a>}
+          <input type="text" class="text-s" placeholder="请输入关键字" value={keywords} name="keywords" />
+          <select name="category">
+            <option value="">所有分类</option>
+            {allCategories.map(cat => (
+              <option value={String(cat.mid)} selected={category === String(cat.mid)}>{cat.name}</option>
+            ))}
+          </select>
+          <button type="submit" class="btn btn-s">筛选</button>
+          {status && <input type="hidden" value={status} name="status" />}
+        </div>
+      </form>
+    </div>
+
+    <form method="post" name="manage_posts" class="operate-form">
+      <div class="typecho-table-wrap">
+        <table class="typecho-list-table">
+          <colgroup>
+            <col width="20" class="kit-hidden-mb" />
+            <col width="6%" class="kit-hidden-mb" />
+            <col width="45%" />
+            <col width="" class="kit-hidden-mb" />
+            <col width="18%" class="kit-hidden-mb" />
+            <col width="16%" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th class="kit-hidden-mb"></th>
+              <th class="kit-hidden-mb"></th>
+              <th>标题</th>
+              <th class="kit-hidden-mb">作者</th>
+              <th class="kit-hidden-mb">分类</th>
+              <th>日期</th>
+            </tr>
+          </thead>
+          <tbody>
+            {posts.length === 0 ? (
+              <tr>
+                <td colspan="6"><h6 class="typecho-list-table-title">没有任何文章</h6></td>
+              </tr>
+            ) : (
+              posts.map((post) => {
+                const author = authorMap.get(post.authorId || 0);
+                const cats = postCats.get(post.cid) || [];
+                const isDraft = post.type === 'post_draft';
+                return (
+                  <tr>
+                    <td class="kit-hidden-mb"><input type="checkbox" value={String(post.cid)} name="cid[]" /></td>
+                    <td class="kit-hidden-mb">
+                      <a href={`/admin/manage-comments?cid=${post.cid}`}
+                        class="balloon-button size-small"
+                        title={`${post.commentsNum || 0} 评论`}>{post.commentsNum || 0}</a>
+                    </td>
+                    <td>
+                      <a href={`/admin/write-post?cid=${post.cid}`}>{post.title || '无标题'}</a>
+                      {isDraft && <em class="status">草稿</em>}
+                      {post.status === 'hidden' && <em class="status">隐藏</em>}
+                      {post.status === 'waiting' && <em class="status">待审核</em>}
+                      {post.status === 'private' && <em class="status">私密</em>}
+                      {post.password && post.status === 'publish' && <em class="status">密码保护</em>}
+                      <a href={`/admin/write-post?cid=${post.cid}`} title={`编辑 ${post.title}`}><i class="i-edit"></i></a>
+                      {!isDraft && (
+                        <a href={buildPermalink({ cid: post.cid, slug: post.slug, type: post.type, created: post.created }, urls.siteUrl, options.permalinkPattern as string | undefined)}
+                          title={`浏览 ${post.title}`}><i class="i-exlink"></i></a>
+                      )}
+                    </td>
+                    <td class="kit-hidden-mb">{author?.screenName || author?.name || '未知'}</td>
+                    <td class="kit-hidden-mb">
+                      {cats.map((cat, i) => (
+                        <>{i > 0 && ', '}<a href={`/admin/manage-posts?category=${cat.mid}`}>{cat.name}</a></>
+                      ))}
+                      {cats.length === 0 && '未分类'}
+                    </td>
+                    <td>{formatDate(post.created || 0, 'Y-m-d', options.timezone)}</td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+    </form>
+
+    <div class="typecho-list-operate clearfix">
+      <form method="get">
+        <div class="operate">
+          <label><i class="sr-only">全选</i><input type="checkbox" class="typecho-table-select-all" /></label>
+          <div class="btn-group btn-drop">
+            <button class="btn dropdown-toggle btn-s" type="button"><i class="sr-only">操作</i>选中项 <i class="i-caret-down"></i></button>
+            <ul class="dropdown-menu">
+              <li><a href="/api/admin/content-batch?do=delete">删除</a></li>
+              {isEditor && (
+                <>
+                  <li><a href="/api/admin/content-batch?do=mark&status=publish">标记为<strong>公开</strong></a></li>
+                  <li><a href="/api/admin/content-batch?do=mark&status=waiting">标记为<strong>待审核</strong></a></li>
+                  <li><a href="/api/admin/content-batch?do=mark&status=hidden">标记为<strong>隐藏</strong></a></li>
+                  <li><a href="/api/admin/content-batch?do=mark&status=private">标记为<strong>私密</strong></a></li>
+                </>
+              )}
+            </ul>
+          </div>
+        </div>
+
+        {totalPages > 1 && (
+          <ul class="typecho-pager">
+            {page > 1 && <li><a href={`/admin/manage-posts?page=${page - 1}${status ? '&status=' + status : ''}`}>&laquo;</a></li>}
+            <li class="current"><a>{page}</a> / {totalPages}</li>
+            {page < totalPages && <li><a href={`/admin/manage-posts?page=${page + 1}${status ? '&status=' + status : ''}`}>&raquo;</a></li>}
+          </ul>
+        )}
+      </form>
+    </div>
+  </div>
+</Admin>

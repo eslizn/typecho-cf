@@ -1,0 +1,179 @@
+---
+/**
+ * Default theme — Index (home page) component
+ *
+ * Renders the blog post list with pagination.
+ * Equivalent to the original index.astro template section.
+ */
+import Base from '@/layouts/Base.astro';
+import type { ThemeIndexProps } from '@/lib/theme-props';
+import { formatDate, buildAuthorLink, buildCategoryLink } from '@/lib/content';
+
+type Props = ThemeIndexProps;
+
+const {
+  options, urls, user, isLoggedIn, pages, sidebarData, currentPath,
+  posts, pagination,
+} = Astro.props;
+
+const isIndex = currentPath === '/';
+---
+<Base options={options} urls={urls} user={user} isLoggedIn={isLoggedIn}>
+  <header id="header" class="clearfix">
+    <div class="container">
+      <div class="row">
+        <div class="site-name col-mb-12 col-9">
+          <a id="logo" href={urls.siteUrl + '/'}>{options.title}</a>
+          <p class="description">{options.description}</p>
+        </div>
+        <div class="site-search col-3 kit-hidden-tb">
+          <form id="search" method="post" action={urls.siteUrl + '/'} role="search">
+            <label for="s" class="sr-only">搜索关键字</label>
+            <input type="text" id="s" name="s" class="text" placeholder="输入关键字搜索" />
+            <button type="submit" class="submit">搜索</button>
+          </form>
+        </div>
+        <div class="col-mb-12">
+          <nav id="nav-menu" class="clearfix" role="navigation">
+            <a class:list={[{ current: isIndex }]} href={urls.siteUrl + '/'}>首页</a>
+            {pages.map((page) => (
+              <a href={page.permalink} title={page.title}>{page.title}</a>
+            ))}
+          </nav>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div id="body">
+    <div class="container">
+      <div class="row">
+        <div class="col-mb-12 col-8" id="main" role="main">
+          {posts.length === 0 ? (
+            <article class="post">
+              <h2 class="post-title">暂时没有文章</h2>
+              <div class="post-content">
+                <p>这里还没有任何文章，请通过管理后台发布第一篇文章。</p>
+              </div>
+            </article>
+          ) : (
+            posts.map((post) => (
+              <article class="post" itemscope itemtype="http://schema.org/BlogPosting">
+                <h2 class="post-title" itemprop="name headline">
+                  <a itemprop="url" href={post.permalink}>{post.title}</a>
+                </h2>
+                <ul class="post-meta">
+                  <li itemprop="author" itemscope itemtype="http://schema.org/Person">
+                    作者: <a
+                      itemprop="name"
+                      href={post.author ? buildAuthorLink(post.author.uid, urls.siteUrl) : '#'}
+                      rel="author"
+                    >
+                      {post.author?.screenName || post.author?.name || '未知'}
+                    </a>
+                  </li>
+                  <li>
+                    时间: <time datetime={new Date((post.created) * 1000).toISOString()} itemprop="datePublished">
+                      {formatDate(post.created, 'Y-m-d', options.timezone)}
+                    </time>
+                  </li>
+                  {post.categories.length > 0 && (
+                    <li>
+                      分类: {post.categories.map((c, i) => (
+                        <>{i > 0 && ', '}<a href={c.permalink}>{c.name}</a></>
+                      ))}
+                    </li>
+                  )}
+                  <li itemprop="interactionCount">
+                    <a itemprop="discussionUrl" href={`${post.permalink}#comments`}>
+                      {post.commentsNum === 0 ? '评论' : `${post.commentsNum} 条评论`}
+                    </a>
+                  </li>
+                </ul>
+                <div class="post-content" itemprop="articleBody" set:html={post.excerpt} />
+              </article>
+            ))
+          )}
+
+          {pagination.totalPages > 1 && (
+            <nav class="page-navigator">
+              {pagination.hasPrev && (
+                <a class="prev" href={pagination.prevUrl!}>&laquo; 前一页</a>
+              )}
+              {pagination.hasNext && (
+                <a class="next" href={pagination.nextUrl!}>后一页 &raquo;</a>
+              )}
+            </nav>
+          )}
+        </div>
+
+        {sidebarData && (
+          <div class="col-mb-12 col-offset-1 col-3 kit-hidden-tb" id="secondary" role="complementary">
+            {sidebarData.recentPosts && sidebarData.recentPosts.length > 0 && (
+              <section class="widget">
+                <h3 class="widget-title">最新文章</h3>
+                <ul class="widget-list">
+                  {sidebarData.recentPosts.map((p) => (
+                    <li><a href={p.permalink}>{p.title}</a></li>
+                  ))}
+                </ul>
+              </section>
+            )}
+            {sidebarData.recentComments && sidebarData.recentComments.length > 0 && (
+              <section class="widget">
+                <h3 class="widget-title">最近回复</h3>
+                <ul class="widget-list">
+                  {sidebarData.recentComments.map((c) => (
+                    <li><a href={c.permalink}>{c.author}</a>: {c.excerpt}</li>
+                  ))}
+                </ul>
+              </section>
+            )}
+            {sidebarData.categories && sidebarData.categories.length > 0 && (
+              <section class="widget">
+                <h3 class="widget-title">分类</h3>
+                <ul class="widget-list">
+                  {sidebarData.categories.map((cat) => (
+                    <li><a href={cat.permalink}>{cat.name} ({cat.count})</a></li>
+                  ))}
+                </ul>
+              </section>
+            )}
+            {sidebarData.archives && sidebarData.archives.length > 0 && (
+              <section class="widget">
+                <h3 class="widget-title">归档</h3>
+                <ul class="widget-list">
+                  {sidebarData.archives.map((archive) => (
+                    <li><a href={archive.permalink}>{archive.date}</a></li>
+                  ))}
+                </ul>
+              </section>
+            )}
+            <section class="widget">
+              <h3 class="widget-title">其它</h3>
+              <ul class="widget-list">
+                {isLoggedIn ? (
+                  <>
+                    <li class="last">
+                      <a href={urls.adminUrl}>进入后台 ({user?.screenName || user?.name})</a>
+                    </li>
+                    <li><a href={urls.logoutUrl}>退出</a></li>
+                  </>
+                ) : (
+                  <li class="last"><a href={urls.loginUrl}>登录</a></li>
+                )}
+                <li><a href={urls.feedUrl}>文章 RSS</a></li>
+                <li><a href={urls.commentsFeedUrl}>评论 RSS</a></li>
+              </ul>
+            </section>
+          </div>
+        )}
+      </div>
+    </div>
+  </div>
+
+  <footer id="footer" role="contentinfo">
+    &copy; {new Date().getFullYear()} <a href={urls.siteUrl}>{options.title}</a>.
+    由 <a href="https://github.com/eslizn/typecho-cf">Typecho CF</a> 强力驱动.
+  </footer>
+</Base>

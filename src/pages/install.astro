@@ -1,0 +1,75 @@
+---
+import Base from '@/layouts/Base.astro';
+import { getDb, schema } from '@/db';
+import { loadOptions } from '@/lib/options';
+import { env } from 'cloudflare:workers';
+
+const db = getDb(env.DB);
+let installed = false;
+
+try {
+  const options = await loadOptions(db);
+  installed = !!options.installed;
+} catch {
+  // DB tables don't exist yet
+}
+
+if (installed) {
+  return Astro.redirect('/');
+}
+
+const defaultOptions = {
+  title: 'Blog', charset: 'UTF-8', lang: 'zh_CN', description: '',
+  siteUrl: new URL(Astro.request.url).origin,
+};
+const urls = { siteUrl: defaultOptions.siteUrl };
+---
+<Base title="安装 Typecho" options={defaultOptions as any} urls={urls as any}>
+  <Fragment slot="head">
+    <link rel="stylesheet" href="/css/admin.css" />
+    <style>
+      body { background: #f5f5f5; }
+      .install-container { max-width: 600px; margin: 3em auto; padding: 2em; background: #fff; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+      .install-container h1 { text-align: center; margin-bottom: 0.5em; }
+      .install-container .subtitle { text-align: center; color: #888; margin-bottom: 2em; }
+      .install-container label { display: block; margin-bottom: 0.3em; font-weight: bold; }
+      .install-container input.text { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; margin-bottom: 1em; }
+      .install-container .submit { display: block; width: 100%; padding: 12px; border: none; background: #467b96; color: #fff; border-radius: 4px; cursor: pointer; font-size: 1em; }
+      .install-container .submit:hover { background: #3a6880; }
+      .install-container .note { font-size: 0.85em; color: #888; margin-top: -0.5em; margin-bottom: 1em; }
+    </style>
+  </Fragment>
+
+  <div class="install-container">
+    <h1>Typecho</h1>
+    <p class="subtitle">一个基于 Astro + Cloudflare Workers 的博客系统</p>
+
+    <form method="post" action="/api/install">
+      <p>
+        <label for="siteTitle">站点名称</label>
+        <input type="text" id="siteTitle" name="siteTitle" class="text" value="Hello World" required />
+      </p>
+      <p>
+        <label for="siteDescription">站点描述</label>
+        <input type="text" id="siteDescription" name="siteDescription" class="text" value="Just Another Blog" />
+      </p>
+      <p>
+        <label for="userName">用户名</label>
+        <input type="text" id="userName" name="userName" class="text" value="admin" required />
+      </p>
+      <p>
+        <label for="userPassword">密码</label>
+        <input type="password" id="userPassword" name="userPassword" class="text" required />
+        <span class="note">密码长度至少6位</span>
+      </p>
+      <p>
+        <label for="userMail">邮箱</label>
+        <input type="email" id="userMail" name="userMail" class="text" required />
+      </p>
+
+      <p>
+        <button type="submit" class="submit">开始安装</button>
+      </p>
+    </form>
+  </div>
+</Base>

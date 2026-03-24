@@ -1,0 +1,42 @@
+---
+import { themeTemplates } from 'virtual:theme-templates';
+import { createContext } from '@/lib/context';
+import { preparePostData } from '@/lib/page-data';
+
+const { cid } = Astro.params;
+const cidNum = parseInt(cid || '0', 10);
+if (!cidNum) return Astro.redirect('/');
+
+const ctx = await createContext(Astro.locals, Astro.request);
+
+// If it's a page, the data layer will handle the redirect via contentRow.type check
+// But we still need to handle the page redirect at the route level
+const { db, options } = ctx;
+import { eq } from 'drizzle-orm';
+import { schema } from '@/db';
+
+const contentRow = await db.query.contents.findFirst({
+  where: eq(schema.contents.cid, cidNum),
+});
+
+if (!contentRow) return new Response('Not Found', { status: 404 });
+
+// If it's a page, redirect to page route
+if (contentRow.type === 'page') {
+  return Astro.redirect(`/${contentRow.slug || contentRow.cid}.html`);
+}
+
+// Prepare data
+const suppliedPassword = Astro.url.searchParams.get('password');
+const result = await preparePostData(ctx, cidNum, Astro.request.url, suppliedPassword);
+
+// If result is a Response, return it (404, etc.)
+if (result instanceof Response) return result;
+
+// Select theme component
+const activeTheme = options.theme || 'typecho-theme-minimal';
+const templates = themeTemplates[activeTheme] ?? {};
+const defaultTemplates = themeTemplates['typecho-theme-minimal']!;
+const PostComponent = templates.Post ?? defaultTemplates.Post!;
+---
+<PostComponent {...result} />

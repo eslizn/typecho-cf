@@ -1,0 +1,37 @@
+---
+import { themeTemplates } from 'virtual:theme-templates';
+import { createContext } from '@/lib/context';
+import { prepareIndexData } from '@/lib/page-data';
+
+const ctx = await createContext(Astro.locals, Astro.request);
+const { options } = ctx;
+
+// Handle search redirect (GET or POST)
+let searchQuery = Astro.url.searchParams.get('s');
+if (!searchQuery && Astro.request.method === 'POST') {
+  try {
+    const formData = await Astro.request.formData();
+    searchQuery = formData.get('s') as string | null;
+  } catch {}
+}
+if (searchQuery) {
+  return Astro.redirect(`/search/${encodeURIComponent(searchQuery)}/`);
+}
+
+// Custom front page
+if (options.frontPage && options.frontPage !== 'recent') {
+  if (options.frontPage.startsWith('page:')) {
+    return Astro.redirect(`/archives/${options.frontPage.split(':')[1]}/`);
+  }
+}
+
+// Prepare data
+const data = await prepareIndexData(ctx, Astro.request.url, Astro.locals, Astro.url);
+
+// Select theme component
+const activeTheme = options.theme || 'typecho-theme-minimal';
+const templates = themeTemplates[activeTheme] ?? {};
+const defaultTemplates = themeTemplates['typecho-theme-minimal']!;
+const IndexComponent = templates.Index ?? defaultTemplates.Index!;
+---
+<IndexComponent {...data} />

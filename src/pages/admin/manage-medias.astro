@@ -1,0 +1,190 @@
+---
+import Admin from '@/layouts/Admin.astro';
+import { createContext, requireAuth } from '@/lib/context';
+import { hasPermission } from '@/lib/auth';
+import { eq, and, desc, sql } from 'drizzle-orm';
+import { schema } from '@/db';
+import { formatDate } from '@/lib/content';
+
+const ctx = await createContext(Astro.locals, Astro.request);
+const authCheck = requireAuth(ctx);
+if (authCheck) return authCheck;
+
+if (!hasPermission(ctx.user!.group || 'visitor', 'editor')) {
+  return new Response('Forbidden', { status: 403 });
+}
+
+const { db, options, urls, user } = ctx;
+const isAdmin = hasPermission(user!.group || 'visitor', 'administrator');
+
+const page = parseInt(Astro.url.searchParams.get('page') || '1', 10) || 1;
+const keywords = Astro.url.searchParams.get('keywords') || '';
+const pageSize = 20;
+
+// Build conditions
+const conditions: any[] = [eq(schema.contents.type, 'attachment')];
+if (!isAdmin) {
+  conditions.push(eq(schema.contents.authorId, user!.uid));
+}
+if (keywords) {
+  conditions.push(sql`${schema.contents.title} LIKE ${'%' + keywords + '%'}`);
+}
+
+const where = and(...conditions);
+
+const countResult = await db.select({ count: sql<number>`count(*)` }).from(schema.contents).where(where);
+const totalItems = countResult[0]?.count || 0;
+const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+
+const attachments = await db.select().from(schema.contents)
+  .where(where)
+  .orderBy(desc(schema.contents.created))
+  .limit(pageSize)
+  .offset((page - 1) * pageSize);
+
+// Get author info
+const authorIds = [...new Set(attachments.map(a => a.authorId).filter(Boolean))];
+const authors = authorIds.length > 0
+  ? await db.select().from(schema.users)
+      .where(sql`${schema.users.uid} IN (${sql.join(authorIds.map(id => sql`${id}`), sql`, `)})`)
+  : [];
+const authorMap = new Map(authors.map(a => [a.uid, a]));
+
+// Get parent content titles
+const parentIds = [...new Set(attachments.map(a => a.parent).filter(Boolean))];
+const parents = parentIds.length > 0
+  ? await db.select({ cid: schema.contents.cid, title: schema.contents.title }).from(schema.contents)
+      .where(sql`${schema.contents.cid} IN (${sql.join(parentIds.map(id => sql`${id}`), sql`, `)})`)
+  : [];
+const parentMap = new Map(parents.map(p => [p.cid, p.title]));
+
+// Parse attachment meta
+function parseMeta(text: string) {
+  try { return JSON.parse(text || '{}'); } catch { return {}; }
+}
+
+const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'avif'];
+
+function isImageFile(meta: any): boolean {
+  const mimeType = meta.type || '';
+  return mimeType.startsWith('image/')
+    || imageExtensions.includes(mimeType.toLowerCase())
+    || imageExtensions.some(ext => (meta.name || '').toLowerCase().endsWith('.' + ext));
+}
+
+function resolveFileUrl(meta: any): string {
+  if (meta.url) return meta.url;
+  if (meta.path) return '/' + meta.path.replace(/^\//, '');
+  return '';
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return Math.ceil(bytes / 1024) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+---
+<Admin title="管理文件" options={options} urls={urls} user={user} activeMenu="manage-medias">
+  <div class="col-mb-12 typecho-list">
+    <div class="typecho-list-operate clearfix">
+      <form method="get">
+        <div class="operate">
+          <label><i class="sr-only">全选</i><input type="checkbox" class="typecho-table-select-all" /></label>
+          <div class="btn-group btn-drop">
+            <button class="btn dropdown-toggle btn-s" type="button"><i class="sr-only">操作</i>选中项 <i class="i-caret-down"></i></button>
+            <ul class="dropdown-menu">
+              <li><a href="/api/admin/media-batch?do=delete">删除</a></li>
+            </ul>
+          </div>
+        </div>
+        <div class="search" role="search">
+          {keywords && <a href="/admin/manage-medias">&laquo; 取消筛选</a>}
+          <input type="text" class="text-s" placeholder="请输入关键字" value={keywords} name="keywords" />
+          <button type="submit" class="btn btn-s">筛选</button>
+        </div>
+      </form>
+    </div>
+
+    <form method="post" name="manage_medias" class="operate-form">
+      <div class="typecho-table-wrap">
+        <table class="typecho-list-table">
+          <colgroup>
+            <col width="20" class="kit-hidden-mb" />
+            <col width="45%" />
+            <col width="" class="kit-hidden-mb" />
+            <col width="18%" class="kit-hidden-mb" />
+            <col width="16%" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th class="kit-hidden-mb"></th>
+              <th>文件名</th>
+              <th class="kit-hidden-mb">上传者</th>
+              <th class="kit-hidden-mb">所属</th>
+              <th>日期</th>
+            </tr>
+          </thead>
+          <tbody>
+            {attachments.length === 0 ? (
+              <tr>
+                <td colspan="5"><h6 class="typecho-list-table-title">没有任何文件</h6></td>
+              </tr>
+            ) : (
+              attachments.map((att) => {
+                const meta = parseMeta(att.text || '');
+                const author = authorMap.get(att.authorId || 0);
+                const parentTitle = parentMap.get(att.parent || 0);
+                const isImage = isImageFile(meta);
+                const fileUrl = resolveFileUrl(meta);
+                return (
+                  <tr>
+                    <td class="kit-hidden-mb"><input type="checkbox" value={String(att.cid)} name="cid[]" /></td>
+                    <td>
+                      <a href={`/admin/media?cid=${att.cid}`}>{att.title || '未命名文件'}</a>
+                      <a href={`/admin/media?cid=${att.cid}`} title={`编辑 ${att.title}`}><i class="i-edit"></i></a>
+                      {fileUrl && (
+                        <a href={fileUrl} title="浏览文件" target="_blank" rel="noopener noreferrer"><i class="i-exlink"></i></a>
+                      )}
+                      <br />
+                      <span class="description">{isImage ? '图片' : '文件'} - {formatBytes(parseInt(String(meta.size || '0'), 10) || 0)}</span>
+                    </td>
+                    <td class="kit-hidden-mb">{author?.screenName || author?.name || '未知'}</td>
+                    <td class="kit-hidden-mb">
+                      {att.parent && parentTitle ? (
+                        <a href={`/admin/write-post?cid=${att.parent}`}>{parentTitle}</a>
+                      ) : (
+                        <span class="description">未归档</span>
+                      )}
+                    </td>
+                    <td>{formatDate(att.created || 0, 'Y-m-d', options.timezone)}</td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+    </form>
+
+    <div class="typecho-list-operate clearfix">
+      <form method="get">
+        <div class="operate">
+          <label><i class="sr-only">全选</i><input type="checkbox" class="typecho-table-select-all" /></label>
+          <div class="btn-group btn-drop">
+            <button class="btn dropdown-toggle btn-s" type="button"><i class="sr-only">操作</i>选中项 <i class="i-caret-down"></i></button>
+            <ul class="dropdown-menu">
+              <li><a href="/api/admin/media-batch?do=delete">删除</a></li>
+            </ul>
+          </div>
+        </div>
+        {totalPages > 1 && (
+          <ul class="typecho-pager">
+            {page > 1 && <li><a href={`/admin/manage-medias?page=${page - 1}${keywords ? '&keywords=' + encodeURIComponent(keywords) : ''}`}>&laquo;</a></li>}
+            <li class="current"><a>{page}</a> / {totalPages}</li>
+            {page < totalPages && <li><a href={`/admin/manage-medias?page=${page + 1}${keywords ? '&keywords=' + encodeURIComponent(keywords) : ''}`}>&raquo;</a></li>}
+          </ul>
+        )}
+      </form>
+    </div>
+  </div>
+</Admin>

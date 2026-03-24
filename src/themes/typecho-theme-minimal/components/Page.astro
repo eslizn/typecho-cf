@@ -1,0 +1,240 @@
+---
+/**
+ * Default theme — Independent page component
+ *
+ * Renders a single page with optional comments.
+ * Equivalent to the original [slug].astro template section.
+ */
+import Base from '@/layouts/Base.astro';
+import CommentList from './CommentList.astro';
+import type { ThemePageProps } from '@/lib/theme-props';
+import { formatDate } from '@/lib/content';
+
+type Props = ThemePageProps;
+
+const {
+  options, urls, user, isLoggedIn, pages, sidebarData, currentPath,
+  page, comments, commentOptions, gravatarMap,
+} = Astro.props;
+
+const isIndex = currentPath === '/';
+
+function countAll(nodes: typeof comments): number {
+  let n = 0;
+  for (const node of nodes) {
+    n += 1 + countAll(node.children);
+  }
+  return n;
+}
+const totalComments = countAll(comments);
+---
+<Base
+  title={page.title}
+  options={options}
+  urls={urls}
+  user={user}
+  isLoggedIn={isLoggedIn}
+>
+  <header id="header" class="clearfix">
+    <div class="container">
+      <div class="row">
+        <div class="site-name col-mb-12 col-9">
+          <a id="logo" href={urls.siteUrl + '/'}>{options.title}</a>
+          <p class="description">{options.description}</p>
+        </div>
+        <div class="site-search col-3 kit-hidden-tb">
+          <form id="search" method="post" action={urls.siteUrl + '/'} role="search">
+            <label for="s" class="sr-only">搜索关键字</label>
+            <input type="text" id="s" name="s" class="text" placeholder="输入关键字搜索" />
+            <button type="submit" class="submit">搜索</button>
+          </form>
+        </div>
+        <div class="col-mb-12">
+          <nav id="nav-menu" class="clearfix" role="navigation">
+            <a class:list={[{ current: isIndex }]} href={urls.siteUrl + '/'}>首页</a>
+            {pages.map((p) => (
+              <a
+                class:list={[{ current: page.slug === p.slug }]}
+                href={p.permalink}
+                title={p.title}
+              >
+                {p.title}
+              </a>
+            ))}
+          </nav>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div id="body">
+    <div class="container">
+      <div class="row">
+        <div class="col-mb-12 col-8" id="main" role="main">
+          <article class="post" itemscope itemtype="http://schema.org/BlogPosting">
+            <h1 class="post-title" itemprop="name headline">
+              <a itemprop="url" href={page.permalink}>{page.title}</a>
+            </h1>
+
+            {page.hasPassword && !page.passwordVerified ? (
+              <div class="post-content">
+                <form method="get" action={page.permalink}>
+                  <p>请输入密码访问此内容：</p>
+                  <p><input type="password" name="password" class="text" /></p>
+                  <p><button type="submit" class="submit">提交</button></p>
+                </form>
+              </div>
+            ) : (
+              <div class="post-content" itemprop="articleBody" set:html={page.content} />
+            )}
+          </article>
+
+          {/* Comments */}
+          {(!page.hasPassword || page.passwordVerified) && commentOptions.allowComment && (
+            <div id="comments">
+              {totalComments > 0 && (
+                <>
+                  <h3>{totalComments === 1 ? '仅有一条评论' : `已有 ${totalComments} 条评论`}</h3>
+                  <ol class="comment-list">
+                    <CommentList
+                      comments={comments}
+                      commentOptions={commentOptions}
+                      gravatarMap={gravatarMap}
+                      permalink={page.permalink}
+                    />
+                  </ol>
+                </>
+              )}
+
+              <div id="respond" class="respond">
+                <h3 id="response">添加新评论</h3>
+                <div class="cancel-comment-reply" style="display:none">
+                  <a id="cancel-comment-reply-link" href={`${page.permalink}#respond`} rel="nofollow"
+                    onclick="return TypechoComment.cancelReply()">取消回复</a>
+                </div>
+                <form method="post" action="/api/comment" id="comment-form" role="form">
+                  <input type="hidden" name="cid" value={String(page.cid)} />
+                  <input type="hidden" name="parent" id="comment-parent" value="0" />
+                  {isLoggedIn ? (
+                    <p>登录身份: <a href={urls.profileUrl}>{user?.screenName || user?.name}</a></p>
+                  ) : (
+                    <>
+                      <p>
+                        <label for="author" class="required">称呼</label>
+                        <input type="text" name="author" id="author" class="text" required />
+                      </p>
+                      <p>
+                        <label for="mail">Email</label>
+                        <input type="email" name="mail" id="mail" class="text" />
+                      </p>
+                    </>
+                  )}
+                  <p>
+                    <label for="textarea" class="required">内容</label>
+                    <textarea rows="8" cols="50" name="text" id="textarea" class="textarea" required></textarea>
+                  </p>
+                  <p><button type="submit" class="submit">提交评论</button></p>
+                </form>
+              </div>
+              <script is:inline>
+                var TypechoComment = {
+                  dom: function (id) { return document.getElementById(id); },
+                  reply: function (commentId, coid) {
+                    var comment = this.dom(commentId);
+                    var respond = this.dom('respond');
+                    var cancelLink = this.dom('cancel-comment-reply-link');
+                    var parentInput = this.dom('comment-parent');
+                    if (!comment || !respond || !parentInput) return true;
+                    parentInput.value = coid;
+                    comment.appendChild(respond);
+                    if (cancelLink) cancelLink.style.display = '';
+                    try { this.dom('textarea').focus(); } catch (e) {}
+                    return false;
+                  },
+                  cancelReply: function () {
+                    var respond = this.dom('respond');
+                    var cancelLink = this.dom('cancel-comment-reply-link');
+                    var parentInput = this.dom('comment-parent');
+                    var comments = this.dom('comments');
+                    if (!respond || !comments || !parentInput) return false;
+                    parentInput.value = '0';
+                    if (cancelLink) cancelLink.style.display = 'none';
+                    comments.appendChild(respond);
+                    return false;
+                  }
+                };
+              </script>
+            </div>
+          )}
+        </div>
+
+        {sidebarData && (
+          <div class="col-mb-12 col-offset-1 col-3 kit-hidden-tb" id="secondary" role="complementary">
+            {sidebarData.recentPosts && sidebarData.recentPosts.length > 0 && (
+              <section class="widget">
+                <h3 class="widget-title">最新文章</h3>
+                <ul class="widget-list">
+                  {sidebarData.recentPosts.map((p) => (
+                    <li><a href={p.permalink}>{p.title}</a></li>
+                  ))}
+                </ul>
+              </section>
+            )}
+            {sidebarData.recentComments && sidebarData.recentComments.length > 0 && (
+              <section class="widget">
+                <h3 class="widget-title">最近回复</h3>
+                <ul class="widget-list">
+                  {sidebarData.recentComments.map((c) => (
+                    <li><a href={c.permalink}>{c.author}</a>: {c.excerpt}</li>
+                  ))}
+                </ul>
+              </section>
+            )}
+            {sidebarData.categories && sidebarData.categories.length > 0 && (
+              <section class="widget">
+                <h3 class="widget-title">分类</h3>
+                <ul class="widget-list">
+                  {sidebarData.categories.map((cat) => (
+                    <li><a href={cat.permalink}>{cat.name} ({cat.count})</a></li>
+                  ))}
+                </ul>
+              </section>
+            )}
+            {sidebarData.archives && sidebarData.archives.length > 0 && (
+              <section class="widget">
+                <h3 class="widget-title">归档</h3>
+                <ul class="widget-list">
+                  {sidebarData.archives.map((archive) => (
+                    <li><a href={archive.permalink}>{archive.date}</a></li>
+                  ))}
+                </ul>
+              </section>
+            )}
+            <section class="widget">
+              <h3 class="widget-title">其它</h3>
+              <ul class="widget-list">
+                {isLoggedIn ? (
+                  <>
+                    <li class="last">
+                      <a href={urls.adminUrl}>进入后台 ({user?.screenName || user?.name})</a>
+                    </li>
+                    <li><a href={urls.logoutUrl}>退出</a></li>
+                  </>
+                ) : (
+                  <li class="last"><a href={urls.loginUrl}>登录</a></li>
+                )}
+                <li><a href={urls.feedUrl}>文章 RSS</a></li>
+                <li><a href={urls.commentsFeedUrl}>评论 RSS</a></li>
+              </ul>
+            </section>
+          </div>
+        )}
+      </div>
+    </div>
+  </div>
+
+  <footer id="footer" role="contentinfo">
+    &copy; {new Date().getFullYear()} <a href={urls.siteUrl}>{options.title}</a>.
+    由 <a href="https://github.com/eslizn/typecho-cf">Typecho CF</a> 强力驱动.
+  </footer>
+</Base>

@@ -1,0 +1,28 @@
+---
+import { themeTemplates } from 'virtual:theme-templates';
+import { createContext } from '@/lib/context';
+import { preparePageData } from '@/lib/page-data';
+
+const { slug } = Astro.params;
+
+// Remove .html extension if present
+const cleanSlug = slug?.replace(/\.html$/, '') || '';
+if (!cleanSlug) return Astro.redirect('/');
+
+const ctx = await createContext(Astro.locals, Astro.request);
+const { options } = ctx;
+
+// Prepare data
+const suppliedPassword = Astro.url.searchParams.get('password');
+const result = await preparePageData(ctx, cleanSlug, Astro.request.url, suppliedPassword);
+
+// If result is a Response, return it (404, etc.)
+if (result instanceof Response) return result;
+
+// Select theme component
+const activeTheme = options.theme || 'typecho-theme-minimal';
+const templates = themeTemplates[activeTheme] ?? {};
+const defaultTemplates = themeTemplates['typecho-theme-minimal']!;
+const PageComponent = templates.Page ?? defaultTemplates.Page!;
+---
+<PageComponent {...result} />

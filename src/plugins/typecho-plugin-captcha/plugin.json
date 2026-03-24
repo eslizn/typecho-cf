@@ -1,0 +1,58 @@
+{
+  "id": "typecho-plugin-captcha",
+  "name": "Captcha 验证码",
+  "description": "评论验证码插件，支持 Google reCAPTCHA v3 和 Cloudflare Turnstile，防止垃圾评论",
+  "author": "eslizn",
+  "authorUrl": "https://eslizn.com",
+  "version": "1.0.0",
+  "homepage": "https://github.com/eslizn/typecho-cf",
+  "license": "MIT",
+  "tags": ["captcha", "recaptcha", "turnstile", "antispam"],
+  "config": {
+    "client": {
+      "type": "text",
+      "label": "前端 Key",
+      "default": "",
+      "description": "<a href=\"//www.google.com/recaptcha/admin/create\" target=\"_blank\">点击申请</a>"
+    },
+    "server": {
+      "type": "text",
+      "label": "后端 Key",
+      "default": ""
+    },
+    "api": {
+      "type": "text",
+      "label": "API 接入点",
+      "default": "https://www.recaptcha.net",
+      "description": "国内建议使用：https://www.recaptcha.net"
+    },
+    "input": {
+      "type": "text",
+      "label": "验证码字段名",
+      "default": "captcha",
+      "description": "用于提交验证 token 的字段名，如遇参数冲突可以修改"
+    },
+    "action": {
+      "type": "select",
+      "label": "评分场景",
+      "default": "social",
+      "options": {
+        "homepage": "首页",
+        "login": "登录",
+        "social": "社交",
+        "e-commerce": "电商"
+      },
+      "description": "<a href=\"//developers.google.com/recaptcha/docs/v3#score\" target=\"_blank\">详情</a>"
+    },
+    "hidden": {
+      "type": "radio",
+      "label": "隐藏部件",
+      "default": "0",
+      "options": {
+        "0": "展示",
+        "1": "隐藏"
+      },
+      "description": "是否隐藏隐私声明"
+    }
+  }
+}

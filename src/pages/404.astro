@@ -1,0 +1,33 @@
+---
+import { themeTemplates } from 'virtual:theme-templates';
+import { createContext } from '@/lib/context';
+import { prepareNotFoundData } from '@/lib/page-data';
+
+let data;
+let activeTheme = 'minimal';
+
+try {
+  const ctx = await createContext(Astro.locals, Astro.request);
+  activeTheme = ctx.options.theme || 'minimal';
+  data = await prepareNotFoundData(ctx, Astro.request.url);
+} catch {
+  // If DB not initialized, provide minimal fallback data
+  data = {
+    options: { title: 'Blog', charset: 'UTF-8', lang: 'zh_CN', description: '' } as any,
+    urls: { siteUrl: '', adminUrl: '/admin', feedUrl: '/feed', commentsFeedUrl: '/feed/comments', loginUrl: '/admin/login', logoutUrl: '/api/users/logout', registerUrl: '/admin/register' } as any,
+    user: null,
+    isLoggedIn: false,
+    pages: [],
+    sidebarData: {},
+    currentPath: '/404',
+    statusCode: 404,
+    errorTitle: '404 - 页面没找到',
+  };
+}
+
+// Select theme component
+const templates = themeTemplates[activeTheme] ?? {};
+const defaultTemplates = themeTemplates['typecho-theme-minimal']!;
+const NotFoundComponent = templates.NotFound ?? defaultTemplates.NotFound!;
+---
+<NotFoundComponent {...data} />

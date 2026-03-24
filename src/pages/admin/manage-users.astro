@@ -1,0 +1,143 @@
+---
+import Admin from '@/layouts/Admin.astro';
+import { createContext, requireAuth } from '@/lib/context';
+import { hasPermission } from '@/lib/auth';
+import { eq, sql, desc } from 'drizzle-orm';
+import { schema } from '@/db';
+import { formatDate } from '@/lib/content';
+
+const ctx = await createContext(Astro.locals, Astro.request);
+const authCheck = requireAuth(ctx);
+if (authCheck) return authCheck;
+
+if (!hasPermission(ctx.user!.group || 'visitor', 'administrator')) {
+  return new Response('Forbidden', { status: 403 });
+}
+
+const { db, options, urls, user } = ctx;
+const keywords = Astro.url.searchParams.get('keywords') || '';
+const page = parseInt(Astro.url.searchParams.get('page') || '1', 10) || 1;
+const pageSize = 20;
+
+const conditions: any[] = [];
+if (keywords) {
+  conditions.push(sql`(${schema.users.name} LIKE ${'%' + keywords + '%'} OR ${schema.users.screenName} LIKE ${'%' + keywords + '%'} OR ${schema.users.mail} LIKE ${'%' + keywords + '%'})`);
+}
+
+const where = conditions.length > 0 ? sql.join(conditions, sql` AND `) : undefined;
+
+const countResult = await db.select({ count: sql<number>`count(*)` }).from(schema.users).where(where);
+const totalUsers = countResult[0]?.count || 0;
+const totalPages = Math.max(1, Math.ceil(totalUsers / pageSize));
+
+const users = await db.select().from(schema.users)
+  .where(where)
+  .orderBy(desc(schema.users.uid))
+  .limit(pageSize)
+  .offset((page - 1) * pageSize);
+
+// Get post counts per user
+const userIds = users.map(u => u.uid);
+const postCounts = userIds.length > 0
+  ? await db.select({
+      authorId: schema.contents.authorId,
+      count: sql<number>`count(*)`
+    }).from(schema.contents)
+      .where(sql`${schema.contents.authorId} IN (${sql.join(userIds.map(id => sql`${id}`), sql`, `)}) AND ${schema.contents.type} = 'post'`)
+      .groupBy(schema.contents.authorId)
+  : [];
+const postCountMap = new Map(postCounts.map(p => [p.authorId, p.count]));
+
+const groupNames: Record<string, string> = {
+  administrator: '管理员',
+  editor: '编辑',
+  contributor: '贡献者',
+  subscriber: '关注者',
+  visitor: '访问者',
+};
+---
+<Admin title="用户" options={options} urls={urls} user={user} activeMenu="manage-users">
+  <div class="col-mb-12 typecho-list">
+    <div class="typecho-list-operate clearfix">
+      <form method="get">
+        <div class="operate">
+          <label><i class="sr-only">全选</i><input type="checkbox" class="typecho-table-select-all" /></label>
+          <div class="btn-group btn-drop">
+            <button class="btn dropdown-toggle btn-s" type="button"><i class="sr-only">操作</i>选中项 <i class="i-caret-down"></i></button>
+            <ul class="dropdown-menu">
+              <li><a href="/api/admin/user-batch?do=delete">删除</a></li>
+            </ul>
+          </div>
+          <a class="btn btn-s" href="/admin/user">新增用户</a>
+        </div>
+        <div class="search" role="search">
+          {keywords && <a href="/admin/manage-users">&laquo; 取消筛选</a>}
+          <input type="text" class="text-s" placeholder="请输入关键字" value={keywords} name="keywords" />
+          <button type="submit" class="btn btn-s">筛选</button>
+        </div>
+      </form>
+    </div>
+
+    <form method="post" name="manage_users" class="operate-form">
+      <div class="typecho-table-wrap">
+        <table class="typecho-list-table">
+          <colgroup>
+            <col width="20" class="kit-hidden-mb" />
+            <col width="30%" />
+            <col width="" class="kit-hidden-mb" />
+            <col width="20%" class="kit-hidden-mb" />
+            <col width="10%" class="kit-hidden-mb" />
+            <col width="16%" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th class="kit-hidden-mb"></th>
+              <th>用户名</th>
+              <th class="kit-hidden-mb">昵称</th>
+              <th class="kit-hidden-mb">邮箱</th>
+              <th class="kit-hidden-mb">文章</th>
+              <th>用户组</th>
+            </tr>
+          </thead>
+          <tbody>
+            {users.length === 0 ? (
+              <tr>
+                <td colspan="6"><h6 class="typecho-list-table-title">没有任何用户</h6></td>
+              </tr>
+            ) : (
+              users.map((u) => (
+                <tr>
+                  <td class="kit-hidden-mb">
+                    {u.uid !== user!.uid && (
+                      <input type="checkbox" value={String(u.uid)} name="uid[]" />
+                    )}
+                  </td>
+                  <td>
+                    <a href={`/admin/user?uid=${u.uid}`}>{u.name}</a>
+                    <a href={`/admin/user?uid=${u.uid}`} title={`编辑 ${u.name}`}><i class="i-edit"></i></a>
+                  </td>
+                  <td class="kit-hidden-mb">{u.screenName || u.name}</td>
+                  <td class="kit-hidden-mb">{u.mail ? <a href={`mailto:${u.mail}`}>{u.mail}</a> : '-'}</td>
+                  <td class="kit-hidden-mb">
+                    <a class="balloon-button size-small" href={`/admin/manage-posts?uid=${u.uid}`}>{postCountMap.get(u.uid) || 0}</a>
+                  </td>
+                  <td>{groupNames[u.group || 'visitor'] || u.group}</td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </form>
+
+    {totalPages > 1 && (
+      <div class="typecho-list-operate clearfix">
+        <ul class="typecho-pager">
+          {page > 1 && <li><a href={`/admin/manage-users?page=${page - 1}${keywords ? '&keywords=' + encodeURIComponent(keywords) : ''}`}>&laquo;</a></li>}
+          <li class="current"><a>{page}</a> / {totalPages}</li>
+          {page < totalPages && <li><a href={`/admin/manage-users?page=${page + 1}${keywords ? '&keywords=' + encodeURIComponent(keywords) : ''}`}>&raquo;</a></li>}
+        </ul>
+      </div>
+    )}
+  </div>
+</Admin>

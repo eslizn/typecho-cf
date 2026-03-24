@@ -1,0 +1,46 @@
+{
+  "name": "typecho",
+  "type": "module",
+  "version": "0.1.0",
+  "description": "Typecho blog rewrite with Astro + Cloudflare Workers + D1",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "deploy": "astro build && wrangler deploy",
+    "db:generate": "drizzle-kit generate",
+    "db:studio": "drizzle-kit studio",
+    "db:migrate": "tsx scripts/migrate.ts",
+    "db:migrate:local": "tsx scripts/migrate.ts --target local",
+    "db:migrate:cloudflare": "tsx scripts/migrate.ts --target cloudflare",
+    "db:migrate:dry-run": "tsx scripts/migrate.ts --dry-run",
+    "reset-password": "tsx scripts/reset-password.ts --target local",
+    "reset-password:cloudflare": "tsx scripts/reset-password.ts --target cloudflare"
+  },
+  "dependencies": {
+    "@astrojs/cloudflare": "^13.1.3",
+    "astro": "^6.0.8",
+    "drizzle-orm": "^0.45.1",
+    "marked": "^17.0.5",
+    "sanitize-html": "^2.17.2",
+    "typecho-plugin-captcha": "file:src/plugins/typecho-plugin-captcha",
+    "typecho-theme-minimal": "file:src/themes/typecho-theme-minimal"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/sanitize-html": "^2.16.1",
+    "better-sqlite3": "^12.8.0",
+    "drizzle-kit": "^0.31.10",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2",
+    "wrangler": "^4.77.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild",
+      "sharp",
+      "workerd"
+    ],
+    "overrides": {}
+  }
+}

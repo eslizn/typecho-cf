@@ -1,0 +1,248 @@
+---
+import type { SiteOptions } from '@/lib/options';
+import type { computeUrls } from '@/lib/options';
+import { hasPermission } from '@/lib/auth';
+
+interface Props {
+  title: string;
+  options: SiteOptions;
+  urls: ReturnType<typeof computeUrls>;
+  user: any;
+  activeMenu?: string;
+  bodyClass?: string;
+}
+
+const { title, options, urls, user, activeMenu, bodyClass } = Astro.props;
+
+const userGroup = user?.group || 'visitor';
+const isAdmin = hasPermission(userGroup, 'administrator');
+const isEditor = hasPermission(userGroup, 'editor');
+const isContributor = hasPermission(userGroup, 'contributor');
+
+// Typecho 原版菜单结构：嵌套的 ul.root > li.parent + ul.child
+const menuGroups = [
+  {
+    label: '控制台',
+    show: isContributor,
+    children: [
+      { label: '概览', href: '/admin/', active: activeMenu === 'dashboard', show: isContributor },
+      { label: '个人设置', href: '/admin/profile', active: activeMenu === 'profile', show: true },
+      { label: '插件', href: '/admin/plugins', active: activeMenu === 'plugins', show: isAdmin },
+      { label: '外观', href: '/admin/themes', active: activeMenu === 'themes', show: isAdmin },
+    ],
+  },
+  {
+    label: '撰写',
+    show: isContributor,
+    children: [
+      { label: '撰写文章', href: '/admin/write-post', active: activeMenu === 'write-post', show: isContributor },
+      { label: '创建页面', href: '/admin/write-page', active: activeMenu === 'write-page', show: isEditor },
+    ],
+  },
+  {
+    label: '管理',
+    show: isContributor,
+    children: [
+      { label: '文章', href: '/admin/manage-posts', active: activeMenu === 'manage-posts', show: isContributor },
+      { label: '独立页面', href: '/admin/manage-pages', active: activeMenu === 'manage-pages', show: isEditor },
+      { label: '评论', href: '/admin/manage-comments', active: activeMenu === 'manage-comments', show: isContributor },
+      { label: '分类', href: '/admin/manage-categories', active: activeMenu === 'manage-categories', show: isEditor },
+      { label: '标签', href: '/admin/manage-tags', active: activeMenu === 'manage-tags', show: isEditor },
+      { label: '文件', href: '/admin/manage-medias', active: activeMenu === 'manage-medias', show: isEditor },
+      { label: '用户', href: '/admin/manage-users', active: activeMenu === 'manage-users', show: isAdmin },
+    ],
+  },
+  {
+    label: '设置',
+    show: isAdmin,
+    children: [
+      { label: '基本', href: '/admin/options-general', active: activeMenu === 'options', show: isAdmin },
+      { label: '评论', href: '/admin/options-discussion', active: activeMenu === 'options-discussion', show: isAdmin },
+      { label: '阅读', href: '/admin/options-reading', active: activeMenu === 'options-reading', show: isAdmin },
+      { label: '永久链接', href: '/admin/options-permalink', active: activeMenu === 'options-permalink', show: isAdmin },
+    ],
+  },
+];
+
+// Determine which group is "focus" (has an active child)
+const focusGroupIdx = menuGroups.findIndex(g => g.children.some(c => c.active));
+---
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset={options.charset || 'UTF-8'} />
+  <meta name="renderer" content="webkit" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>{`${title} - ${options.title} - Powered by Typecho`}</title>
+  <meta name="robots" content="noindex, nofollow" />
+  <link rel="stylesheet" href="/css/normalize.css" />
+  <link rel="stylesheet" href="/css/grid.css" />
+  <link rel="stylesheet" href="/css/admin.css" />
+  <slot name="head" />
+</head>
+<body>
+  <div class="typecho-head-nav clearfix" role="navigation">
+    <button class="menu-bar">菜单</button>
+    <nav id="typecho-nav-list">
+      {menuGroups.filter(g => g.show).map((group, idx) => {
+        const isFocus = idx === focusGroupIdx;
+        const visibleChildren = group.children.filter(c => c.show);
+        return (
+          <ul class:list={['root', { focus: isFocus }]}>
+            <li class="parent">
+              <a href={visibleChildren[0]?.href || '#'}>{group.label}</a>
+            </li>
+            <ul class="child">
+              {visibleChildren.map(item => (
+                <li class:list={[{ focus: item.active }]}>
+                  <a href={item.href}>{item.label}</a>
+                </li>
+              ))}
+            </ul>
+          </ul>
+        );
+      })}
+    </nav>
+    <div class="operate">
+      <a href={`/admin/profile`} class="author">{user?.screenName || user?.name}</a>
+      <a class="exit" href={urls.logoutUrl}>登出</a>
+      <a href={urls.siteUrl + '/'}>网站</a>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="body container">
+      <div class="typecho-page-title">
+        <h2>{title}</h2>
+      </div>
+      <div class:list={['row', 'typecho-page-main', bodyClass]} role="main">
+        <slot />
+      </div>
+    </div>
+  </div>
+
+  <div class="typecho-foot" role="contentinfo">
+    <div class="copyright">
+      <p>&copy; {new Date().getFullYear()} <a href={urls.siteUrl}>{options.title}</a>.
+      Powered by <a href="https://github.com/eslizn/typecho-cf">Typecho</a>.</p>
+    </div>
+  </div>
+
+  <script is:inline src="/js/jquery.js"></script>
+  <script is:inline src="/js/jquery-ui.js"></script>
+  <script is:inline src="/js/typecho.js"></script>
+  <script is:inline>
+    (function () {
+      $(document).ready(function() {
+        // 导航菜单
+        const menuBar = $('.menu-bar').click(function () {
+          const nav = $(this).next('#typecho-nav-list');
+          if (!$(this).toggleClass('focus').hasClass('focus')) {
+            nav.removeClass('expanded noexpanded');
+          }
+        });
+
+        $('.main, .typecho-foot').on('click touchstart', function () {
+          if (menuBar.hasClass('focus')) {
+            menuBar.trigger('click');
+          }
+        });
+
+        $('#typecho-nav-list ul.root').each(function () {
+          const ul = $(this), nav = ul.parent();
+          let focused = false;
+
+          ul.on('click touchend', '.parent a', function (e) {
+            nav.removeClass('noexpanded').addClass('expanded');
+            if ($(window).width() < 576 && e.type == 'click') {
+              return false;
+            }
+          }).find('.child')
+          .append($('<li class="return"><a>返回</a></li>').click(function () {
+            nav.removeClass('expanded').addClass('noexpanded');
+            return false;
+          }));
+
+          $('a', ul).focus(function () {
+            ul.addClass('expanded');
+            focused = true;
+          }).blur(function () {
+            focused = false;
+            setTimeout(function () {
+              if (!focused) {
+                ul.removeClass('expanded');
+              }
+            });
+          });
+        });
+
+        // 表格全选 - 在 .typecho-list 范围内查找所有 checkbox
+        $('.typecho-table-select-all').click(function () {
+          var scope = $(this).closest('.typecho-list, form.operate-form');
+          $('input[type=checkbox]', scope).prop('checked', this.checked);
+        });
+
+        // 下拉菜单显示/隐藏
+        $('.dropdown-toggle').click(function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          var menu = $(this).next('.dropdown-menu');
+          // 关闭其他打开的菜单
+          $('.dropdown-menu').not(menu).hide();
+          menu.toggle();
+          return false;
+        });
+
+        // 点击其他区域关闭下拉菜单
+        $(document).click(function () {
+          $('.dropdown-menu').hide();
+        });
+
+        // 批量操作 - dropdown-menu 链接
+        $('.dropdown-menu a[href*="/api/admin/"]').click(function (e) {
+          e.preventDefault();
+          var href = $(this).attr('href');
+          // 在 .typecho-list 范围内查找 operate-form
+          var list = $(this).closest('.typecho-list');
+          var form = list.find('form.operate-form');
+          if (!form.length) form = $(this).closest('form.operate-form');
+          if (!form.length) return;
+
+          var checked = form.find('input[type=checkbox]:checked').not('.typecho-table-select-all');
+          if (checked.length === 0) {
+            alert('请先选择要操作的项目');
+            return;
+          }
+
+          // Confirm delete actions
+          if (href.indexOf('delete') >= 0) {
+            if (!confirm('确认要执行此操作吗?')) return;
+          }
+
+          form.attr('action', href);
+          form.submit();
+        });
+
+        // 表单提交防重复
+        $('.main form').submit(function () {
+          $('button[type=submit]', this).attr('disabled', 'disabled');
+        });
+
+        // 外部链接新窗口打开
+        if ($('.typecho-login').length == 0) {
+          $('a').each(function () {
+            var t = $(this), href = t.attr('href');
+            if (href && href[0] == '#') return;
+            if (href && (href.indexOf('/admin') >= 0 || href.indexOf('/api') >= 0)) return;
+            if (href && href.indexOf('://') > 0) {
+              t.attr('target', '_blank').attr('rel', 'noopener noreferrer');
+            }
+          });
+        }
+      });
+    })();
+  </script>
+
+  <slot name="footer" />
+</body>
+</html>

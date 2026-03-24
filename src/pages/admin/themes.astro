@@ -1,0 +1,184 @@
+---
+import Admin from '@/layouts/Admin.astro';
+import { createContext, requireAuth } from '@/lib/context';
+import { hasPermission } from '@/lib/auth';
+import { getAvailableThemes, getThemeCount } from '@/lib/theme';
+
+const ctx = await createContext(Astro.locals, Astro.request);
+const authCheck = requireAuth(ctx);
+if (authCheck) return authCheck;
+
+if (!hasPermission(ctx.user!.group || 'visitor', 'administrator')) {
+  return new Response('Forbidden', { status: 403 });
+}
+
+const { options, urls, user } = ctx;
+
+// Handle theme activation via POST
+let message = '';
+let messageType = '';
+
+if (Astro.request.method === 'POST') {
+  try {
+    const formData = await Astro.request.formData();
+    const action = formData.get('action') as string;
+    const themeId = formData.get('theme') as string;
+
+    if (action === 'activate' && themeId) {
+      const { setOption } = await import('@/lib/options');
+      const { themeExists } = await import('@/lib/theme');
+
+      if (themeExists(themeId)) {
+        await setOption(ctx.db, 'theme', themeId);
+        // Update local options to reflect change
+        (options as any).theme = themeId;
+        message = `主题已切换为 "${themeId}"`;
+        messageType = 'success';
+      } else {
+        message = `主题 "${themeId}" 不存在`;
+        messageType = 'error';
+      }
+    }
+  } catch (e) {
+    message = '操作失败';
+    messageType = 'error';
+  }
+}
+
+const themes = getAvailableThemes(options.theme || 'typecho-theme-minimal');
+const themeCount = getThemeCount();
+---
+<Admin title="外观" options={options} urls={urls} user={user} activeMenu="themes">
+  <div class="col-mb-12" role="main">
+    {message && (
+      <div class={`typecho-option-tabs notice ${messageType === 'error' ? 'notice-error' : 'notice-success'}`}
+        style={`padding: 10px 15px; margin-bottom: 20px; border-radius: 3px; ${messageType === 'error' ? 'background: #ffeaea; color: #c33;' : 'background: #e7f5e7; color: #3a3;'}`}>
+        <p>{message}</p>
+      </div>
+    )}
+
+    <div class="typecho-option-tabs">
+      <ul class="typecho-option-tabs-nav clearfix" style="margin-bottom: 20px;">
+        <li class="current"><a href="/admin/themes">已安装主题</a></li>
+      </ul>
+    </div>
+
+    <p class="description" style="margin-bottom: 20px;">
+      当前共有 {themeCount} 个可用主题。安装新主题：在 npm 搜索 keywords 包含 <code>typecho</code> 和 <code>theme</code> 的包，<code>pnpm add 包名</code> 安装后重新构建即可。
+    </p>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 20px;">
+      {themes.map((theme) => (
+        <div class="typecho-mini-panel" style={`border: 2px solid ${theme.isActive ? '#467B96' : '#e0e0e0'}; border-radius: 6px; overflow: hidden; position: relative;`}>
+          {/* Screenshot area */}
+          <div style="height: 180px; background: #f5f5f5; display: flex; align-items: center; justify-content: center; overflow: hidden;">
+            {theme.manifest.screenshot ? (
+              <img
+                src={theme.isDefault ? '/img/theme-default.png' : `/themes/${theme.id}/screenshot.${(theme.manifest.screenshot || 'png').split('.').pop()}`}
+                alt={theme.manifest.name}
+                style="width: 100%; height: 100%; object-fit: cover;"
+                onerror="this.style.display='none';this.parentElement.querySelector('.theme-fallback').style.display='block'"
+              />
+            ) : null}
+            <div class="theme-fallback" style={`text-align: center; color: #999; ${theme.manifest.screenshot ? 'display:none;' : ''}`}>
+              <div style="font-size: 28px; margin-bottom: 8px; font-weight: bold; color: #467B96;">T</div>
+              <div style="font-size: 13px;">{theme.manifest.name}</div>
+            </div>
+          </div>
+
+          {/* Active badge */}
+          {theme.isActive && (
+            <div style="position: absolute; top: 10px; right: 10px; background: #467B96; color: white; padding: 2px 10px; border-radius: 3px; font-size: 12px;">
+              当前使用
+            </div>
+          )}
+
+          {/* Theme info */}
+          <div style="padding: 15px;">
+            <h3 style="margin: 0 0 5px 0; font-size: 16px;">{theme.manifest.name || theme.id}</h3>
+            {theme.manifest.version && (
+              <span style="font-size: 12px; color: #999;">v{theme.manifest.version}</span>
+            )}
+
+            {theme.manifest.description && (
+              <p class="description" style="margin: 8px 0; font-size: 13px; color: #666; line-height: 1.5;">
+                {theme.manifest.description}
+              </p>
+            )}
+
+            <div style="font-size: 12px; color: #999; margin-bottom: 12px;">
+              {theme.manifest.author && (
+                <span>
+                  作者:
+                  {theme.manifest.authorUrl ? (
+                    <a href={theme.manifest.authorUrl} target="_blank" rel="noopener noreferrer">{theme.manifest.author}</a>
+                  ) : (
+                    theme.manifest.author
+                  )}
+                </span>
+              )}
+              {theme.isDefault && <span style="margin-left: 8px;">· 内置</span>}
+              {!theme.isDefault && <span style="margin-left: 8px;">· npm: {theme.packageName}</span>}
+            </div>
+
+            <div style="display: flex; gap: 8px; align-items: center;">
+              {theme.isActive ? (
+                <span class="btn" style="cursor: default; opacity: 0.6;">已启用</span>
+              ) : (
+                <form method="post" action="/admin/themes" style="display: inline;">
+                  <input type="hidden" name="action" value="activate" />
+                  <input type="hidden" name="theme" value={theme.id} />
+                  <button type="submit" class="btn primary">启用</button>
+                </form>
+              )}
+
+              {theme.manifest.homepage && (
+                <a href={theme.manifest.homepage} target="_blank" rel="noopener noreferrer"
+                  class="btn" style="text-decoration: none;">
+                  详情
+                </a>
+              )}
+
+              <a href={`${urls.siteUrl}/`} target="_blank" rel="noopener noreferrer"
+                class="btn" style="text-decoration: none;">
+                预览
+              </a>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+
+    {/* Installation guide */}
+    <div class="typecho-mini-panel" style="margin-top: 30px; padding: 20px;">
+      <h3 style="margin: 0 0 15px 0;">如何安装新主题</h3>
+      <ol style="margin: 0; padding-left: 20px; line-height: 2;">
+        <li>在 npm 搜索 keywords 同时包含 <code>typecho</code> 和 <code>theme</code> 的包</li>
+        <li>在项目根目录运行 <code>pnpm add 包名</code> 安装</li>
+        <li>重新构建/部署项目：<code>pnpm build</code></li>
+        <li>在此页面选择并启用新主题</li>
+      </ol>
+
+      <h4 style="margin: 20px 0 10px 0;">创建自定义主题</h4>
+      <p class="description" style="margin: 0; line-height: 1.8;">
+        创建一个 npm 包，在 <code>package.json</code> 的 <code>keywords</code> 中包含 <code>"typecho"</code> 和 <code>"theme"</code>，并包含以下文件：
+      </p>
+      <pre style="background: #f5f5f5; padding: 12px; border-radius: 4px; margin-top: 10px; overflow-x: auto;"><code>typecho-theme-myname/
+  ├── theme.json          # 主题描述文件 (必须)
+  ├── style.css           # 主样式表 (必须)
+  ├── screenshot.png      # 预览截图 (推荐, 280x180)
+  └── assets/             # 其他资源文件 (可选)
+
+// theme.json 示例:
+{'{'}
+  "id": "myname",
+  "name": "我的主题",
+  "description": "一个简洁的博客主题",
+  "author": "Your Name",
+  "version": "1.0.0",
+  "stylesheet": "style.css",
+  "screenshot": "screenshot.png"
+{'}'}</code></pre>
+    </div>
+  </div>
+</Admin>

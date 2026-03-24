@@ -1,0 +1,49 @@
+---
+import type { SiteOptions } from '@/lib/options';
+import type { computeUrls } from '@/lib/options';
+import { getThemeStylesheets } from '@/lib/theme';
+
+interface Props {
+  title?: string;
+  description?: string;
+  keywords?: string;
+  options: SiteOptions;
+  urls: ReturnType<typeof computeUrls>;
+  user?: any;
+  isLoggedIn?: boolean;
+  bodyClass?: string;
+}
+
+const {
+  title,
+  description,
+  keywords,
+  options,
+  urls,
+  user,
+  isLoggedIn = false,
+  bodyClass = '',
+} = Astro.props;
+
+const pageTitle = title ? `${title} - ${options.title}` : options.title;
+const themeStylesheets = getThemeStylesheets(options.theme || 'typecho-theme-minimal');
+---
+<!DOCTYPE html>
+<html lang={options.lang === 'zh_CN' ? 'zh-CN' : 'en'}>
+<head>
+  <meta charset={options.charset || 'UTF-8'} />
+  <meta name="renderer" content="webkit" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <title>{pageTitle}</title>
+  {description && <meta name="description" content={description} />}
+  {keywords && <meta name="keywords" content={keywords} />}
+  {themeStylesheets.map((href) => (
+    <link rel="stylesheet" href={href} />
+  ))}
+  <link rel="alternate" type="application/rss+xml" title={`${options.title} RSS`} href={urls.feedUrl} />
+  <slot name="head" />
+</head>
+<body class={bodyClass}>
+  <slot />
+</body>
+</html>

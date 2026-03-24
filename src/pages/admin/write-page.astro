@@ -1,0 +1,580 @@
+---
+import Admin from '@/layouts/Admin.astro';
+import { createContext, requireAuth } from '@/lib/context';
+import { hasPermission } from '@/lib/auth';
+import { eq, and } from 'drizzle-orm';
+import { schema } from '@/db';
+import { buildPermalink } from '@/lib/content';
+
+const ctx = await createContext(Astro.locals, Astro.request);
+const authCheck = requireAuth(ctx);
+if (authCheck) return authCheck;
+if (!hasPermission(ctx.user!.group || 'visitor', 'editor')) {
+  return new Response('Forbidden', { status: 403 });
+}
+
+const { db, options, urls, user } = ctx;
+const cid = Astro.url.searchParams.get('cid');
+let page: any = null;
+let isEdit = false;
+let customFields: { name: string; type: string; value: string }[] = [];
+
+if (cid) {
+  page = await db.query.contents.findFirst({ where: eq(schema.contents.cid, parseInt(cid, 10)) });
+  if (page) {
+    isEdit = true;
+
+    // Load custom fields
+    const fieldRows = await db.select().from(schema.fields)
+      .where(eq(schema.fields.cid, page.cid));
+    customFields = fieldRows.map(f => ({
+      name: f.name,
+      type: f.type || 'str',
+      value: f.type === 'int' ? String(f.int_value || 0)
+           : f.type === 'float' ? String(f.float_value || 0)
+           : (f.str_value || ''),
+    }));
+  }
+}
+
+const isMarkdown = !page || (page.text && page.text.indexOf('<!--markdown-->') >= 0);
+
+// Build preview URL
+const previewUrl = isEdit && page ? buildPermalink(page, urls.siteUrl, options.permalinkPattern, options.pagePattern) : '';
+
+// Fetch existing attachments for this page
+let attachments: any[] = [];
+if (isEdit && page) {
+  const rows = await db.select().from(schema.contents)
+    .where(and(eq(schema.contents.type, 'attachment'), eq(schema.contents.parent, page.cid)))
+    .orderBy(schema.contents.created);
+  attachments = rows.map(row => {
+    let meta: any = {};
+    try { meta = JSON.parse(row.text || '{}'); } catch {}
+    return {
+      cid: row.cid,
+      title: row.title,
+      url: meta.url || '',
+      size: meta.size || 0,
+      isImage: (meta.type || '').startsWith('image/'),
+    };
+  });
+}
+---
+<Admin
+  title={isEdit ? '编辑页面' : '创建新页面'}
+  options={options}
+  urls={urls}
+  user={user}
+  activeMenu={isEdit ? 'manage-pages' : 'write-page'}
+  bodyClass="typecho-post-area"
+>
+  <form action="/api/admin/content" method="post" name="write_page">
+    <div class="col-mb-12 col-tb-9" role="main">
+      {isEdit && page.type === 'page_draft' && (
+        <cite class="edit-draft-notice">当前正在编辑的是未发布的草稿</cite>
+      )}
+
+      <p class="title">
+        <label for="title" class="sr-only">标题</label>
+        <input type="text" id="title" name="title" autocomplete="off"
+          value={page?.title || ''} placeholder="标题" class="w-100 text title" />
+      </p>
+
+      <p class="mono url-slug">
+        <label for="slug" class="sr-only">网址缩略名</label>
+        <span id="preview-url">{isEdit ? previewUrl : ''}</span>
+        <input type="text" id="slug" name="slug" autocomplete="off"
+          value={page?.slug || ''} class="mono" placeholder={isEdit ? String(page?.cid) : '留空则使用页面ID'} style="display:none" />
+        <a href="#" id="edit-slug-btn" class="i-edit" title="编辑缩略名" style="margin-left:4px;"></a>
+      </p>
+
+      <p>
+        <label for="text" class="sr-only">页面内容</label>
+        <textarea style={`height: ${options.editorSize || 350}px`} autocomplete="off"
+          id="text" name="text" class="w-100 mono">{page?.text ? page.text.replace(/^<!--markdown-->/, '') : ''}</textarea>
+      </p>
+
+      <p class="submit clearfix">
+        <span class="left">
+          <button type="button" id="btn-cancel-preview" class="btn">取消预览</button>
+        </span>
+        <span class="right">
+          <input type="hidden" name="do" value={isEdit ? 'update' : 'create'} />
+          <input type="hidden" name="type" value="page" />
+          {isEdit && <input type="hidden" name="cid" value={String(page.cid)} />}
+          <button type="button" id="btn-preview" class="btn">预览页面</button>
+          <button type="submit" name="status" value="draft" id="btn-save" class="btn">保存草稿</button>
+          <button type="submit" name="status" value="publish" class="btn primary" id="btn-submit">发布页面</button>
+          {isMarkdown && <input type="hidden" name="markdown" value="1" />}
+        </span>
+      </p>
+    </div>
+
+    <div id="edit-secondary" class="col-mb-12 col-tb-3" role="complementary">
+      <ul class="typecho-option-tabs clearfix">
+        <li class="active w-50"><a href="#tab-advance">选项</a></li>
+        <li class="w-50"><a href="#tab-files" id="tab-files-btn">附件</a></li>
+      </ul>
+
+      <div id="tab-advance" class="tab-content">
+        <section class="typecho-post-option">
+          <label for="order" class="typecho-label">页面顺序</label>
+          <p><input type="text" id="order" name="order" value={String(page?.order || 0)} class="w-100" /></p>
+          <p class="description">为你的自定义页面设定一个序列值以后, 能够使得它们按此值从小到大排列</p>
+        </section>
+
+        <button type="button" id="advance-panel-btn" class="btn btn-xs">高级选项 <i class="i-caret-down"></i></button>
+        <div id="advance-panel">
+          <section class="typecho-post-option visibility-option">
+            <label for="visibility" class="typecho-label">公开度</label>
+            <p>
+              <select id="visibility" name="visibility">
+                <option value="publish" selected={(!page?.status || page?.status === 'publish')}>公开</option>
+                <option value="hidden" selected={page?.status === 'hidden'}>隐藏</option>
+              </select>
+            </p>
+          </section>
+
+          <section class="typecho-post-option">
+            <label for="template" class="typecho-label">自定义模板</label>
+            <p>
+              <input type="text" id="template" name="template" class="text w-100"
+                value={page?.template || ''} placeholder="留空使用默认模板" />
+            </p>
+            <p class="description">如果你为页面指定了自定义模板, 系统将按此模板来渲染页面</p>
+          </section>
+
+          <section class="typecho-post-option allow-option">
+            <label class="typecho-label">权限控制</label>
+            <ul>
+              <li>
+                <input id="allowComment" name="allowComment" type="checkbox" value="1"
+                  checked={page ? page.allowComment === '1' : true} />
+                <label for="allowComment">允许评论</label>
+              </li>
+              <li>
+                <input id="allowPing" name="allowPing" type="checkbox" value="1"
+                  checked={page ? page.allowPing === '1' : true} />
+                <label for="allowPing">允许被引用</label>
+              </li>
+              <li>
+                <input id="allowFeed" name="allowFeed" type="checkbox" value="1"
+                  checked={page ? page.allowFeed === '1' : true} />
+                <label for="allowFeed">允许在聚合中出现</label>
+              </li>
+            </ul>
+          </section>
+        </div>
+
+        <section class="typecho-post-option" id="custom-field-section">
+          <label class="typecho-label">自定义字段</label>
+          <table id="custom-fields-table" class="typecho-list-table" style="margin-bottom:8px;">
+            <thead>
+              <tr>
+                <th width="30%">字段名称</th>
+                <th width="15%">类型</th>
+                <th>字段值</th>
+                <th width="10%"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {customFields.map((f) => (
+                <tr>
+                  <td><input type="text" name="fieldNames[]" value={f.name} class="text w-100" /></td>
+                  <td>
+                    <select name={`fieldTypes[${f.name}]`} class="field-type-select">
+                      <option value="str" selected={f.type === 'str'}>字符</option>
+                      <option value="int" selected={f.type === 'int'}>整数</option>
+                      <option value="float" selected={f.type === 'float'}>小数</option>
+                    </select>
+                  </td>
+                  <td><textarea name={`fieldValues[${f.name}]`} class="text w-100 mono" rows="2">{f.value}</textarea></td>
+                  <td><button type="button" class="btn btn-xs remove-field">删除</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <button type="button" id="add-field-btn" class="btn btn-xs">增加字段</button>
+        </section>
+      </div>
+
+      <div id="tab-files" class="tab-content hidden">
+        <div id="upload-panel" class="p" data-cid={isEdit ? String(page.cid) : '0'}>
+          <div class="upload-area" draggable="true">
+            <p>拖放文件到这里<br />或 <a href="#" class="upload-file">选择文件上传</a></p>
+            <input type="file" id="file-input" multiple style="display:none" />
+          </div>
+          <ul id="file-list">
+            {attachments.map(att => (
+              <li data-cid={String(att.cid)} data-url={att.url} data-image={att.isImage ? '1' : '0'}>
+                <input type="hidden" name="attachment[]" value={String(att.cid)} />
+                <a class="insert" title="点击插入文件" href="#">{att.title}</a>
+                <div class="info">
+                  {att.size < 1024 ? att.size + ' B' : att.size < 1024*1024 ? Math.ceil(att.size/1024) + ' KB' : (att.size/(1024*1024)).toFixed(1) + ' MB'}
+                  {' '}<a class="delete" href="#" title="删除"><i class="i-delete"></i></a>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </div>
+  </form>
+
+  <Fragment slot="footer">
+    <script is:inline src="/js/hyperdown.js"></script>
+    <script is:inline src="/js/pagedown.js"></script>
+    <script is:inline src="/js/paste.js"></script>
+    <script is:inline src="/js/purify.js"></script>
+    <script is:inline>
+    $(document).ready(function () {
+      var textarea = $('#text'),
+          isFullScreen = false,
+          toolbar = $('<div class="editor" id="wmd-button-bar" />').insertBefore(textarea.parent()),
+          preview = $('<div id="wmd-preview" class="wmd-hidetab" />').insertAfter('.editor');
+
+      var options = {};
+
+      options.strings = {
+        bold: '加粗 <strong> Ctrl+B',
+        boldexample: '加粗文字',
+        italic: '斜体 <em> Ctrl+I',
+        italicexample: '斜体文字',
+        link: '链接 <a> Ctrl+L',
+        linkdescription: '请输入链接描述',
+        quote: '引用 <blockquote> Ctrl+Q',
+        quoteexample: '引用文字',
+        code: '代码 <pre><code> Ctrl+K',
+        codeexample: '请输入代码',
+        image: '图片 <img> Ctrl+G',
+        imagedescription: '请输入图片描述',
+        olist: '数字列表 <ol> Ctrl+O',
+        ulist: '普通列表 <ul> Ctrl+U',
+        litem: '列表项目',
+        heading: '标题 <h1>/<h2> Ctrl+H',
+        headingexample: '标题文字',
+        hr: '分割线 <hr> Ctrl+R',
+        more: '摘要分割线 <!--more--> Ctrl+M',
+        undo: '撤销 - Ctrl+Z',
+        redo: '重做 - Ctrl+Y',
+        redomac: '重做 - Ctrl+Shift+Z',
+        fullscreen: '全屏 - Ctrl+J',
+        exitFullscreen: '退出全屏 - Ctrl+E',
+        fullscreenUnsupport: '此浏览器不支持全屏操作',
+        imagedialog: '<p><b>插入图片</b></p><p>请在下方的输入框内输入要插入的远程图片地址</p>',
+        linkdialog: '<p><b>插入链接</b></p><p>请在下方的输入框内输入要插入的链接地址</p>',
+        ok: '确定',
+        cancel: '取消',
+        help: 'Markdown语法帮助'
+      };
+
+      var converter = new HyperDown(),
+          editor = new Markdown.Editor(converter, '', options);
+
+      converter.enableHtml(true);
+      converter.enableLine(true);
+      reloadScroll = scrollableEditor(textarea, preview);
+
+      converter.hook('makeHtml', function (html) {
+        html = html.replace('<p><!--more--></p>', '<!--more-->');
+        if (html.indexOf('<!--more-->') > 0) {
+          var parts = html.split(/\s*<\!\-\-more\-\->\s*/),
+              summary = parts.shift(),
+              details = parts.join('');
+          html = '<div class="summary">' + summary + '</div>'
+              + '<div class="details">' + details + '</div>';
+        }
+        html = html.replace(/<(iframe|embed)\s+([^>]*)>/ig, function (all, tag, src) {
+          if (src[src.length - 1] == '/') { src = src.substring(0, src.length - 1); }
+          return '<div class="embed"><strong>' + tag + '</strong> : ' + $.trim(src) + '</div>';
+        });
+        return DOMPurify.sanitize(html, {USE_PROFILES: {html: true}});
+      });
+
+      editor.hooks.chain('onPreviewRefresh', function () {
+        var images = $('img', preview), count = images.length;
+        if (count == 0) { reloadScroll(true); }
+        else {
+          images.bind('load error', function () {
+            count--;
+            if (count == 0) { reloadScroll(true); }
+          });
+        }
+      });
+
+      var th = textarea.height(), ph = preview.height();
+
+      editor.hooks.chain('enterFakeFullScreen', function () {
+        th = textarea.height(); ph = preview.height();
+        $(document.body).addClass('fullscreen');
+        var h = $(window).height() - toolbar.outerHeight();
+        textarea.css('height', h); preview.css('height', h);
+        isFullScreen = true;
+      });
+
+      editor.hooks.chain('enterFullScreen', function () {
+        $(document.body).addClass('fullscreen');
+        var h = window.screen.height - toolbar.outerHeight();
+        textarea.css('height', h); preview.css('height', h);
+        isFullScreen = true;
+      });
+
+      editor.hooks.chain('exitFullScreen', function () {
+        $(document.body).removeClass('fullscreen');
+        textarea.height(th); preview.height(ph);
+        isFullScreen = false;
+      });
+
+      editor.hooks.chain('commandExecuted', function () {
+        textarea.trigger('input');
+      });
+
+      editor.run();
+
+      // 编辑预览切换
+      var edittab = $('.editor').prepend('<div class="wmd-edittab"><a href="#wmd-editarea" class="active">撰写</a><a href="#wmd-preview">预览</a></div>'),
+          editarea = $(textarea.parent()).attr("id", "wmd-editarea");
+
+      $(".wmd-edittab a").click(function() {
+        $(".wmd-edittab a").removeClass('active');
+        $(this).addClass("active");
+        $("#wmd-editarea, #wmd-preview").addClass("wmd-hidetab");
+        var selected_tab = $(this).attr("href"),
+            selected_el = $(selected_tab).removeClass("wmd-hidetab");
+        if (selected_tab == "#wmd-preview") {
+          $("#wmd-button-row").addClass("wmd-visualhide");
+        } else {
+          $("#wmd-button-row").removeClass("wmd-visualhide");
+        }
+        $("#wmd-preview").outerHeight($("#wmd-editarea").innerHeight());
+        return false;
+      });
+
+      // 高级选项面板
+      $('#advance-panel-btn').click(function () {
+        $('#advance-panel').toggle();
+        return false;
+      });
+
+      // 缩略名编辑切换
+      $('#edit-slug-btn').click(function (e) {
+        e.preventDefault();
+        var slugInput = $('#slug');
+        if (slugInput.is(':visible')) {
+          slugInput.hide();
+        } else {
+          slugInput.show().focus();
+        }
+      });
+
+      // ========== 自定义字段 ==========
+      (function () {
+        var fieldIdx = 0;
+        $('#add-field-btn').click(function () {
+          fieldIdx++;
+          var name = 'newfield_' + fieldIdx;
+          var row = '<tr>'
+            + '<td><input type="text" name="fieldNames[]" value="" class="text w-100" placeholder="字段名" /></td>'
+            + '<td><select name="fieldTypes[' + name + ']" class="field-type-select"><option value="str">字符</option><option value="int">整数</option><option value="float">小数</option></select></td>'
+            + '<td><textarea name="fieldValues[' + name + ']" class="text w-100 mono" rows="2"></textarea></td>'
+            + '<td><button type="button" class="btn btn-xs remove-field">删除</button></td>'
+            + '</tr>';
+          $('#custom-fields-table tbody').append(row);
+        });
+
+        $(document).on('click', '.remove-field', function () {
+          $(this).closest('tr').remove();
+        });
+
+        $(document).on('change', '#custom-fields-table input[name="fieldNames[]"]', function () {
+          var newName = $(this).val();
+          var row = $(this).closest('tr');
+          row.find('.field-type-select').attr('name', 'fieldTypes[' + newName + ']');
+          row.find('textarea').attr('name', 'fieldValues[' + newName + ']');
+        });
+      })();
+
+      // 选项/附件 Tab 切换
+      $('.typecho-option-tabs a').click(function () {
+        var target = $(this).attr('href');
+        $('.typecho-option-tabs li').removeClass('active');
+        $(this).parent().addClass('active');
+        $('.tab-content').addClass('hidden');
+        $(target).removeClass('hidden');
+        return false;
+      });
+
+      // ========== 文件上传 ==========
+      (function () {
+        var uploadPanel = $('#upload-panel'),
+            cid = uploadPanel.data('cid') || 0,
+            fileInput = $('#file-input'),
+            fileList = $('#file-list');
+
+        function updateAttachmentNumber() {
+          var btn = $('#tab-files-btn'),
+              balloon = $('.balloon', btn),
+              count = $('#file-list li .insert').length;
+          if (count > 0) {
+            if (!balloon.length) {
+              btn.html($.trim(btn.html()) + ' ');
+              balloon = $('<span class="balloon"></span>').appendTo(btn);
+            }
+            balloon.html(count);
+          } else if (balloon.length) {
+            balloon.remove();
+          }
+        }
+
+        function fileUploadStart(name, id) {
+          $('<li id="upload-' + id + '" class="loading">' + name + '</li>').appendTo(fileList);
+        }
+
+        function fileUploadComplete(id, data) {
+          var li = $('#upload-' + id).removeClass('loading')
+            .data('cid', data.cid).data('url', data.url).data('image', data.isImage)
+            .html('<input type="hidden" name="attachment[]" value="' + data.cid + '" />'
+              + '<a class="insert" target="_blank" href="#" title="点击插入文件">' + data.title + '</a>'
+              + '<div class="info">' + data.bytes
+              + ' <a class="delete" href="#" title="删除"><i class="i-delete"></i></a></div>');
+          attachInsertEvent(li);
+          attachDeleteEvent(li);
+          updateAttachmentNumber();
+        }
+
+        function fileUploadError(id, msg) {
+          var exist = $('#upload-' + id);
+          if (exist.length) {
+            exist.removeClass('loading').html(msg).css('color', '#B94A48');
+            setTimeout(function () { exist.fadeOut(function () { $(this).remove(); }); }, 3000);
+          }
+        }
+
+        function doUpload(files) {
+          for (var i = 0; i < files.length; i++) {
+            (function (file, idx) {
+              var uid = Date.now().toString(36) + idx;
+              fileUploadStart(file.name, uid);
+
+              var fd = new FormData();
+              fd.append('file', file);
+              fd.append('cid', String(cid));
+
+              $.ajax({
+                url: '/api/admin/upload',
+                type: 'POST',
+                data: fd,
+                processData: false,
+                contentType: false,
+                dataType: 'json',
+                success: function (resp) {
+                  if ($.isArray(resp) && resp[1]) {
+                    fileUploadComplete(uid, resp[1]);
+                    if (!cid && resp[1].cid) cid = resp[1].cid;
+                  } else if (resp && resp.error) {
+                    fileUploadError(uid, file.name + ' 上传失败: ' + resp.error);
+                  }
+                },
+                error: function () {
+                  fileUploadError(uid, file.name + ' 上传失败');
+                }
+              });
+            })(files[i], i);
+          }
+        }
+
+        $('.upload-file').click(function (e) {
+          e.preventDefault();
+          fileInput.click();
+        });
+        fileInput.change(function () {
+          if (this.files && this.files.length) {
+            doUpload(this.files);
+            this.value = '';
+          }
+        });
+
+        var uploadArea = $('.upload-area');
+        uploadArea.on('dragenter dragover', function (e) {
+          e.preventDefault(); e.stopPropagation();
+          $(this).parent().addClass('drag');
+        }).on('dragleave dragend', function (e) {
+          e.preventDefault(); e.stopPropagation();
+          $(this).parent().removeClass('drag');
+        }).on('drop', function (e) {
+          e.preventDefault(); e.stopPropagation();
+          $(this).parent().removeClass('drag');
+          var files = e.originalEvent.dataTransfer.files;
+          if (files && files.length) doUpload(files);
+        });
+
+        function attachInsertEvent(el) {
+          $('.insert', el).click(function (e) {
+            e.preventDefault();
+            var t = $(this), p = t.parents('li'),
+                url = p.data('url'), isImage = p.data('image'),
+                title = t.text();
+            Typecho.insertFileToEditor(title, url, isImage);
+          });
+        }
+
+        function attachDeleteEvent(el) {
+          var name = $('a.insert', el).text();
+          $('.delete', el).click(function (e) {
+            e.preventDefault();
+            if (!confirm('确认要删除文件 ' + name + ' 吗?')) return;
+            var attachCid = $(el).data('cid');
+            $.ajax({
+              url: '/api/admin/upload?cid=' + attachCid,
+              type: 'DELETE',
+              dataType: 'json',
+              success: function () {
+                $(el).fadeOut(function () {
+                  $(this).remove();
+                  updateAttachmentNumber();
+                });
+              }
+            });
+          });
+        }
+
+        $('#file-list li').each(function () {
+          attachInsertEvent(this);
+          attachDeleteEvent(this);
+        });
+
+        updateAttachmentNumber();
+
+        // Convert absolute URL to relative path for portability
+        Typecho.insertFileToEditor = function (title, url, isImage) {
+          var textarea = $('#text'), sel = textarea.getSelection();
+          var relUrl = url;
+          try {
+            var u = new URL(url, location.origin);
+            relUrl = u.pathname;
+          } catch (e) {}
+          var md;
+          if (isImage == 1 || isImage === true) {
+            md = '![' + title + '](' + relUrl + ')';
+          } else {
+            md = '[' + title + '](' + relUrl + ')';
+          }
+          textarea.replaceSelection(md);
+          textarea.setSelection(sel.start + md.length, sel.start + md.length);
+          textarea.trigger('input');
+        };
+
+        if ($.fn.pastableTextarea) {
+          $('#text').pastableTextarea().on('pasteImage', function (e, data) {
+            if (data.blob) {
+              var file = new File([data.blob], data.name || ('paste-' + Date.now() + '.png'), { type: 'image/png' });
+              doUpload([file]);
+            }
+          });
+        }
+      })();
+    });
+    </script>
+  </Fragment>
+</Admin>

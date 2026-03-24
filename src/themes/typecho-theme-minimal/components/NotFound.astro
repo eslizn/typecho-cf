@@ -1,0 +1,79 @@
+---
+/**
+ * Minimal theme — NotFound (404) component
+ *
+ * Renders the 404 error page with a search form.
+ */
+import Base from '@/layouts/Base.astro';
+import type { ThemeNotFoundProps } from '@/lib/theme-props';
+
+type Props = ThemeNotFoundProps;
+
+const {
+  options,
+  urls,
+  user,
+  isLoggedIn,
+  pages,
+  sidebarData,
+  currentPath,
+  errorTitle,
+} = Astro.props;
+
+const isIndex = currentPath === '/';
+---
+<Base
+  title={errorTitle}
+  options={options}
+  urls={urls}
+  user={user}
+  isLoggedIn={isLoggedIn}
+>
+  <header id="header" class="clearfix">
+    <div class="container">
+      <div class="row">
+        <div class="site-name col-mb-12 col-9">
+          <a id="logo" href={urls.siteUrl + '/'}>{options.title}</a>
+          <p class="description">{options.description}</p>
+        </div>
+        <div class="site-search col-3 kit-hidden-tb">
+          <form id="search" method="post" action={urls.siteUrl + '/'} role="search">
+            <label for="s" class="sr-only">搜索关键字</label>
+            <input type="text" id="s" name="s" class="text" placeholder="输入关键字搜索" />
+            <button type="submit" class="submit">搜索</button>
+          </form>
+        </div>
+        <div class="col-mb-12">
+          <nav id="nav-menu" class="clearfix" role="navigation">
+            <a class:list={[{ current: isIndex }]} href={urls.siteUrl + '/'}>首页</a>
+            {pages.map((page) => (
+              <a href={page.permalink} title={page.title}>{page.title}</a>
+            ))}
+          </nav>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div id="body">
+    <div class="container">
+      <div class="row">
+        <div class="col-mb-12 col-tb-8 col-tb-offset-2">
+          <div class="error-page">
+            <h2 class="post-title">{errorTitle}</h2>
+            <p>你想查看的页面已被转移或删除了, 要不要搜索看看:</p>
+            <form method="post" action={urls.siteUrl + '/'}>
+              <p><input type="text" name="s" class="text" autofocus /></p>
+              <p><button type="submit" class="submit">搜索</button></p>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer id="footer" role="contentinfo">
+    &copy; {new Date().getFullYear()} <a href={urls.siteUrl}>{options.title}</a>.
+    由 <a href="https://github.com/eslizn/typecho-cf">Typecho CF</a> 强力驱动.
+  </footer>
+</Base>

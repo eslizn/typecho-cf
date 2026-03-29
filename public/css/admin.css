@@ -432,9 +432,9 @@ a.operate-reply { color: #545c30; }
 
 #custom-field.fold table, #custom-field.fold .description { display: none; }
 
-#custom-field .description { margin-top: 10px; text-align: right; }
+#custom-field .description { margin-top: 10px; overflow: hidden; }
 
-#custom-field .description button { float: left; }
+#custom-field .description button { float: left; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 #custom-field p.description { text-align: left; }
 
@@ -444,13 +444,23 @@ a.operate-reply { color: #545c30; }
 
 #custom-field .typecho-label a:hover { color: #467B96; text-decoration: none; }
 
-#custom-field table { margin-top: 10px; }
+#custom-field table { margin-top: 10px; width: 100%; border-collapse: collapse; table-layout: fixed; }
 
-#custom-field td { padding: 10px 5px; font-size: .92857em; border-bottom: 1px solid #F0F0EC; vertical-align: top; }
+#custom-field thead { display: none; }
+
+#custom-field tr { display: block; border-bottom: 1px solid #F0F0EC; padding: 6px 0; }
+
+#custom-field td { display: block; padding: 3px 0; font-size: .92857em; border: none; vertical-align: top; width: 100% !important; box-sizing: border-box; }
 
 #custom-field td label { font-size: 1em; font-weight: normal; }
 
-#custom-field select { height: 27px; }
+#custom-field td:last-child { text-align: left; padding-top: 4px; }
+
+#custom-field select { height: 27px; width: 100%; box-sizing: border-box; }
+
+#custom-field input.text, #custom-field textarea { width: 100%; box-sizing: border-box; }
+
+#custom-field .btn.remove-field { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .typecho-post-area .is-draft { background: #FFF1A8; }
 

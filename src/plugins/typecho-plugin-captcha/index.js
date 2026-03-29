@@ -127,10 +127,13 @@ export default function init({ addHook, pluginId }) {
       return commentData;
     }
 
-    // Get client IP
-    const ip = extra.request?.headers?.get('cf-connecting-ip')
-      || extra.request?.headers?.get('x-forwarded-for')
-      || '';
+    // Get client IP — prefer CF-Connecting-IP (single trusted value from Cloudflare).
+    // X-Forwarded-For may be "clientIP, proxy1, proxy2"; only the first entry is the real client.
+    const cfIp = extra.request?.headers?.get('cf-connecting-ip');
+    const xffRaw = extra.request?.headers?.get('x-forwarded-for');
+    const ip = cfIp
+      ? cfIp.trim()
+      : (xffRaw ? (xffRaw.split(',')[0] ?? '').trim() : '');
 
     try {
       const result = await verifyRecaptcha(token, config.server, config.api, ip);

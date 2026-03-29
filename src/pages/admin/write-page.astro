@@ -167,15 +167,17 @@ if (isEdit && page) {
           </section>
         </div>
 
-        <section class="typecho-post-option" id="custom-field-section">
-          <label class="typecho-label">自定义字段</label>
-          <table id="custom-fields-table" class="typecho-list-table" style="margin-bottom:8px;">
+        <div id="custom-field" class:list={[{ fold: customFields.length === 0 }]}>
+          <label class="typecho-label">
+            <a href="#custom-field-toggle" id="custom-field-toggle">自定义字段</a>
+          </label>
+          <table id="custom-fields-table">
             <thead>
               <tr>
-                <th width="30%">字段名称</th>
-                <th width="15%">类型</th>
+                <th>字段名称</th>
+                <th>类型</th>
                 <th>字段值</th>
-                <th width="10%"></th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -183,7 +185,7 @@ if (isEdit && page) {
                 <tr>
                   <td><input type="text" name="fieldNames[]" value={f.name} class="text w-100" /></td>
                   <td>
-                    <select name={`fieldTypes[${f.name}]`} class="field-type-select">
+                    <select name={`fieldTypes[${f.name}]`} class="field-type-select w-100">
                       <option value="str" selected={f.type === 'str'}>字符</option>
                       <option value="int" selected={f.type === 'int'}>整数</option>
                       <option value="float" selected={f.type === 'float'}>小数</option>
@@ -195,8 +197,10 @@ if (isEdit && page) {
               ))}
             </tbody>
           </table>
-          <button type="button" id="add-field-btn" class="btn btn-xs">增加字段</button>
-        </section>
+          <div class="description">
+            <button type="button" id="add-field-btn" class="btn btn-xs">增加字段</button>
+          </div>
+        </div>
       </div>
 
       <div id="tab-files" class="tab-content hidden">
@@ -371,6 +375,14 @@ if (isEdit && page) {
       // ========== 自定义字段 ==========
       (function () {
         var fieldIdx = 0;
+        var customField = $('#custom-field');
+
+        // 折叠/展开
+        $('#custom-field-toggle').click(function (e) {
+          e.preventDefault();
+          customField.toggleClass('fold');
+        });
+
         $('#add-field-btn').click(function () {
           fieldIdx++;
           var name = 'newfield_' + fieldIdx;
@@ -381,6 +393,8 @@ if (isEdit && page) {
             + '<td><button type="button" class="btn btn-xs remove-field">删除</button></td>'
             + '</tr>';
           $('#custom-fields-table tbody').append(row);
+          // 自动展开
+          customField.removeClass('fold');
         });
 
         $(document).on('click', '.remove-field', function () {

@@ -28,17 +28,6 @@ const commentsPostIntervalMinutes = options.commentsPostInterval
     <form method="post" action="/api/admin/options">
       <ul class="typecho-option">
         <li>
-          <label class="typecho-label" for="commentDateFormat">评论日期格式</label>
-          <input type="text" id="commentDateFormat" name="commentDateFormat" class="w-40 mono"
-            value={options.commentDateFormat || 'F jS, Y \\a\\t h:i a'} />
-          <p class="description">
-            这是一个默认的日期格式, 当你在评论中调用显示日期函数时, 如果没有指定日期格式, 将使用此格式输出
-          </p>
-        </li>
-      </ul>
-
-      <ul class="typecho-option">
-        <li>
           <label class="typecho-label" for="commentsListSize">评论列表数目</label>
           <input type="text" id="commentsListSize" name="commentsListSize" class="w-20"
             value={options.commentsListSize || '10'} />
@@ -64,7 +53,7 @@ const commentsPostIntervalMinutes = options.commentsPostInterval
             </li>
             <li>
               <input type="checkbox" id="commentsShowUrl" name="commentsShowUrl" value="1"
-                checked={options.commentsShowUrl !== false && options.commentsShowUrl !== '0'} />
+                checked={!!options.commentsShowUrl} />
               <label for="commentsShowUrl">评论者名称自动加上其个人主页链接</label>
             </li>
             <li>
@@ -74,7 +63,7 @@ const commentsPostIntervalMinutes = options.commentsPostInterval
             </li>
             <li>
               <input type="checkbox" id="commentsAvatar" name="commentsAvatar" value="1"
-                checked={options.commentsAvatar !== false && options.commentsAvatar !== '0'} />
+                checked={!!options.commentsAvatar} />
               <label for="commentsAvatar">启用 <a href="http://www.gravatar.com">Gravatar</a> 头像服务, 最高显示评级为</label>
               <select name="commentsAvatarRating" id="commentsAvatarRating">
                 <option value="G" selected={!options.commentsAvatarRating || options.commentsAvatarRating === 'G'}>G - 普遍级</option>

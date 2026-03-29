@@ -140,7 +140,7 @@ export function formatDate(timestamp: number, format: string, timezoneOffset = 2
   const date = new Date((timestamp + timezoneOffset) * 1000);
   const utcDate = new Date(date.getTime() + date.getTimezoneOffset() * 60000);
 
-  const Y = utcDate.getFullYear();
+  const Y = String(utcDate.getFullYear());
   const m = String(utcDate.getMonth() + 1).padStart(2, '0');
   const d = String(utcDate.getDate()).padStart(2, '0');
   const H = String(utcDate.getHours()).padStart(2, '0');
@@ -148,26 +148,27 @@ export function formatDate(timestamp: number, format: string, timezoneOffset = 2
   const s = String(utcDate.getSeconds()).padStart(2, '0');
   const n = String(utcDate.getMonth() + 1);
   const j = String(utcDate.getDate());
+  const c = new Date(timestamp * 1000).toISOString();
 
   const monthNames = [
     'January', 'February', 'March', 'April', 'May', 'June',
     'July', 'August', 'September', 'October', 'November', 'December',
   ];
-  const shortMonthNames = monthNames.map((m) => m.substring(0, 3));
+  const shortMonthNames = monthNames.map((name) => name.substring(0, 3));
+  const F = monthNames[utcDate.getMonth()];
+  const M = shortMonthNames[utcDate.getMonth()];
 
-  return format
-    .replace(/(?<!\\)Y/g, String(Y))
-    .replace(/(?<!\\)m/g, m)
-    .replace(/(?<!\\)d/g, d)
-    .replace(/(?<!\\)H/g, H)
-    .replace(/(?<!\\)i/g, i)
-    .replace(/(?<!\\)s/g, s)
-    .replace(/(?<!\\)n/g, n)
-    .replace(/(?<!\\)j/g, j)
-    .replace(/(?<!\\)F/g, monthNames[utcDate.getMonth()])
-    .replace(/(?<!\\)M/g, shortMonthNames[utcDate.getMonth()])
-    .replace(/(?<!\\)c/g, new Date(timestamp * 1000).toISOString())
-    .replace(/\\/g, '');
+  const replacements: Record<string, string> = { Y, m, d, H, i, s, n, j, F, M, c };
+
+  // Single-pass replacement: match either an escaped char (\X) or a format letter (X).
+  // This prevents substituted values from being re-processed by subsequent replacements.
+  return format.replace(/\\(.)|(Y|m|d|H|i|s|n|j|F|M|c)/g, (match, escaped, token) => {
+    if (escaped !== undefined) {
+      // \X — output the literal character X (strips the backslash)
+      return escaped;
+    }
+    return replacements[token] ?? match;
+  });
 }
 
 /**

@@ -3,6 +3,7 @@ import { getDb, schema } from '@/db';
 import { loadOptions } from '@/lib/options';
 import { getAuthCookies, validateAuthToken } from '@/lib/auth';
 import { setActivatedPlugins, parseActivatedPlugins, applyFilter, doHook } from '@/lib/plugin';
+import { getClientIp } from '@/lib/context';
 import { eq, and, sql } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 
@@ -44,6 +45,14 @@ export const POST: APIRoute = async ({ request, locals }) => {
     return new Response('不能对加密文章评论', { status: 403 });
   }
 
+  // Check if comments are auto-closed due to age
+  if (options.commentsAutoClose && options.commentsPostTimeout && content.created) {
+    const ageSeconds = Math.floor(Date.now() / 1000) - content.created;
+    if (ageSeconds > options.commentsPostTimeout) {
+      return new Response('评论已关闭（文章发布时间过长）', { status: 403 });
+    }
+  }
+
   // Check auth
   const cookieHeader = request.headers.get('cookie');
   const { token } = getAuthCookies(cookieHeader);
@@ -73,9 +82,20 @@ export const POST: APIRoute = async ({ request, locals }) => {
     }
   }
 
+  // Check referer URL matches the content's URL (anti-spam: ensure comment came from a real page view)
+  if (options.commentsCheckReferer) {
+    const refererHeader = request.headers.get('referer') || '';
+    const siteUrl = options.siteUrl?.replace(/\/$/, '') || '';
+    if (!refererHeader || (siteUrl && !refererHeader.startsWith(siteUrl))) {
+      return new Response('评论来源页 URL 不合法', { status: 403 });
+    }
+  }
+
+  // Resolve client IP once — used for anti-spam rate-limit and stored with the comment
+  const ip = getClientIp(request);
+
   // Anti-spam: check comment interval
   if (options.commentsPostIntervalEnable && !userId) {
-    const ip = request.headers.get('cf-connecting-ip') || request.headers.get('x-forwarded-for') || '';
     const recentComment = await db
       .select({ created: schema.comments.created })
       .from(schema.comments)
@@ -123,7 +143,6 @@ export const POST: APIRoute = async ({ request, locals }) => {
   }
 
   const now = Math.floor(Date.now() / 1000);
-  const ip = request.headers.get('cf-connecting-ip') || request.headers.get('x-forwarded-for') || '';
   const agent = request.headers.get('user-agent') || '';
 
   // Insert comment

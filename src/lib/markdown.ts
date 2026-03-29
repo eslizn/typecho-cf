@@ -2,40 +2,55 @@ import { marked } from 'marked';
 import sanitizeHtml from 'sanitize-html';
 import { applyFilter } from '@/lib/plugin';
 
+// ─── Shared sanitize config ──────────────────────────────────────────────────
+
+const SANITIZE_OPTIONS: sanitizeHtml.IOptions = {
+  allowedTags: sanitizeHtml.defaults.allowedTags.concat([
+    'img', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+    'pre', 'code', 'table', 'thead', 'tbody', 'tr', 'th', 'td',
+    'del', 'ins', 'details', 'summary', 'figure', 'figcaption',
+    'video', 'audio', 'source', 'iframe',
+  ]),
+  allowedAttributes: {
+    ...sanitizeHtml.defaults.allowedAttributes,
+    img: ['src', 'alt', 'title', 'width', 'height', 'loading'],
+    a: ['href', 'title', 'target', 'rel'],
+    code: ['class'],
+    pre: ['class'],
+    td: ['align', 'valign'],
+    th: ['align', 'valign'],
+    iframe: ['src', 'width', 'height', 'frameborder', 'allowfullscreen'],
+    video: ['src', 'controls', 'width', 'height'],
+    audio: ['src', 'controls'],
+    source: ['src', 'type'],
+  },
+};
+
 /**
- * Render markdown to HTML
+ * Unique placeholder used to survive markdown rendering + sanitization.
+ * Marked wraps a standalone line of plain text in <p>…</p>, so after
+ * rendering the placeholder appears as <p>TYPECHO_MORE_0</p> which we
+ * can reliably split on.
+ */
+const MORE_PLACEHOLDER = 'TYPECHO_MORE_0';
+const MORE_PLACEHOLDER_RE = /<p>\s*TYPECHO_MORE_0\s*<\/p>/;
+
+// ─── Strip <!--markdown--> prefix ────────────────────────────────────────────
+
+function stripMarkdownPrefix(text: string): string {
+  return text.startsWith('<!--markdown-->') ? text.slice('<!--markdown-->'.length) : text;
+}
+
+// ─── Public API ──────────────────────────────────────────────────────────────
+
+/**
+ * Render markdown to HTML (synchronous, no plugin hooks)
  */
 export function renderMarkdown(text: string): string {
   if (!text) return '';
-
-  // Typecho stores markdown with <!--markdown--> prefix
-  let content = text;
-  if (content.startsWith('<!--markdown-->')) {
-    content = content.replace('<!--markdown-->', '');
-  }
-
+  const content = stripMarkdownPrefix(text).replace(/<!--more-->/g, '');
   const html = marked.parse(content, { async: false }) as string;
-  return sanitizeHtml(html, {
-    allowedTags: sanitizeHtml.defaults.allowedTags.concat([
-      'img', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-      'pre', 'code', 'table', 'thead', 'tbody', 'tr', 'th', 'td',
-      'del', 'ins', 'details', 'summary', 'figure', 'figcaption',
-      'video', 'audio', 'source', 'iframe',
-    ]),
-    allowedAttributes: {
-      ...sanitizeHtml.defaults.allowedAttributes,
-      img: ['src', 'alt', 'title', 'width', 'height', 'loading'],
-      a: ['href', 'title', 'target', 'rel'],
-      code: ['class'],
-      pre: ['class'],
-      td: ['align', 'valign'],
-      th: ['align', 'valign'],
-      iframe: ['src', 'width', 'height', 'frameborder', 'allowfullscreen'],
-      video: ['src', 'controls', 'width', 'height'],
-      audio: ['src', 'controls'],
-      source: ['src', 'type'],
-    },
-  });
+  return sanitizeHtml(html, SANITIZE_OPTIONS);
 }
 
 /**
@@ -45,36 +60,16 @@ export function renderMarkdown(text: string): string {
 export async function renderMarkdownFiltered(text: string): Promise<string> {
   if (!text) return '';
 
-  let content = text;
-  if (content.startsWith('<!--markdown-->')) {
-    content = content.replace('<!--markdown-->', '');
-  }
+  let content = stripMarkdownPrefix(text);
+  // Remove <!--more--> from full-content renders — it is only meaningful
+  // for list/excerpt views where renderContentExcerpt() is used instead.
+  content = content.replace(/<!--more-->/g, '');
 
   // Apply content:markdown filter — plugins can modify the raw markdown
   content = await applyFilter('content:markdown', content);
 
   const html = marked.parse(content, { async: false }) as string;
-  let sanitized = sanitizeHtml(html, {
-    allowedTags: sanitizeHtml.defaults.allowedTags.concat([
-      'img', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-      'pre', 'code', 'table', 'thead', 'tbody', 'tr', 'th', 'td',
-      'del', 'ins', 'details', 'summary', 'figure', 'figcaption',
-      'video', 'audio', 'source', 'iframe',
-    ]),
-    allowedAttributes: {
-      ...sanitizeHtml.defaults.allowedAttributes,
-      img: ['src', 'alt', 'title', 'width', 'height', 'loading'],
-      a: ['href', 'title', 'target', 'rel'],
-      code: ['class'],
-      pre: ['class'],
-      td: ['align', 'valign'],
-      th: ['align', 'valign'],
-      iframe: ['src', 'width', 'height', 'frameborder', 'allowfullscreen'],
-      video: ['src', 'controls', 'width', 'height'],
-      audio: ['src', 'controls'],
-      source: ['src', 'type'],
-    },
-  });
+  let sanitized = sanitizeHtml(html, SANITIZE_OPTIONS);
 
   // Apply content:content filter — plugins can modify the rendered HTML
   sanitized = await applyFilter('content:content', sanitized);
@@ -83,8 +78,12 @@ export async function renderMarkdownFiltered(text: string): Promise<string> {
 }
 
 /**
- * Render content with <!--more--> support
- * Returns truncated HTML with a "read more" link when needed
+ * Render content with <!--more--> support.
+ *
+ * The full markdown source is rendered first so that reference-style links,
+ * footnotes, and other constructs that span the <!--more--> boundary are
+ * resolved correctly.  Only after a complete render is the output split at
+ * the <!--more--> marker to produce the excerpt.
  */
 export function renderContentExcerpt(
   text: string,
@@ -93,14 +92,23 @@ export function renderContentExcerpt(
 ): string {
   if (!text) return '';
 
-  const moreIndex = text.indexOf('<!--more-->');
-  if (moreIndex === -1) {
+  const content = stripMarkdownPrefix(text);
+
+  if (!content.includes('<!--more-->')) {
     return renderMarkdown(text);
   }
 
-  const excerpt = text.substring(0, moreIndex);
-  const html = renderMarkdown(excerpt);
-  return `${html}<p class="more"><a href="${permalink}" title="${moreText}">${moreText}</a></p>`;
+  // Surround the marker with blank lines before substituting the placeholder.
+  // This guarantees that marked wraps the placeholder in its own <p> block
+  // regardless of whether the author placed <!--more--> inline or between
+  // paragraphs — enabling a clean split on the rendered output.
+  const withPlaceholder = content.replace(/<!--more-->/g, '\n\n' + MORE_PLACEHOLDER + '\n\n');
+  const html = marked.parse(withPlaceholder, { async: false }) as string;
+  const sanitized = sanitizeHtml(html, SANITIZE_OPTIONS);
+
+  // Split on the rendered placeholder and keep only the excerpt (part before it).
+  const excerptHtml = sanitized.split(MORE_PLACEHOLDER_RE)[0];
+  return `${excerptHtml}<p class="more"><a href="${permalink}" title="${moreText}">${moreText}</a></p>`;
 }
 
 /**

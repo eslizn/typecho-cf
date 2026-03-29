@@ -454,6 +454,9 @@ pnpm run reset-password:cloudflare
 | `pnpm run dev` | 启动本地开发服务器 |
 | `pnpm run build` | 构建生产版本 |
 | `pnpm run deploy` | 构建并部署到 Cloudflare Workers |
+| `pnpm run test` | 运行所有单元测试和集成测试 |
+| `pnpm run test:watch` | 以监听模式运行测试（文件变更时自动重跑） |
+| `pnpm run test:coverage` | 运行测试并生成覆盖率报告 |
 | `pnpm run db:generate` | 生成 Drizzle 数据库迁移 |
 | `pnpm run db:studio` | 启动 Drizzle Studio 数据库管理界面 |
 | `pnpm run db:migrate` | 数据迁移工具（通用入口） |
@@ -462,6 +465,52 @@ pnpm run reset-password:cloudflare
 | `pnpm run db:migrate:dry-run` | 预览迁移（不写入） |
 | `pnpm run reset-password` | 重置用户密码（本地） |
 | `pnpm run reset-password:cloudflare` | 重置用户密码（Cloudflare） |
+
+---
+
+## 测试
+
+项目使用 [Vitest](https://vitest.dev) 作为测试框架，测试文件位于 `tests/` 目录。
+
+### 目录结构
+
+```
+tests/
+├── __mocks__/
+│   └── cloudflare-workers.ts  # cloudflare:workers 模块的 Node.js 桩
+├── unit/
+│   ├── auth.test.ts           # 认证模块单元测试（密码/Token/Cookie）
+│   ├── content.test.ts        # 内容工具单元测试（Permalink/日期格式化）
+│   ├── context.test.ts        # getClientIp() 单元测试
+│   └── options.test.ts        # 站点选项单元测试（loadOptions/setOption）
+└── integration/
+    ├── comment.test.ts        # POST /api/comment 集成测试
+    └── admin-options.test.ts  # POST /api/admin/options 集成测试
+```
+
+### 运行测试
+
+```bash
+# 运行所有测试（单次）
+pnpm run test
+
+# 监听模式（文件变更时自动重跑）
+pnpm run test:watch
+
+# 生成代码覆盖率报告
+pnpm run test:coverage
+```
+
+### 测试覆盖范围
+
+| 模块 | 单元测试 | 集成测试 |
+|------|----------|----------|
+| `lib/context.ts` - `getClientIp()` | ✅ 9 cases | — |
+| `lib/auth.ts` | ✅ 28 cases | — |
+| `lib/content.ts` | ✅ 27 cases | — |
+| `lib/options.ts` | ✅ 14 cases | — |
+| `pages/api/comment.ts` | — | ✅ 14 cases |
+| `pages/api/admin/options.ts` | — | ✅ 20 cases |
 
 ---
 
@@ -498,7 +547,7 @@ pnpm run reset-password:cloudflare
 |------|------|------|
 | 数据库 | `src/db/index.ts` | D1 → Drizzle ORM 连接 |
 | Schema | `src/db/schema.ts` | 7 张表的 Drizzle 定义 |
-| 上下文 | `src/lib/context.ts` | 每次请求初始化：DB、用户、选项、插件加载 |
+| 上下文 | `src/lib/context.ts` | 每次请求初始化：DB、用户、选项、插件加载；提供 `getClientIp()` 工具函数 |
 | 认证 | `src/lib/auth.ts` | 密码哈希（SHA-256 + salt）、Cookie 会话管理 |
 | 选项 | `src/lib/options.ts` | 站点设置加载与缓存（自动生成缺失的 secret） |
 | 内容 | `src/lib/content.ts` | Permalink 生成、日期格式化 |
@@ -524,6 +573,22 @@ pnpm run reset-password:cloudflare
      → 对应 page/api 处理
      → 布局渲染 (Base → Blog/Admin)
 ```
+
+### 客户端 IP 获取
+
+使用 `src/lib/context.ts` 中的 `getClientIp(request)` 工具函数统一获取客户端 IP，**不要**直接读取 Header：
+
+```typescript
+import { getClientIp } from '@/lib/context';
+
+const ip = getClientIp(request);
+```
+
+优先级规则：
+1. **`CF-Connecting-IP`** — Cloudflare 注入，始终为单个真实客户端 IP（最可靠）
+2. **`X-Forwarded-For`** — 可能是逗号分隔的多个 IP（`客户端IP, 代理1, 代理2`）；函数只取**第一个**
+
+> ⚠️ 不要直接使用 `X-Forwarded-For` 的完整值来匹配 IP，否则代理链中添加的 IP 会导致限流比较失败。
 
 ### Cloudflare 环境变量访问
 

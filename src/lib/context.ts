@@ -2,6 +2,31 @@
  * Request context - initializes DB, options, and user for each request
  * Equivalent to Typecho's Widget\Init bootstrap
  */
+
+/**
+ * Extract the real client IP address from a request.
+ *
+ * Priority:
+ *  1. CF-Connecting-IP  — set by Cloudflare to the true client IP (single value, always reliable)
+ *  2. X-Forwarded-For   — may be a comma-separated list such as "clientIP, proxy1, proxy2";
+ *                         only the *first* entry is the original client IP.
+ *
+ * The returned value is trimmed. Returns an empty string if no header is present.
+ */
+export function getClientIp(request: Request): string {
+  const cfIp = request.headers.get('cf-connecting-ip');
+  if (cfIp) return cfIp.trim();
+
+  const xff = request.headers.get('x-forwarded-for');
+  if (xff) {
+    // X-Forwarded-For: clientIP, proxy1, proxy2 — only the first entry is the real client
+    const firstIp = xff.split(',')[0];
+    return firstIp ? firstIp.trim() : '';
+  }
+
+  return '';
+}
+
 import { getDb, type Database } from '@/db';
 import { loadOptions, type SiteOptions, computeUrls } from '@/lib/options';
 import { getAuthCookies, validateAuthToken, hasPermission } from '@/lib/auth';

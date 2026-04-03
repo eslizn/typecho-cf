@@ -25,7 +25,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const mail = formData.get('mail')?.toString()?.trim() || '';
   const screenName = formData.get('screenName')?.toString()?.trim() || '';
   const url = formData.get('url')?.toString()?.trim() || '';
-  const group = formData.get('group')?.toString() || 'subscriber';
+  const groupInput = formData.get('group')?.toString() || 'subscriber';
+  const VALID_GROUPS = ['administrator', 'editor', 'contributor', 'subscriber'];
+  const group = VALID_GROUPS.includes(groupInput) ? groupInput : 'subscriber';
   const password = formData.get('password')?.toString() || '';
   const confirm = formData.get('confirm')?.toString() || '';
 

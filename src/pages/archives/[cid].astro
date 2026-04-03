@@ -21,9 +21,13 @@ const contentRow = await db.query.contents.findFirst({
 
 if (!contentRow) return new Response('Not Found', { status: 404 });
 
-// If it's a page, redirect to page route
+// If it's a page, redirect to page route using configured page pattern
 if (contentRow.type === 'page') {
-  return Astro.redirect(`/${contentRow.slug || contentRow.cid}.html`);
+  const pagePattern = (options.pagePattern as string) || '/{slug}.html';
+  const pageUrl = pagePattern
+    .replace(/\{cid\}/g, String(contentRow.cid))
+    .replace(/\{slug\}/g, contentRow.slug || String(contentRow.cid));
+  return Astro.redirect(pageUrl);
 }
 
 // Prepare data

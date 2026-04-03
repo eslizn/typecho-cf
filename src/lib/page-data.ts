@@ -72,12 +72,13 @@ function buildCommentTree(allComments: any[]): CommentNode[] {
 }
 
 async function buildGravatarMap(allComments: any[], avatarRating: string): Promise<Record<number, string>> {
-  const result: Record<number, string> = {};
-  for (const c of allComments) {
-    const hash = c.mail ? await sha256hex(c.mail) : '';
-    result[c.coid] = `https://gravatar.com/avatar/${hash}?d=identicon&s=40&r=${avatarRating}`;
-  }
-  return result;
+  const entries = await Promise.all(
+    allComments.map(async (c) => {
+      const hash = c.mail ? await sha256hex(c.mail) : '';
+      return [c.coid, `https://gravatar.com/avatar/${hash}?d=identicon&s=40&r=${avatarRating}`] as const;
+    })
+  );
+  return Object.fromEntries(entries);
 }
 
 function buildCommentOptions(options: any): CommentOptions {

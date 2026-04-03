@@ -24,7 +24,8 @@ export function paginate(
   baseUrl: string,
   maxVisible = 10
 ): PaginationInfo {
-  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const safePageSize = Math.max(1, pageSize);
+  const totalPages = Math.max(1, Math.ceil(totalItems / safePageSize));
   const page = Math.min(Math.max(1, currentPage), totalPages);
 
   // Calculate visible page numbers

@@ -72,11 +72,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const token = hash.split(':')[1];
   const cookieHeaders = setAuthCookieHeaders(uid, token);
 
-  return new Response(null, {
-    status: 302,
-    headers: {
-      Location: '/',
-      'Set-Cookie': cookieHeaders.join(', '),
-    },
-  });
+  const headers = new Headers();
+  headers.set('Location', '/');
+  for (const cookie of cookieHeaders) {
+    headers.append('Set-Cookie', cookie);
+  }
+  return new Response(null, { status: 302, headers });
 };

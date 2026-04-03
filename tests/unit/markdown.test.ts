@@ -114,3 +114,85 @@ describe('generateExcerpt', () => {
     expect(text).not.toContain('more');
   });
 });
+
+// ---------------------------------------------------------------------------
+// XSS prevention in renderContentExcerpt (security fix)
+// ---------------------------------------------------------------------------
+describe('renderContentExcerpt XSS prevention', () => {
+  it('escapes double quotes in permalink attribute', () => {
+    const html = renderContentExcerpt(
+      'intro<!--more-->rest',
+      '阅读更多',
+      '/post/" onmouseover="alert(1)',
+    );
+    // The double quotes should be escaped as &quot; preventing attribute breakout
+    expect(html).toContain('&quot;');
+    // The href value should be safely escaped, not creating a real onmouseover attribute
+    expect(html).not.toMatch(/onmouseover="alert/);
+    // The escaped version is safe: it's inside the href attribute value
+    expect(html).toContain('href="/post/&quot; onmouseover=&quot;alert(1)"');
+  });
+
+  it('escapes HTML tags in moreText', () => {
+    const html = renderContentExcerpt(
+      'intro<!--more-->rest',
+      '<script>alert("xss")</script>',
+      '/post/1/',
+    );
+    expect(html).not.toContain('<script>');
+    expect(html).toContain('&lt;script&gt;');
+  });
+
+  it('escapes & in permalink', () => {
+    const html = renderContentExcerpt(
+      'intro<!--more-->rest',
+      'more',
+      '/post?a=1&b=2',
+    );
+    expect(html).toContain('&amp;');
+  });
+
+  it('normal permalink and moreText render correctly', () => {
+    const html = renderContentExcerpt(
+      'intro<!--more-->rest',
+      '继续阅读',
+      '/archives/1/',
+    );
+    expect(html).toContain('href="/archives/1/"');
+    expect(html).toContain('继续阅读');
+    expect(html).toContain('class="more"');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// iframe sanitization (domain restriction fix)
+// ---------------------------------------------------------------------------
+describe('renderMarkdown iframe filtering', () => {
+  it('allows YouTube iframes', () => {
+    const md = '<iframe src="https://www.youtube.com/embed/dQw4w9WgXcQ"></iframe>';
+    const html = renderMarkdown(md);
+    expect(html).toContain('iframe');
+    expect(html).toContain('youtube.com');
+  });
+
+  it('allows Bilibili iframes', () => {
+    const md = '<iframe src="https://player.bilibili.com/player.html?bvid=BV1xx411c7mD"></iframe>';
+    const html = renderMarkdown(md);
+    expect(html).toContain('iframe');
+    expect(html).toContain('bilibili.com');
+  });
+
+  it('strips iframes from untrusted domains', () => {
+    const md = '<iframe src="https://evil.com/steal"></iframe>';
+    const html = renderMarkdown(md);
+    // sanitize-html strips the src attribute from untrusted domains
+    expect(html).not.toContain('evil.com');
+    expect(html).not.toContain('src=');
+  });
+
+  it('strips iframes with javascript: URLs', () => {
+    const md = '<iframe src="javascript:alert(1)"></iframe>';
+    const html = renderMarkdown(md);
+    expect(html).not.toContain('javascript:');
+  });
+});

@@ -58,7 +58,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
   const formData = await request.formData();
   const action = formData.get('do')?.toString() || 'create';
-  const type = formData.get('type')?.toString() || 'post';
+  const typeInput = formData.get('type')?.toString() || 'post';
+  const VALID_TYPES = ['post', 'page'];
+  const type = VALID_TYPES.includes(typeInput) ? typeInput : 'post';
   const cid = parseInt(formData.get('cid')?.toString() || '0', 10);
   const title = formData.get('title')?.toString()?.trim() || '';
   const isMarkdown = formData.get('markdown') === '1';
@@ -69,7 +71,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
   }
   // Slug: use provided value, otherwise leave empty and fill with cid after insert (Typecho convention)
   const slugInput = formData.get('slug')?.toString()?.trim() || '';
-  const status = formData.get('status')?.toString() || 'publish';
+  const statusInput = formData.get('status')?.toString() || 'publish';
+  const VALID_STATUSES = ['publish', 'draft', 'hidden', 'private'];
+  const status = VALID_STATUSES.includes(statusInput) ? statusInput : 'publish';
   const password = formData.get('password')?.toString()?.trim() || null;
   const allowComment = formData.get('allowComment') ? '1' : '0';
   const allowPing = formData.get('allowPing') ? '1' : '0';
@@ -292,6 +296,15 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const isPage = existing.type?.startsWith('page');
     await doHook(isPage ? 'page:delete' : 'post:delete', existing);
 
+    // Decrement meta counts before deleting relationships
+    const rels = await db.select({ mid: schema.relationships.mid })
+      .from(schema.relationships)
+      .where(eq(schema.relationships.cid, cid));
+    for (const rel of rels) {
+      await db.update(schema.metas)
+        .set({ count: sql`MAX(0, ${schema.metas.count} - 1)` })
+        .where(eq(schema.metas.mid, rel.mid));
+    }
     // Delete relationships and comments
     await db.delete(schema.relationships).where(eq(schema.relationships.cid, cid));
     await db.delete(schema.comments).where(eq(schema.comments.cid, cid));

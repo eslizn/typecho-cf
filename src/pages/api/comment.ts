@@ -27,6 +27,11 @@ export const POST: APIRoute = async ({ request, locals }) => {
     return new Response('评论内容不能为空', { status: 400 });
   }
 
+  // Limit comment text length
+  if (text.length > 10000) {
+    return new Response('评论内容过长', { status: 400 });
+  }
+
   // Check if content exists and allows comments
   const content = await db.query.contents.findFirst({
     where: eq(schema.contents.cid, cid),
@@ -79,6 +84,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
     }
     if (options.commentsRequireURL && !url) {
       return new Response('请填写网站地址', { status: 400 });
+    }
+    // Basic email format validation
+    if (mail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)) {
+      return new Response('邮箱格式不正确', { status: 400 });
     }
   }
 
@@ -191,9 +200,22 @@ export const POST: APIRoute = async ({ request, locals }) => {
   await doHook('feedback:finishComment', commentData);
 
   // Redirect back to the post
-  const referer = request.headers.get('referer') || `/archives/${cid}/`;
+  // Prevent open redirect: only use referer if it's a relative path or same-origin
+  let redirectUrl = `/archives/${cid}/#comments`;
+  const referer = request.headers.get('referer');
+  if (referer) {
+    try {
+      const refUrl = new URL(referer);
+      const siteHost = options.siteUrl ? new URL(options.siteUrl).host : '';
+      if (refUrl.host === siteHost || refUrl.host === new URL(request.url).host) {
+        redirectUrl = `${refUrl.pathname}${refUrl.search}#comments`;
+      }
+    } catch {
+      // Invalid referer URL, use default
+    }
+  }
   return new Response(null, {
     status: 302,
-    headers: { Location: `${referer}#comments` },
+    headers: { Location: redirectUrl },
   });
 };

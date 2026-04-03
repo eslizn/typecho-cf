@@ -7,7 +7,33 @@ import { eq, and, sql } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 
 export const POST: APIRoute = handler;
-export const GET: APIRoute = handler;
+
+// GET only for reading (JSON list for autocomplete), never for state changes
+export const GET: APIRoute = async ({ request, locals, url }) => {
+  const db = getDb(env.DB);
+  const options = await loadOptions(db);
+
+  const cookieHeader = request.headers.get('cookie');
+  const { token } = getAuthCookies(cookieHeader);
+  if (!token || !options.secret) return new Response('Unauthorized', { status: 401 });
+
+  const auth = await validateAuthToken(token, options.secret, db);
+  if (!auth || !hasPermission(auth.user.group || 'visitor', 'editor')) {
+    return new Response('Forbidden', { status: 403 });
+  }
+
+  const type = url.searchParams.get('type') || 'category';
+
+  // Return JSON list of metas (used for tag autocomplete)
+  const metas = await db.select({ mid: schema.metas.mid, name: schema.metas.name, slug: schema.metas.slug, count: schema.metas.count })
+    .from(schema.metas)
+    .where(eq(schema.metas.type, type))
+    .orderBy(schema.metas.name);
+  return new Response(JSON.stringify(metas), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+};
 
 async function handler({ request, locals, url }: { request: Request; locals: App.Locals; url: URL }) {
   const db = getDb(env.DB);
@@ -22,29 +48,14 @@ async function handler({ request, locals, url }: { request: Request; locals: App
     return new Response('Forbidden', { status: 403 });
   }
 
-  // Handle GET params for delete action
-  const isGet = request.method === 'GET';
-  let action: string, type: string, mid: number, name: string, slug: string, description: string;
-  let mids: number[] = [];  // For batch operations
-
-  if (isGet) {
-    action = url.searchParams.get('action') || '';
-    type = url.searchParams.get('type') || 'category';
-    mid = parseInt(url.searchParams.get('mid') || '0', 10);
-    name = '';
-    slug = '';
-    description = '';
-  } else {
-    const formData = await request.formData();
-    action = formData.get('action')?.toString() || url.searchParams.get('action') || '';
-    type = formData.get('type')?.toString() || url.searchParams.get('type') || 'category';
-    mid = parseInt(formData.get('mid')?.toString() || '0', 10);
-    name = formData.get('name')?.toString()?.trim() || '';
-    slug = formData.get('slug')?.toString()?.trim() || '';
-    description = formData.get('description')?.toString()?.trim() || '';
-    // Batch: read mid[] from form data
-    mids = formData.getAll('mid[]').map((v: any) => parseInt(v.toString(), 10)).filter(Boolean);
-  }
+  const formData = await request.formData();
+  const action = formData.get('action')?.toString() || url.searchParams.get('action') || '';
+  const type = formData.get('type')?.toString() || url.searchParams.get('type') || 'category';
+  const mid = parseInt(formData.get('mid')?.toString() || '0', 10);
+  const name = formData.get('name')?.toString()?.trim() || '';
+  const slug = formData.get('slug')?.toString()?.trim() || '';
+  const description = formData.get('description')?.toString()?.trim() || '';
+  const mids = formData.getAll('mid[]').map((v: any) => parseInt(v.toString(), 10)).filter(Boolean);
 
   const redirectTo = type === 'tag' ? '/admin/manage-tags' : '/admin/manage-categories';
 
@@ -125,18 +136,6 @@ async function handler({ request, locals, url }: { request: Request; locals: App
     }
 
     return new Response(null, { status: 302, headers: { Location: redirectTo } });
-  }
-
-  if (isGet && !action) {
-    // Return JSON list of metas (used for tag autocomplete)
-    const metas = await db.select({ mid: schema.metas.mid, name: schema.metas.name, slug: schema.metas.slug, count: schema.metas.count })
-      .from(schema.metas)
-      .where(eq(schema.metas.type, type))
-      .orderBy(schema.metas.name);
-    return new Response(JSON.stringify(metas), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
   }
 
   return new Response('Invalid action', { status: 400 });

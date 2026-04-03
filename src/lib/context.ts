@@ -3,6 +3,13 @@
  * Equivalent to Typecho's Widget\Init bootstrap
  */
 
+import { getDb, type Database } from '@/db';
+import { loadOptions, type SiteOptions, computeUrls } from '@/lib/options';
+import { getAuthCookies, validateAuthToken, hasPermission } from '@/lib/auth';
+import { setActivatedPlugins, parseActivatedPlugins, doHook } from '@/lib/plugin';
+import { schema } from '@/db';
+import { env } from 'cloudflare:workers';
+
 /**
  * Extract the real client IP address from a request.
  *
@@ -27,18 +34,14 @@ export function getClientIp(request: Request): string {
   return '';
 }
 
-import { getDb, type Database } from '@/db';
-import { loadOptions, type SiteOptions, computeUrls } from '@/lib/options';
-import { getAuthCookies, validateAuthToken, hasPermission } from '@/lib/auth';
-import { setActivatedPlugins, parseActivatedPlugins, doHook } from '@/lib/plugin';
-import { schema } from '@/db';
-import { env } from 'cloudflare:workers';
+/** Drizzle-inferred user row type */
+export type UserRow = typeof schema.users.$inferSelect;
 
 export interface RequestContext {
   db: Database;
   options: SiteOptions;
   urls: ReturnType<typeof computeUrls>;
-  user: typeof schema.users.$inferSelect | null;
+  user: UserRow | null;
   isLoggedIn: boolean;
 }
 
@@ -59,7 +62,7 @@ export async function createContext(locals: App.Locals, request: Request): Promi
   // Check auth
   const cookieHeader = request.headers.get('cookie');
   const { token } = getAuthCookies(cookieHeader);
-  let user: typeof schema.users.$inferSelect | null = null;
+  let user: UserRow | null = null;
   let isLoggedIn = false;
 
   if (token && options.secret) {

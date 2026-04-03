@@ -67,9 +67,16 @@ const FALLBACK_THEME: ThemeManifest = {
 };
 
 /**
+ * Module-level state — safe in Cloudflare Workers because:
+ * 1. Workers are single-threaded per request
+ * 2. themeRegistry is populated once at build time by the theme-loader integration
+ *    and is effectively read-only at runtime (no mutations after init)
+ */
+
+/**
  * Registry of all discovered themes
  * Key: theme ID (slug), Value: ThemeInfo
- * 
+ *
  * This is populated at build time by the theme-loader integration.
  * Themes are npm packages whose keywords contain both "typecho" and "theme".
  * The default theme is also discovered this way (typecho-theme-minimal package).

@@ -23,7 +23,7 @@
  */
 
 import { execSync } from 'node:child_process';
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes, pbkdf2Sync } from 'node:crypto';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -116,24 +116,25 @@ Examples:
 `);
 }
 
-// ─── Password Hashing (matches src/lib/auth.ts) ─────────────────────────────
+// ─── Password Hashing (matches src/lib/auth.ts — PBKDF2) ────────────────────
 
 function generateSalt(length: number): string {
   const array = randomBytes(length);
   return Array.from(array)
-    .map((b) => b.toString(36))
-    .join('')
-    .substring(0, length);
-}
-
-function sha256(message: string): string {
-  return createHash('sha256').update(message).digest('hex');
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
 }
 
 function hashPassword(password: string): string {
+  const iterations = 100000;
   const salt = generateSalt(16);
-  const hash = sha256(salt + password);
-  return `$SHA256$${salt}$${hash}`;
+  const hash = pbkdf2Hash(password, salt, iterations);
+  return `$PBKDF2$${iterations}$${salt}$${hash}`;
+}
+
+function pbkdf2Hash(password: string, salt: string, iterations: number): string {
+  const derived = pbkdf2Sync(password, salt, iterations, 32, 'sha256');
+  return derived.toString('hex');
 }
 
 function generateRandomPassword(length = 16): string {

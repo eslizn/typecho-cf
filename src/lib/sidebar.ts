@@ -80,7 +80,8 @@ export async function loadSidebarData(db: Database, siteUrl: string, permalinkPa
   // Archives (by month)
   const archiveRows = await db
     .select({
-      created: schema.contents.created,
+      year: sql<number>`cast(strftime('%Y', ${schema.contents.created}, 'unixepoch') as integer)`,
+      month: sql<number>`cast(strftime('%m', ${schema.contents.created}, 'unixepoch') as integer)`,
     })
     .from(schema.contents)
     .where(
@@ -89,25 +90,18 @@ export async function loadSidebarData(db: Database, siteUrl: string, permalinkPa
         eq(schema.contents.status, 'publish')
       )
     )
-    .orderBy(desc(schema.contents.created));
-
-  // Group by year/month
-  const archiveMap = new Map<string, { year: number; month: number }>();
-  for (const row of archiveRows) {
-    if (!row.created) continue;
-    const d = new Date(row.created * 1000);
-    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-    if (!archiveMap.has(key)) {
-      archiveMap.set(key, { year: d.getFullYear(), month: d.getMonth() + 1 });
-    }
-  }
+    .groupBy(
+      sql`strftime('%Y', ${schema.contents.created}, 'unixepoch')`,
+      sql`strftime('%m', ${schema.contents.created}, 'unixepoch')`,
+    )
+    .orderBy(desc(sql`strftime('%Y', ${schema.contents.created}, 'unixepoch')`), desc(sql`strftime('%m', ${schema.contents.created}, 'unixepoch')`));
 
   const monthNames = [
     'January', 'February', 'March', 'April', 'May', 'June',
     'July', 'August', 'September', 'October', 'November', 'December',
   ];
 
-  const archives = Array.from(archiveMap.values()).map((a) => ({
+  const archives = archiveRows.map((a) => ({
     date: `${monthNames[a.month - 1]} ${a.year}`,
     permalink: buildDateLink(a.year, a.month, undefined, siteUrl),
   }));

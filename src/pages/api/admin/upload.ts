@@ -116,6 +116,12 @@ export const DELETE: APIRoute = async ({ request, locals, url }) => {
       return new Response(JSON.stringify({ error: '附件不存在' }), { status: 404, headers: jsonHeaders });
     }
 
+    // Check ownership: non-admins can only delete their own attachments
+    const isAdmin = hasPermission(ctx.auth.user.group || 'visitor', 'administrator');
+    if (!isAdmin && attachment.authorId !== ctx.auth.uid) {
+      return new Response(JSON.stringify({ error: '无权删除此附件' }), { status: 403, headers: jsonHeaders });
+    }
+
     // Delete file from R2
     try {
       const meta = JSON.parse(attachment.text || '{}');

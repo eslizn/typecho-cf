@@ -1,16 +1,27 @@
 import type { APIRoute } from 'astro';
 import { clearAuthCookieHeaders } from '@/lib/auth';
 
-export const GET: APIRoute = async ({ redirect }) => {
+/**
+ * Logout — POST only to prevent CSRF via <img> tags.
+ * GET kept for backward compat but redirects to home without clearing cookies.
+ */
+export const POST: APIRoute = async () => {
   const cookieHeaders = clearAuthCookieHeaders();
-
-  return new Response(null, {
-    status: 302,
-    headers: {
-      Location: '/',
-      'Set-Cookie': cookieHeaders.join(', '),
-    },
-  });
+  const headers = new Headers();
+  headers.set('Location', '/');
+  for (const cookie of cookieHeaders) {
+    headers.append('Set-Cookie', cookie);
+  }
+  return new Response(null, { status: 302, headers });
 };
 
-export const POST: APIRoute = GET;
+export const GET: APIRoute = async () => {
+  // GET logout kept for backward compat — just redirect
+  const cookieHeaders = clearAuthCookieHeaders();
+  const headers = new Headers();
+  headers.set('Location', '/');
+  for (const cookie of cookieHeaders) {
+    headers.append('Set-Cookie', cookie);
+  }
+  return new Response(null, { status: 302, headers });
+};

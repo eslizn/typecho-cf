@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, uniqueIndex, index } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, real, uniqueIndex, index } from 'drizzle-orm/sqlite-core';
 
 // ==================== Users ====================
 export const users = sqliteTable('typecho_users', {
@@ -101,7 +101,7 @@ export const fields = sqliteTable('typecho_fields', {
   type: text('type').default('str'),
   str_value: text('str_value'),
   int_value: integer('int_value').default(0),
-  float_value: integer('float_value').default(0),
+  float_value: real('float_value').default(0),
 }, (table) => [
   uniqueIndex('typecho_fields_cid_name').on(table.cid, table.name),
   index('typecho_fields_int_value').on(table.int_value),

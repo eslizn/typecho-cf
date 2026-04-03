@@ -187,6 +187,15 @@ export type HookPoint = typeof HookPoints[keyof typeof HookPoints];
 // ==================== Plugin Registry ====================
 
 /**
+ * Module-level state — safe in Cloudflare Workers because:
+ * 1. Workers are single-threaded: only one request executes at a time per isolate
+ * 2. pluginRegistry and hookRegistry are populated once at module init (build time)
+ *    and are effectively read-only at runtime
+ * 3. activatedPlugins is re-initialized at the start of every request via
+ *    setActivatedPlugins() called from context.ts
+ */
+
+/**
  * Registry of all discovered plugins
  * Key: plugin ID, Value: PluginInfo
  */

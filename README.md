@@ -4,6 +4,126 @@
 
 保留了 Typecho 的数据库表结构、默认主题样式和管理后台功能，同时利用 Cloudflare 边缘网络实现极速响应。
 
+[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/eslizn/typecho-cf)
+
+## 快速开始
+
+### 前置要求
+
+- Node.js 18+
+- pnpm (`npm install -g pnpm`)
+- [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/)
+- Cloudflare 帐号（D1 数据库 + R2 存储桶）
+
+### 本地开发
+
+```bash
+# 安装依赖
+pnpm install
+
+# 启动开发服务器（本地 D1 + R2 由 wrangler 自动模拟）
+pnpm run dev
+```
+
+访问 http://localhost:4321，首次访问会自动跳转到安装向导。
+
+### 部署到 Cloudflare
+
+1. **创建 D1 数据库**：
+   ```bash
+   wrangler d1 create typecho-cf-db
+   ```
+
+2. **创建 R2 存储桶**：
+   ```bash
+   wrangler r2 bucket create typecho-cf-uploads
+   ```
+
+3. **更新 `wrangler.toml`**：将 `database_id` 替换为实际的 D1 数据库 ID
+
+4. **构建并部署**：
+   ```bash
+   pnpm run deploy
+   ```
+
+---
+
+## 从 PHP 版 Typecho 迁移数据
+
+项目提供了完整的数据迁移工具 `scripts/migrate.ts`，支持从 PHP 版 Typecho SQLite 数据库迁移到新系统。
+
+### 迁移到 Cloudflare (生产环境)
+
+```bash
+pnpm run db:migrate:cloudflare \
+  --source /path/to/typecho.db \
+  --uploads /path/to/usr/uploads
+```
+
+### 迁移到本地 (开发环境)
+
+```bash
+pnpm run db:migrate:local \
+  --source /path/to/typecho.db \
+  --uploads /path/to/usr/uploads
+```
+
+### 预览模式 (不写入数据)
+
+```bash
+pnpm run db:migrate:dry-run \
+  --source /path/to/typecho.db \
+  --uploads /path/to/usr/uploads
+```
+
+### 迁移后重置密码
+
+由于密码哈希算法不兼容（PHP phpass → SHA-256+salt），迁移后的用户需要重置密码：
+
+```bash
+# 本地环境
+pnpm run reset-password
+
+# Cloudflare 远程环境
+pnpm run reset-password:cloudflare
+```
+
+### 迁移选项
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `--source`, `-s` | 源 Typecho SQLite 数据库路径 | (必填) |
+| `--uploads`, `-u` | 源 `usr/uploads/` 目录路径 | (必填) |
+| `--target`, `-t` | 目标：`cloudflare` 或 `local` | `local` |
+| `--prefix` | 源表前缀 | `typecho_` |
+| `--dry-run`, `-n` | 预览模式，不执行写入 | `false` |
+| `--site-url` | 新站点 URL（附件 URL 重写） | — |
+| `--d1-name` | D1 数据库名 | `typecho-cf-db` |
+| `--r2-bucket` | R2 存储桶名 | `typecho-cf-uploads` |
+
+---
+
+## NPM Scripts
+
+| 命令 | 说明 |
+|------|------|
+| `pnpm run dev` | 启动本地开发服务器 |
+| `pnpm run build` | 构建生产版本 |
+| `pnpm run deploy` | 构建并部署到 Cloudflare Workers |
+| `pnpm run test` | 运行所有单元测试和集成测试 |
+| `pnpm run test:watch` | 以监听模式运行测试（文件变更时自动重跑） |
+| `pnpm run test:coverage` | 运行测试并生成覆盖率报告 |
+| `pnpm run db:generate` | 生成 Drizzle 数据库迁移 |
+| `pnpm run db:studio` | 启动 Drizzle Studio 数据库管理界面 |
+| `pnpm run db:migrate` | 数据迁移工具（通用入口） |
+| `pnpm run db:migrate:local` | 迁移数据到本地 |
+| `pnpm run db:migrate:cloudflare` | 迁移数据到 Cloudflare |
+| `pnpm run db:migrate:dry-run` | 预览迁移（不写入） |
+| `pnpm run reset-password` | 重置用户密码（本地） |
+| `pnpm run reset-password:cloudflare` | 重置用户密码（Cloudflare） |
+
+---
+
 ## 技术栈
 
 | 组件 | 技术 |
@@ -347,124 +467,6 @@ export default function({ addHook, HookPoints, pluginId }) {
 **配置优先级**: `plugin.json` > `package.json.typecho.plugin` > 自动推导
 
 参考示例：`src/plugins/typecho-plugin-captcha/`
-
----
-
-## 快速开始
-
-### 前置要求
-
-- Node.js 18+
-- pnpm (`npm install -g pnpm`)
-- [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/)
-- Cloudflare 帐号（D1 数据库 + R2 存储桶）
-
-### 本地开发
-
-```bash
-# 安装依赖
-pnpm install
-
-# 启动开发服务器（本地 D1 + R2 由 wrangler 自动模拟）
-pnpm run dev
-```
-
-访问 http://localhost:4321，首次访问会自动跳转到安装向导。
-
-### 部署到 Cloudflare
-
-1. **创建 D1 数据库**：
-   ```bash
-   wrangler d1 create typecho-cf-db
-   ```
-
-2. **创建 R2 存储桶**：
-   ```bash
-   wrangler r2 bucket create typecho-cf-uploads
-   ```
-
-3. **更新 `wrangler.toml`**：将 `database_id` 替换为实际的 D1 数据库 ID
-
-4. **构建并部署**：
-   ```bash
-   pnpm run deploy
-   ```
-
----
-
-## 从 PHP 版 Typecho 迁移数据
-
-项目提供了完整的数据迁移工具 `scripts/migrate.ts`，支持从 PHP 版 Typecho SQLite 数据库迁移到新系统。
-
-### 迁移到 Cloudflare (生产环境)
-
-```bash
-pnpm run db:migrate:cloudflare \
-  --source /path/to/typecho.db \
-  --uploads /path/to/usr/uploads
-```
-
-### 迁移到本地 (开发环境)
-
-```bash
-pnpm run db:migrate:local \
-  --source /path/to/typecho.db \
-  --uploads /path/to/usr/uploads
-```
-
-### 预览模式 (不写入数据)
-
-```bash
-pnpm run db:migrate:dry-run \
-  --source /path/to/typecho.db \
-  --uploads /path/to/usr/uploads
-```
-
-### 迁移后重置密码
-
-由于密码哈希算法不兼容（PHP phpass → SHA-256+salt），迁移后的用户需要重置密码：
-
-```bash
-# 本地环境
-pnpm run reset-password
-
-# Cloudflare 远程环境
-pnpm run reset-password:cloudflare
-```
-
-### 迁移选项
-
-| 参数 | 说明 | 默认值 |
-|------|------|--------|
-| `--source`, `-s` | 源 Typecho SQLite 数据库路径 | (必填) |
-| `--uploads`, `-u` | 源 `usr/uploads/` 目录路径 | (必填) |
-| `--target`, `-t` | 目标：`cloudflare` 或 `local` | `local` |
-| `--prefix` | 源表前缀 | `typecho_` |
-| `--dry-run`, `-n` | 预览模式，不执行写入 | `false` |
-| `--site-url` | 新站点 URL（附件 URL 重写） | — |
-| `--d1-name` | D1 数据库名 | `typecho-cf-db` |
-| `--r2-bucket` | R2 存储桶名 | `typecho-cf-uploads` |
-
----
-
-## NPM Scripts
-
-| 命令 | 说明 |
-|------|------|
-| `pnpm run dev` | 启动本地开发服务器 |
-| `pnpm run build` | 构建生产版本 |
-| `pnpm run deploy` | 构建并部署到 Cloudflare Workers |
-| `pnpm run test` | 运行所有单元测试和集成测试 |
-| `pnpm run test:watch` | 以监听模式运行测试（文件变更时自动重跑） |
-| `pnpm run test:coverage` | 运行测试并生成覆盖率报告 |
-| `pnpm run db:generate` | 生成 Drizzle 数据库迁移 |
-| `pnpm run db:studio` | 启动 Drizzle Studio 数据库管理界面 |
-| `pnpm run db:migrate` | 数据迁移工具（通用入口） |
-| `pnpm run db:migrate:local` | 迁移数据到本地 |
-| `pnpm run db:migrate:cloudflare` | 迁移数据到 Cloudflare |
-| `pnpm run db:migrate:dry-run` | 预览迁移（不写入） |
-| `pnpm run reset-password` | 重置用户密码（本地） |
-| `pnpm run reset-password:cloudflare` | 重置用户密码（Cloudflare） |
 
 ---
 

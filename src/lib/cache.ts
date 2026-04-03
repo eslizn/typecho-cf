@@ -43,12 +43,11 @@ export async function getCachedOptions(): Promise<Record<string, any> | null> {
 
 /**
  * Write options JSON to cache (TTL = 10 minutes).
- * Strips `secret` to avoid storing sensitive material in Cache API.
+ * Cache API storage is per-isolate and not publicly accessible.
  */
 export async function setCachedOptions(data: Record<string, any>): Promise<void> {
-  const { secret: _, ...safe } = data;
   const cache = caches.default;
-  const res = new Response(JSON.stringify(safe), {
+  const res = new Response(JSON.stringify(data), {
     headers: {
       'Content-Type': 'application/json',
       'Cache-Control': 'public, max-age=600',

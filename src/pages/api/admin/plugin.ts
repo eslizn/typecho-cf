@@ -7,6 +7,7 @@ import { getDb } from '@/db';
 import { loadOptions, setOption, deleteOption } from '@/lib/options';
 import { getAuthCookies, validateAuthToken, hasPermission } from '@/lib/auth';
 import { pluginExists, parseActivatedPlugins, setActivatedPlugins, getAvailablePlugins, pluginHasConfig, getPluginConfigDefaults } from '@/lib/plugin';
+import { purgeSiteCache } from '@/lib/cache';
 import { env } from 'cloudflare:workers';
 
 async function authenticate(request: Request) {
@@ -87,6 +88,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const newIds = Array.from(idSet);
     setActivatedPlugins(newIds);
     await setOption(auth.db, 'activatedPlugins', JSON.stringify(newIds));
+
+    // Purge all caches — plugin changes affect page rendering
+    await purgeSiteCache(auth.options.siteUrl || '');
 
     return new Response(JSON.stringify({
       success: true,

@@ -3,6 +3,7 @@ import { getDb, schema } from '@/db';
 import { loadOptions } from '@/lib/options';
 import { getAuthCookies, validateAuthToken, hasPermission } from '@/lib/auth';
 import { generateSlug } from '@/lib/content';
+import { purgeSiteCache } from '@/lib/cache';
 import { eq, and, sql } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 
@@ -72,6 +73,7 @@ async function handler({ request, locals, url }: { request: Request; locals: App
       order: 0,
     });
 
+    await purgeSiteCache(options.siteUrl || '');
     return new Response(null, { status: 302, headers: { Location: redirectTo } });
   }
 
@@ -85,6 +87,7 @@ async function handler({ request, locals, url }: { request: Request; locals: App
       description: description || null,
     }).where(eq(schema.metas.mid, mid));
 
+    await purgeSiteCache(options.siteUrl || '');
     return new Response(null, { status: 302, headers: { Location: redirectTo } });
   }
 
@@ -100,6 +103,7 @@ async function handler({ request, locals, url }: { request: Request; locals: App
       await db.delete(schema.metas).where(eq(schema.metas.mid, id));
     }
 
+    await purgeSiteCache(options.siteUrl || '');
     return new Response(null, { status: 302, headers: { Location: redirectTo } });
   }
 

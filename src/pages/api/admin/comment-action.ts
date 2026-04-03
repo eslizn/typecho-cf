@@ -2,6 +2,7 @@ import type { APIRoute } from 'astro';
 import { getDb, schema } from '@/db';
 import { loadOptions } from '@/lib/options';
 import { getAuthCookies, validateAuthToken, hasPermission } from '@/lib/auth';
+import { purgeContentCache } from '@/lib/cache';
 import { eq, sql } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 
@@ -68,6 +69,9 @@ export const GET: APIRoute = async ({ request, locals, url }) => {
         .where(eq(schema.contents.cid, comment.cid || 0));
     }
   }
+
+  // Purge edge cache for affected post
+  await purgeContentCache(options.siteUrl || '', comment.cid || 0);
 
   const referer = request.headers.get('referer') || '/admin/manage-comments';
   return new Response(null, {

@@ -2,6 +2,7 @@ import { eq, and } from 'drizzle-orm';
 import type { Database } from '@/db';
 import { schema } from '@/db';
 import { generateRandomString } from '@/lib/auth';
+import { getCachedOptions, setCachedOptions } from '@/lib/cache';
 
 export interface SiteOptions {
   theme: string;
@@ -57,6 +58,7 @@ export interface SiteOptions {
   editorSize: number;
   autoSave: number;
   xmlrpcMarkdown: number;
+  cacheEnabled: number;
   activatedPlugins: string;
   permalinkPattern: string;
   pagePattern: string;
@@ -111,6 +113,7 @@ const defaultOptions: Partial<SiteOptions> = {
   commentsAntiSpam: 1,
   commentsHTMLTagAllowed: null,
   attachmentTypes: '@image@',
+  cacheEnabled: 1,
   installed: 0,
   allowXmlRpc: 2,
   editorSize: 350,
@@ -119,9 +122,15 @@ const defaultOptions: Partial<SiteOptions> = {
 };
 
 /**
- * Load all global options from database
+ * Load all global options from database (with Cache API caching)
  */
 export async function loadOptions(db: Database): Promise<SiteOptions> {
+  // Try cache first
+  const cached = await getCachedOptions();
+  if (cached) {
+    return cached as unknown as SiteOptions;
+  }
+
   const rows = await db
     .select()
     .from(schema.options)
@@ -144,7 +153,7 @@ export async function loadOptions(db: Database): Promise<SiteOptions> {
     'commentsCheckReferer', 'commentsAutoClose', 'commentsPostIntervalEnable',
     'commentsPostInterval', 'commentsShowCommentOnly', 'commentsAvatar',
     'commentsAntiSpam', 'installed', 'allowXmlRpc', 'editorSize', 'autoSave',
-    'xmlrpcMarkdown', 'gzip',
+    'xmlrpcMarkdown', 'gzip', 'cacheEnabled',
   ];
 
   for (const key of numericKeys) {
@@ -160,6 +169,9 @@ export async function loadOptions(db: Database): Promise<SiteOptions> {
     // Persist to DB so it stays consistent across requests
     await setOption(db, 'secret', secret);
   }
+
+  // Write to cache for subsequent requests
+  await setCachedOptions(opts);
 
   return opts as unknown as SiteOptions;
 }

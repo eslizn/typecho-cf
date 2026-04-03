@@ -1,6 +1,7 @@
 /**
  * Sidebar data loader
  * Aggregates recent posts, comments, categories, and archives
+ * Uses db.batch() to execute all queries in a single D1 round-trip.
  */
 import { eq, desc, and, sql } from 'drizzle-orm';
 import type { Database } from '@/db';
@@ -16,24 +17,66 @@ export interface SidebarData {
 }
 
 export async function loadSidebarData(db: Database, siteUrl: string, permalinkPattern?: string | null, categoryPattern?: string | null): Promise<SidebarData> {
-  // Recent posts
-  const recentPostRows = await db
-    .select({
-      cid: schema.contents.cid,
-      title: schema.contents.title,
-      slug: schema.contents.slug,
-      type: schema.contents.type,
-      created: schema.contents.created,
-    })
-    .from(schema.contents)
-    .where(
-      and(
-        eq(schema.contents.type, 'post'),
-        eq(schema.contents.status, 'publish')
+  // Execute all 4 queries in a single D1 round-trip
+  const [recentPostRows, recentCommentRows, categoryRows, archiveRows] = await db.batch([
+    // Recent posts
+    db
+      .select({
+        cid: schema.contents.cid,
+        title: schema.contents.title,
+        slug: schema.contents.slug,
+        type: schema.contents.type,
+        created: schema.contents.created,
+      })
+      .from(schema.contents)
+      .where(
+        and(
+          eq(schema.contents.type, 'post'),
+          eq(schema.contents.status, 'publish')
+        )
       )
-    )
-    .orderBy(desc(schema.contents.created))
-    .limit(10);
+      .orderBy(desc(schema.contents.created))
+      .limit(10),
+
+    // Recent comments
+    db
+      .select({
+        coid: schema.comments.coid,
+        cid: schema.comments.cid,
+        author: schema.comments.author,
+        text: schema.comments.text,
+      })
+      .from(schema.comments)
+      .where(eq(schema.comments.status, 'approved'))
+      .orderBy(desc(schema.comments.created))
+      .limit(10),
+
+    // Categories
+    db
+      .select()
+      .from(schema.metas)
+      .where(eq(schema.metas.type, 'category'))
+      .orderBy(schema.metas.order),
+
+    // Archives (by month)
+    db
+      .select({
+        year: sql<number>`cast(strftime('%Y', ${schema.contents.created}, 'unixepoch') as integer)`,
+        month: sql<number>`cast(strftime('%m', ${schema.contents.created}, 'unixepoch') as integer)`,
+      })
+      .from(schema.contents)
+      .where(
+        and(
+          eq(schema.contents.type, 'post'),
+          eq(schema.contents.status, 'publish')
+        )
+      )
+      .groupBy(
+        sql`strftime('%Y', ${schema.contents.created}, 'unixepoch')`,
+        sql`strftime('%m', ${schema.contents.created}, 'unixepoch')`,
+      )
+      .orderBy(desc(sql`strftime('%Y', ${schema.contents.created}, 'unixepoch')`), desc(sql`strftime('%m', ${schema.contents.created}, 'unixepoch')`)),
+  ] as const);
 
   const recentPosts = recentPostRows.map((p) => ({
     title: p.title || '无标题',
@@ -44,31 +87,11 @@ export async function loadSidebarData(db: Database, siteUrl: string, permalinkPa
     ),
   }));
 
-  // Recent comments
-  const recentCommentRows = await db
-    .select({
-      coid: schema.comments.coid,
-      cid: schema.comments.cid,
-      author: schema.comments.author,
-      text: schema.comments.text,
-    })
-    .from(schema.comments)
-    .where(eq(schema.comments.status, 'approved'))
-    .orderBy(desc(schema.comments.created))
-    .limit(10);
-
   const recentComments = recentCommentRows.map((c) => ({
     author: c.author || '匿名',
     excerpt: (c.text || '').replace(/<[^>]+>/g, '').substring(0, 35) + (c.text && c.text.length > 35 ? '...' : ''),
     permalink: `${siteUrl.replace(/\/$/, '')}/archives/${c.cid}/#comment-${c.coid}`,
   }));
-
-  // Categories
-  const categoryRows = await db
-    .select()
-    .from(schema.metas)
-    .where(eq(schema.metas.type, 'category'))
-    .orderBy(schema.metas.order);
 
   const categories = categoryRows.map((c) => ({
     name: c.name || '',
@@ -76,25 +99,6 @@ export async function loadSidebarData(db: Database, siteUrl: string, permalinkPa
     count: c.count || 0,
     permalink: buildCategoryLink(c.slug || '', siteUrl, categoryPattern),
   }));
-
-  // Archives (by month)
-  const archiveRows = await db
-    .select({
-      year: sql<number>`cast(strftime('%Y', ${schema.contents.created}, 'unixepoch') as integer)`,
-      month: sql<number>`cast(strftime('%m', ${schema.contents.created}, 'unixepoch') as integer)`,
-    })
-    .from(schema.contents)
-    .where(
-      and(
-        eq(schema.contents.type, 'post'),
-        eq(schema.contents.status, 'publish')
-      )
-    )
-    .groupBy(
-      sql`strftime('%Y', ${schema.contents.created}, 'unixepoch')`,
-      sql`strftime('%m', ${schema.contents.created}, 'unixepoch')`,
-    )
-    .orderBy(desc(sql`strftime('%Y', ${schema.contents.created}, 'unixepoch')`), desc(sql`strftime('%m', ${schema.contents.created}, 'unixepoch')`));
 
   const monthNames = [
     'January', 'February', 'March', 'April', 'May', 'June',

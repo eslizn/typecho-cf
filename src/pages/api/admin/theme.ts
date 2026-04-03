@@ -7,6 +7,7 @@ import { getDb } from '@/db';
 import { loadOptions, setOption } from '@/lib/options';
 import { getAuthCookies, validateAuthToken, hasPermission } from '@/lib/auth';
 import { themeExists } from '@/lib/theme';
+import { purgeSiteCache } from '@/lib/cache';
 import { env } from 'cloudflare:workers';
 
 async function authenticate(request: Request) {
@@ -54,6 +55,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     // Save to options
     await setOption(auth.db, 'theme', themeId);
+
+    // Purge all caches — theme change affects all pages
+    await purgeSiteCache(auth.options.siteUrl || '');
 
     return new Response(JSON.stringify({ 
       success: true, 

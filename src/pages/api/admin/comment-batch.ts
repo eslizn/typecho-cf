@@ -2,6 +2,7 @@ import type { APIRoute } from 'astro';
 import { getDb, schema } from '@/db';
 import { loadOptions } from '@/lib/options';
 import { getAuthCookies, validateAuthToken, hasPermission } from '@/lib/auth';
+import { purgeContentCache } from '@/lib/cache';
 import { eq, sql } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 
@@ -97,6 +98,9 @@ async function handler({ request, locals, url }: { request: Request; locals: App
       }
     }
   }
+
+  // Purge edge cache — comments affect post pages and feeds
+  await purgeContentCache(options.siteUrl || '');
 
   const referer = request.headers.get('referer') || '/admin/manage-comments';
   return new Response(null, { status: 302, headers: { Location: referer } });

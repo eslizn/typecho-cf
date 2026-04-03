@@ -3,6 +3,7 @@ import { getDb, schema } from '@/db';
 import { loadOptions } from '@/lib/options';
 import { getAuthCookies, validateAuthToken } from '@/lib/auth';
 import { setActivatedPlugins, parseActivatedPlugins, applyFilter, doHook } from '@/lib/plugin';
+import { purgeContentCache } from '@/lib/cache';
 import { getClientIp } from '@/lib/context';
 import { eq, and, sql } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
@@ -198,6 +199,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
   // Trigger feedback:finishComment hook — plugins can act after comment saved
   await doHook('feedback:finishComment', commentData);
+
+  // Purge edge cache for the commented post
+  await purgeContentCache(options.siteUrl || '', cid);
 
   // Redirect back to the post
   // Prevent open redirect: only use referer if it's a relative path or same-origin

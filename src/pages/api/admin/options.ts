@@ -2,6 +2,7 @@ import type { APIRoute } from 'astro';
 import { getDb } from '@/db';
 import { loadOptions, setOption } from '@/lib/options';
 import { getAuthCookies, validateAuthToken, hasPermission } from '@/lib/auth';
+import { purgeSiteCache } from '@/lib/cache';
 
 import { env } from 'cloudflare:workers';
 
@@ -35,7 +36,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     'commentsAntiSpam', 'commentsHTMLTagAllowed', 'commentsAvatar',
     'commentsAvatarRating', 'commentsShowCommentOnly',
     'frontPage', 'frontArchive', 'attachmentTypes',
-    'editorSize',
+    'editorSize', 'cacheEnabled',
   ];
 
   // Handle permalinkPattern specially: if "custom" is selected, use customPattern value
@@ -93,7 +94,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
   const checkboxFieldsByPage: Record<string, string[]> = {
     '/admin/options-general': [
-      'allowRegister',
+      'allowRegister', 'cacheEnabled',
     ],
     '/admin/options-discussion': [
       'commentsShowCommentOnly', 'commentsAvatar', 'commentsShowUrl',
@@ -118,6 +119,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
       }
     }
   }
+
+  // Purge all caches when settings change
+  await purgeSiteCache(options.siteUrl || '');
+
   return new Response(null, {
     status: 302,
     headers: { Location: referer },

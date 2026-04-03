@@ -3,6 +3,7 @@ import { getDb, schema } from '@/db';
 import { loadOptions } from '@/lib/options';
 import { getAuthCookies, validateAuthToken, hasPermission } from '@/lib/auth';
 import { setActivatedPlugins, parseActivatedPlugins, doHook } from '@/lib/plugin';
+import { purgeContentCache } from '@/lib/cache';
 import { eq, sql } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 
@@ -95,6 +96,9 @@ async function handler({ request, locals, url }: { request: Request; locals: App
       }).where(eq(schema.contents.cid, cid));
     }
   }
+
+  // Purge edge cache
+  await purgeContentCache(options.siteUrl || '');
 
   const referer = request.headers.get('referer') || (type === 'page' ? '/admin/manage-pages' : '/admin/manage-posts');
   return new Response(null, { status: 302, headers: { Location: referer } });

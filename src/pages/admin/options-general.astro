@@ -62,6 +62,13 @@ const { options, urls, user } = ctx;
             value={options.attachmentTypes || '@image@'} /></p>
           <p class="description">使用逗号分隔, 如: <code>@image@</code> 代表所有图片类型, 支持 <code>jpg,png,gif,webp,svg,zip,pdf,mp3,mp4</code> 等扩展名. <code>@image@</code> 等同于 jpg,jpeg,png,gif,webp,bmp,tiff</p>
         </li>
+        <li>
+          <label class="typecho-label">
+            <input type="checkbox" name="cacheEnabled" value="1" checked={options.cacheEnabled !== 0} />
+            启用页面缓存
+          </label>
+          <p class="description">启用后，未登录用户访问的页面将在边缘节点缓存 5 分钟，可大幅减少数据库查询。管理员操作（发布、编辑、评论等）会自动清除相关缓存</p>
+        </li>
       </ul>
       <ul class="typecho-option typecho-option-submit">
         <li>

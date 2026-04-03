@@ -115,7 +115,10 @@ export const GET: APIRoute = async ({ locals, params }) => {
   }
 
   return new Response(xml, {
-    headers: { 'Content-Type': contentType },
+    headers: {
+      'Content-Type': contentType,
+      'Cache-Control': 'public, s-maxage=1800', // 30 min edge cache for feeds
+    },
   });
 };
 
@@ -162,6 +165,9 @@ async function generateCommentsFeed(
   }
 
   return new Response(xml, {
-    headers: { 'Content-Type': contentType },
+    headers: {
+      'Content-Type': contentType,
+      'Cache-Control': 'public, s-maxage=1800', // 30 min edge cache for comment feeds
+    },
   });
 }

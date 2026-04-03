@@ -6,7 +6,6 @@ import { setActivatedPlugins, parseActivatedPlugins, doHook } from '@/lib/plugin
 import { eq, sql } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 
-export const GET: APIRoute = handler;
 export const POST: APIRoute = handler;
 
 async function handler({ request, locals, url }: { request: Request; locals: App.Locals; url: URL }) {
@@ -30,7 +29,9 @@ async function handler({ request, locals, url }: { request: Request; locals: App
 
   // Get action from query params
   const action = url.searchParams.get('do') || '';
-  const markStatus = url.searchParams.get('status') || '';
+  const markStatusInput = url.searchParams.get('status') || '';
+  const VALID_STATUSES = ['publish', 'draft', 'hidden', 'private'];
+  const markStatus = VALID_STATUSES.includes(markStatusInput) ? markStatusInput : '';
   const type = url.searchParams.get('type') || 'post';
 
   // Get selected cids from form body or referer page's form
@@ -60,6 +61,15 @@ async function handler({ request, locals, url }: { request: Request; locals: App
       const isPage = content.type?.startsWith('page');
       await doHook(isPage ? 'page:delete' : 'post:delete', content);
 
+      // Decrement meta counts
+      const rels = await db.select({ mid: schema.relationships.mid })
+        .from(schema.relationships)
+        .where(eq(schema.relationships.cid, cid));
+      for (const rel of rels) {
+        await db.update(schema.metas)
+          .set({ count: sql`MAX(0, ${schema.metas.count} - 1)` })
+          .where(eq(schema.metas.mid, rel.mid));
+      }
       // Delete relationships, comments, fields, content
       await db.delete(schema.relationships).where(eq(schema.relationships.cid, cid));
       await db.delete(schema.comments).where(eq(schema.comments.cid, cid));

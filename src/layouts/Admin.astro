@@ -1,13 +1,14 @@
 ---
 import type { SiteOptions } from '@/lib/options';
 import type { computeUrls } from '@/lib/options';
+import type { UserRow } from '@/lib/context';
 import { hasPermission } from '@/lib/auth';
 
 interface Props {
   title: string;
   options: SiteOptions;
   urls: ReturnType<typeof computeUrls>;
-  user: any;
+  user: UserRow;
   activeMenu?: string;
   bodyClass?: string;
 }
@@ -65,14 +66,16 @@ const menuGroups = [
 ];
 
 // Determine which group is "focus" (has an active child)
-const focusGroupIdx = menuGroups.findIndex(g => g.children.some(c => c.active));
+// Compute index among visible (filtered) groups to match the .map() idx
+const visibleGroups = menuGroups.filter(g => g.show);
+const focusGroupIdx = visibleGroups.findIndex(g => g.children.some(c => c.active));
 ---
 <!DOCTYPE html>
-<html>
+<html lang={options.lang === 'zh_CN' ? 'zh-CN' : 'en'}>
 <head>
   <meta charset={options.charset || 'UTF-8'} />
   <meta name="renderer" content="webkit" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>{`${title} - ${options.title} - Powered by Typecho`}</title>
   <meta name="robots" content="noindex, nofollow" />
   <link rel="stylesheet" href="/css/normalize.css" />
@@ -84,21 +87,21 @@ const focusGroupIdx = menuGroups.findIndex(g => g.children.some(c => c.active));
   <div class="typecho-head-nav clearfix" role="navigation">
     <button class="menu-bar">菜单</button>
     <nav id="typecho-nav-list">
-      {menuGroups.filter(g => g.show).map((group, idx) => {
+      {visibleGroups.map((group, idx) => {
         const isFocus = idx === focusGroupIdx;
         const visibleChildren = group.children.filter(c => c.show);
         return (
           <ul class:list={['root', { focus: isFocus }]}>
             <li class="parent">
               <a href={visibleChildren[0]?.href || '#'}>{group.label}</a>
+              <ul class="child">
+                {visibleChildren.map(item => (
+                  <li class:list={[{ focus: item.active }]}>
+                    <a href={item.href}>{item.label}</a>
+                  </li>
+                ))}
+              </ul>
             </li>
-            <ul class="child">
-              {visibleChildren.map(item => (
-                <li class:list={[{ focus: item.active }]}>
-                  <a href={item.href}>{item.label}</a>
-                </li>
-              ))}
-            </ul>
           </ul>
         );
       })}

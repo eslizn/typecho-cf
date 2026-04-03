@@ -8,6 +8,7 @@
 import type { SiteOptions, computeUrls } from '@/lib/options';
 import type { SidebarData } from '@/lib/sidebar';
 import type { PaginationInfo } from '@/lib/pagination';
+import type { UserRow } from '@/lib/context';
 
 // ─── Base Props (shared by all theme components) ────────────────────────
 
@@ -17,7 +18,7 @@ export interface ThemeBaseProps {
   /** Computed URL set (siteUrl, adminUrl, feedUrl, etc.) */
   urls: ReturnType<typeof computeUrls>;
   /** Currently logged-in user (null = anonymous) */
-  user: any | null;
+  user: UserRow | null;
   /** Whether a user is logged in */
   isLoggedIn: boolean;
   /** Navigation pages (published pages shown in header nav) */

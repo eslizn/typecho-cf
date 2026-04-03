@@ -2,6 +2,17 @@ import { marked } from 'marked';
 import sanitizeHtml from 'sanitize-html';
 import { applyFilter } from '@/lib/plugin';
 
+// ─── HTML escape helper ─────────────────────────────────────────────────────
+
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // ─── Shared sanitize config ──────────────────────────────────────────────────
 
 const SANITIZE_OPTIONS: sanitizeHtml.IOptions = {
@@ -24,6 +35,7 @@ const SANITIZE_OPTIONS: sanitizeHtml.IOptions = {
     audio: ['src', 'controls'],
     source: ['src', 'type'],
   },
+  allowedIframeHostnames: ['www.youtube.com', 'player.bilibili.com', 'player.vimeo.com'],
 };
 
 /**
@@ -108,7 +120,7 @@ export function renderContentExcerpt(
 
   // Split on the rendered placeholder and keep only the excerpt (part before it).
   const excerptHtml = sanitized.split(MORE_PLACEHOLDER_RE)[0];
-  return `${excerptHtml}<p class="more"><a href="${permalink}" title="${moreText}">${moreText}</a></p>`;
+  return `${excerptHtml}<p class="more"><a href="${escapeHtml(permalink)}" title="${escapeHtml(moreText)}">${escapeHtml(moreText)}</a></p>`;
 }
 
 /**

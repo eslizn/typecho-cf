@@ -178,7 +178,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     });
   } catch (error) {
     console.error('Installation error:', error);
-    return new Response(`安装失败: ${error instanceof Error ? error.message : 'Unknown error'}`, {
+    return new Response('安装失败，请检查数据库配置', {
       status: 500,
     });
   }

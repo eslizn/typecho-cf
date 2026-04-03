@@ -2,7 +2,7 @@ import type { APIRoute } from 'astro';
 import { getDb, schema } from '@/db';
 import { loadOptions } from '@/lib/options';
 import { getAuthCookies, validateAuthToken, hashPassword } from '@/lib/auth';
-import { eq } from 'drizzle-orm';
+import { eq, and, ne } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 
 export const POST: APIRoute = async ({ request, locals }) => {
@@ -24,6 +24,19 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const passwordConfirm = formData.get('passwordConfirm')?.toString() || '';
 
   if (!mail) return new Response('邮箱不能为空', { status: 400 });
+
+  // Basic email format validation
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)) {
+    return new Response('邮箱格式不正确', { status: 400 });
+  }
+
+  // Check email uniqueness (exclude current user)
+  const existingMail = await db.query.users.findFirst({
+    where: and(eq(schema.users.mail, mail), ne(schema.users.uid, auth.uid)),
+  });
+  if (existingMail) {
+    return new Response('邮箱已被其他用户使用', { status: 409 });
+  }
 
   const updateData: Record<string, any> = {
     screenName,

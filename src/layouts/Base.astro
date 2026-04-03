@@ -1,6 +1,7 @@
 ---
 import type { SiteOptions } from '@/lib/options';
 import type { computeUrls } from '@/lib/options';
+import type { UserRow } from '@/lib/context';
 import { getThemeStylesheets } from '@/lib/theme';
 
 interface Props {
@@ -9,7 +10,7 @@ interface Props {
   keywords?: string;
   options: SiteOptions;
   urls: ReturnType<typeof computeUrls>;
-  user?: any;
+  user?: UserRow | null;
   isLoggedIn?: boolean;
   bodyClass?: string;
 }
@@ -33,7 +34,7 @@ const themeStylesheets = getThemeStylesheets(options.theme || 'typecho-theme-min
 <head>
   <meta charset={options.charset || 'UTF-8'} />
   <meta name="renderer" content="webkit" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>{pageTitle}</title>
   {description && <meta name="description" content={description} />}
   {keywords && <meta name="keywords" content={keywords} />}

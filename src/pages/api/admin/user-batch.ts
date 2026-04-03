@@ -5,7 +5,6 @@ import { getAuthCookies, validateAuthToken, hasPermission } from '@/lib/auth';
 import { eq, sql } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 
-export const GET: APIRoute = handler;
 export const POST: APIRoute = handler;
 
 async function handler({ request, locals, url }: { request: Request; locals: App.Locals; url: URL }) {
@@ -45,10 +44,13 @@ async function handler({ request, locals, url }: { request: Request; locals: App
       });
       if (!targetUser) continue;
 
-      // Re-assign content to current admin user
+      // Re-assign content and comments to current admin user
       await db.update(schema.contents)
         .set({ authorId: auth.uid })
         .where(eq(schema.contents.authorId, uid));
+      await db.update(schema.comments)
+        .set({ authorId: auth.uid })
+        .where(eq(schema.comments.authorId, uid));
 
       // Delete user
       await db.delete(schema.users).where(eq(schema.users.uid, uid));

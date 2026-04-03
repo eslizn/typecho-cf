@@ -32,30 +32,36 @@ export function hasPermission(userGroup: string, requiredGroup: string, strict =
 }
 
 /**
- * Hash a password using SHA-256 with salt (Cloudflare Workers compatible)
- * This replaces Typecho's phpass/PasswordHash
+ * Hash a password using PBKDF2 with a random salt (Cloudflare Workers compatible).
+ * Output format: $PBKDF2$iterations$salt$hash
  */
 export async function hashPassword(password: string): Promise<string> {
+  const iterations = 100000;
   const salt = generateSalt(16);
-  const hash = await sha256(salt + password);
-  return `$SHA256$${salt}$${hash}`;
+  const hash = await pbkdf2Hash(password, salt, iterations);
+  return `$PBKDF2$${iterations}$${salt}$${hash}`;
 }
 
 /**
- * Verify a password against a stored hash
+ * Verify a password against a stored hash.
+ * Supports PBKDF2 hashes. Legacy SHA-256 hashes return false to force password reset.
  */
 export async function verifyPassword(password: string, storedHash: string): Promise<boolean> {
-  if (storedHash.startsWith('$SHA256$')) {
-    // "$SHA256$salt$hash".split('$') => ['', 'SHA256', salt, hash] (length 4)
+  if (storedHash.startsWith('$PBKDF2$')) {
+    // "$PBKDF2$iterations$salt$hash".split('$') => ['', 'PBKDF2', iterations, salt, hash] (length 5)
     const parts = storedHash.split('$');
-    if (parts.length !== 4) return false;
-    const salt = parts[2];
-    const hash = parts[3];
-    if (!salt || !hash) return false;
-    const computed = await sha256(salt + password);
-    return hash === computed;
+    if (parts.length !== 5) return false;
+    const iterations = parseInt(parts[2], 10);
+    const salt = parts[3];
+    const hash = parts[4];
+    if (isNaN(iterations) || !salt || !hash) return false;
+    const computed = await pbkdf2Hash(password, salt, iterations);
+    return timeSafeEqual(hash, computed);
   }
-  // Fallback: direct comparison for migration
+  if (storedHash.startsWith('$SHA256$')) {
+    // Legacy SHA-256 hash — force password reset
+    return false;
+  }
   return false;
 }
 
@@ -91,7 +97,7 @@ export async function validateAuthToken(
   if (!user || !user.authCode) return null;
 
   const expected = await sha256(secret + `${uid}:${user.authCode}`);
-  if (hash !== expected) return null;
+  if (!timeSafeEqual(hash, expected)) return null;
 
   return { uid, user };
 }
@@ -113,10 +119,28 @@ export async function validateSecurityToken(
   uid: number
 ): Promise<boolean> {
   const expected = await generateSecurityToken(secret, authCode, uid);
-  return token === expected;
+  return timeSafeEqual(token, expected);
 }
 
 // ---- Utilities ----
+
+/**
+ * Constant-time string comparison to prevent timing attacks.
+ * Returns false if strings differ in length (without leaking which bytes differ).
+ */
+function timeSafeEqual(a: string, b: string): boolean {
+  const encoder = new TextEncoder();
+  const bufA = encoder.encode(a);
+  const bufB = encoder.encode(b);
+  if (bufA.byteLength !== bufB.byteLength) return false;
+  // Constant-time comparison: XOR all bytes and accumulate differences
+  // This avoids short-circuit evaluation that leaks timing information
+  let diff = 0;
+  for (let i = 0; i < bufA.byteLength; i++) {
+    diff |= bufA[i] ^ bufB[i];
+  }
+  return diff === 0;
+}
 
 async function sha256(message: string): Promise<string> {
   const msgUint8 = new TextEncoder().encode(message);
@@ -125,22 +149,65 @@ async function sha256(message: string): Promise<string> {
   return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+/**
+ * Derive a hex-encoded hash using PBKDF2 with SHA-256.
+ */
+async function pbkdf2Hash(password: string, salt: string, iterations: number): Promise<string> {
+  const encoder = new TextEncoder();
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(password),
+    'PBKDF2',
+    false,
+    ['deriveBits']
+  );
+  const derivedBits = await crypto.subtle.deriveBits(
+    {
+      name: 'PBKDF2',
+      salt: encoder.encode(salt),
+      iterations,
+      hash: 'SHA-256',
+    },
+    keyMaterial,
+    256
+  );
+  const hashArray = Array.from(new Uint8Array(derivedBits));
+  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Generate a cryptographically random salt of the given length (in bytes),
+ * returned as a hex-encoded string.
+ */
 function generateSalt(length: number): string {
   const array = new Uint8Array(length);
   crypto.getRandomValues(array);
   return Array.from(array)
-    .map((b) => b.toString(36))
-    .join('')
-    .substring(0, length);
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
 }
 
+/**
+ * Generate a cryptographically random alphanumeric string of the given length.
+ * Uses rejection sampling to avoid modulo bias.
+ */
 export function generateRandomString(length: number): string {
   const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  const array = new Uint8Array(length);
-  crypto.getRandomValues(array);
-  return Array.from(array)
-    .map((b) => chars[b % chars.length])
-    .join('');
+  const charsLen = chars.length; // 62
+  // Largest multiple of charsLen that fits in a byte (252 = 62 * 4)
+  const limit = 256 - (256 % charsLen);
+  const result: string[] = [];
+  while (result.length < length) {
+    const batch = new Uint8Array(length - result.length);
+    crypto.getRandomValues(batch);
+    for (const b of batch) {
+      if (result.length >= length) break;
+      if (b < limit) {
+        result.push(chars[b % charsLen]);
+      }
+    }
+  }
+  return result.join('');
 }
 
 // ---- Cookie helpers ----
@@ -165,7 +232,7 @@ export function getAuthCookies(cookieHeader: string | null): { token: string | n
 }
 
 export function setAuthCookieHeaders(uid: number, hash: string, maxAge = 30 * 24 * 3600): string[] {
-  const base = 'Path=/; HttpOnly; SameSite=Lax';
+  const base = 'Path=/; HttpOnly; Secure; SameSite=Lax';
   const opts = maxAge > 0 ? `${base}; Max-Age=${maxAge}` : base;
   return [
     `${AUTH_COOKIE_NAME}=${uid}; ${opts}`,
@@ -174,7 +241,7 @@ export function setAuthCookieHeaders(uid: number, hash: string, maxAge = 30 * 24
 }
 
 export function clearAuthCookieHeaders(): string[] {
-  const opts = 'Path=/; HttpOnly; SameSite=Lax; Max-Age=0';
+  const opts = 'Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0';
   return [
     `${AUTH_COOKIE_NAME}=; ${opts}`,
     `${AUTH_CODE_COOKIE_NAME}=; ${opts}`,

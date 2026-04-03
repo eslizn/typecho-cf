@@ -371,4 +371,100 @@ describe('POST /api/comment', () => {
     const updated = await testDb.query.contents.findFirst();
     expect(updated?.commentsNum).toBe(0);
   });
+
+  // ── New validation tests (security fixes) ──
+
+  it('returns 400 when comment text exceeds 10000 characters', async () => {
+    await seedOptions(testDb);
+    const content = await seedContent(testDb);
+    const longText = 'x'.repeat(10001);
+    const req = makeCommentRequest({
+      cid: String(content.cid),
+      text: longText,
+      author: 'Alice',
+    });
+    const res = await POST({ request: req, locals: {} } as any);
+    expect(res.status).toBe(400);
+    const body = await res.text();
+    expect(body).toContain('过长');
+  });
+
+  it('accepts comment text at exactly 10000 characters', async () => {
+    await seedOptions(testDb);
+    const content = await seedContent(testDb);
+    const exactText = 'x'.repeat(10000);
+    const req = makeCommentRequest({
+      cid: String(content.cid),
+      text: exactText,
+      author: 'Alice',
+    });
+    const res = await POST({ request: req, locals: {} } as any);
+    expect(res.status).toBe(302);
+  });
+
+  it('returns 400 when email format is invalid for anonymous user', async () => {
+    await seedOptions(testDb, { commentsRequireMail: '1' });
+    const content = await seedContent(testDb);
+    const req = makeCommentRequest({
+      cid: String(content.cid),
+      text: 'Hello',
+      author: 'Alice',
+      mail: 'not-an-email',
+    });
+    const res = await POST({ request: req, locals: {} } as any);
+    expect(res.status).toBe(400);
+    const body = await res.text();
+    expect(body).toContain('邮箱格式');
+  });
+
+  it('accepts valid email format for anonymous user', async () => {
+    await seedOptions(testDb, { commentsRequireMail: '1' });
+    const content = await seedContent(testDb);
+    const req = makeCommentRequest({
+      cid: String(content.cid),
+      text: 'Hello',
+      author: 'Alice',
+      mail: 'alice@example.com',
+    });
+    const res = await POST({ request: req, locals: {} } as any);
+    expect(res.status).toBe(302);
+  });
+
+  it('prevents open redirect in comment response', async () => {
+    await seedOptions(testDb, { siteUrl: 'https://example.com' });
+    const content = await seedContent(testDb);
+    const req = makeCommentRequest(
+      {
+        cid: String(content.cid),
+        text: 'Hello',
+        author: 'Alice',
+      },
+      { referer: 'https://evil.com/phishing' },
+    );
+    const res = await POST({ request: req, locals: {} } as any);
+    expect(res.status).toBe(302);
+    const location = res.headers.get('location') || '';
+    // Should NOT redirect to evil.com
+    expect(location).not.toContain('evil.com');
+    // Should redirect to a safe path
+    expect(location).toContain('#comments');
+  });
+
+  it('uses same-origin referer for redirect when valid', async () => {
+    await seedOptions(testDb, { siteUrl: 'https://example.com' });
+    const content = await seedContent(testDb);
+    const req = makeCommentRequest(
+      {
+        cid: String(content.cid),
+        text: 'Hello',
+        author: 'Alice',
+      },
+      { referer: 'https://example.com/archives/1/' },
+    );
+    const res = await POST({ request: req, locals: {} } as any);
+    expect(res.status).toBe(302);
+    const location = res.headers.get('location') || '';
+    expect(location).toContain('/archives/1/');
+    expect(location).toContain('#comments');
+  });
 });

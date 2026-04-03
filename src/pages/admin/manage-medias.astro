@@ -167,7 +167,7 @@ function formatBytes(bytes: number): string {
     </form>
 
     <div class="typecho-list-operate clearfix">
-      <form method="get">
+      <form method="post" class="operate-form">
         <div class="operate">
           <label><i class="sr-only">全选</i><input type="checkbox" class="typecho-table-select-all" /></label>
           <div class="btn-group btn-drop">
@@ -177,10 +177,11 @@ function formatBytes(bytes: number): string {
             </ul>
           </div>
         </div>
+
         {totalPages > 1 && (
           <ul class="typecho-pager">
             {page > 1 && <li><a href={`/admin/manage-medias?page=${page - 1}${keywords ? '&keywords=' + encodeURIComponent(keywords) : ''}`}>&laquo;</a></li>}
-            <li class="current"><a>{page}</a> / {totalPages}</li>
+            <li class="current"><a href="#">{page} / {totalPages}</a></li>
             {page < totalPages && <li><a href={`/admin/manage-medias?page=${page + 1}${keywords ? '&keywords=' + encodeURIComponent(keywords) : ''}`}>&raquo;</a></li>}
           </ul>
         )}

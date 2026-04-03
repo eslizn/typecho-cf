@@ -46,7 +46,7 @@ function buildCreateTable(table: SQLiteTable): string {
     if (col.hasDefault && col.default !== undefined) {
       const d = col.default;
       if (typeof d === 'string') {
-        parts.push(`DEFAULT '${d}'`);
+        parts.push(`DEFAULT '${d.replace(/'/g, "''")}'`);
       } else if (typeof d === 'number') {
         parts.push(`DEFAULT ${d}`);
       }

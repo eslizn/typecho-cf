@@ -12,7 +12,11 @@ export const POST: APIRoute = async ({ request, locals, redirect }) => {
   const formData = await request.formData();
   const name = formData.get('name')?.toString() || '';
   const password = formData.get('password')?.toString() || '';
-  const referer = formData.get('referer')?.toString() || '/admin/';
+  // Prevent open redirect: only allow relative paths starting with /
+  let referer = formData.get('referer')?.toString() || '/admin/';
+  if (!referer.startsWith('/') || referer.startsWith('//')) {
+    referer = '/admin/';
+  }
   const remember = formData.get('remember')?.toString() === '1';
 
   if (!name) {

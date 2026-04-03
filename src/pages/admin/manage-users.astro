@@ -134,7 +134,7 @@ const groupNames: Record<string, string> = {
       <div class="typecho-list-operate clearfix">
         <ul class="typecho-pager">
           {page > 1 && <li><a href={`/admin/manage-users?page=${page - 1}${keywords ? '&keywords=' + encodeURIComponent(keywords) : ''}`}>&laquo;</a></li>}
-          <li class="current"><a>{page}</a> / {totalPages}</li>
+          <li class="current"><a href="#">{page} / {totalPages}</a></li>
           {page < totalPages && <li><a href={`/admin/manage-users?page=${page + 1}${keywords ? '&keywords=' + encodeURIComponent(keywords) : ''}`}>&raquo;</a></li>}
         </ul>
       </div>

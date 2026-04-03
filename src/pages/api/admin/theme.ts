@@ -56,7 +56,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     // Save to options
     await setOption(auth.db, 'theme', themeId);
 
-    // Purge all caches — theme change affects all pages
+    // Theme change affects all pages
     await purgeSiteCache(auth.options.siteUrl || '');
 
     return new Response(JSON.stringify({ 

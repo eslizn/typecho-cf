@@ -63,6 +63,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
   }
 
   // ── Pagination URL Rewriting ──────────────────────────────────────────────
+  // Typecho uses /page/N/ suffix for pagination (e.g. /page/2/, /category/default/page/2/)
   const paginationMatch = path.match(/^(.*)\/page\/(\d+)\/?$/);
   if (paginationMatch) {
     const basePath = paginationMatch[1] || '';
@@ -98,7 +99,6 @@ export const onRequest = defineMiddleware(async (context, next) => {
   }
 
   // ── Edge Cache Layer ──────────────────────────────────────────────────────
-  // Only cache public GET requests for non-admin, non-API paths when cacheEnabled
   const isGetRequest = context.request.method === 'GET';
   const hasAuth = context.request.headers.get('cookie')?.includes('__typecho_uid');
   const isCacheable =
@@ -109,24 +109,28 @@ export const onRequest = defineMiddleware(async (context, next) => {
     !path.startsWith('/api/') &&
     !path.startsWith('/usr/');
 
-  if (isCacheable) {
-    const cache = caches.default;
-    const cacheKey = new Request(context.request.url, { method: 'GET' });
-    const cached = await cache.match(cacheKey);
+  // Reuse a single Request for both cache.match and cache.put
+  const cacheKey = isCacheable ? new Request(context.request.url, { method: 'GET' }) : null;
+
+  if (cacheKey) {
+    const cached = await caches.default.match(cacheKey);
     if (cached) {
       return cached;
     }
   }
 
   // ── Permalink URL Rewriting ────────────────────────────────────────────────
+  // After a rewrite the middleware runs again on the NEW path.
+  // To avoid infinite loops, skip rewriting for paths that already
+  // match an Astro built-in route (the rewrite targets).
   const postPattern = options.permalinkPattern as string | undefined;
   const pagePattern = options.pagePattern as string | undefined;
   const categoryPattern = options.categoryPattern as string | undefined;
 
   const builtInRoutes = [
-    /^\/archives\/\d+\/?$/,
-    /^\/[^/]+\.html$/,
-    /^\/category\/[^/]+\/?$/,
+    /^\/archives\/\d+\/?$/,       // post: /archives/{cid}/
+    /^\/[^/]+\.html$/,            // page: /{slug}.html
+    /^\/category\/[^/]+\/?$/,     // category: /category/{slug}/
     /^\/tag\//,
     /^\/author\//,
     /^\/search\//,
@@ -249,14 +253,10 @@ export const onRequest = defineMiddleware(async (context, next) => {
   const response = await next();
 
   // ── Write response to edge cache ──────────────────────────────────────────
-  if (isCacheable && response.status === 200) {
-    const cache = caches.default;
-    const cacheKey = new Request(context.request.url, { method: 'GET' });
-
-    // Clone response to add cache headers without mutating the original
+  if (cacheKey && response.status === 200) {
     const headers = new Headers(response.headers);
     if (!headers.has('Cache-Control')) {
-      headers.set('Cache-Control', 'public, s-maxage=300'); // 5 min edge cache
+      headers.set('Cache-Control', 'public, s-maxage=300');
     }
 
     const cacheable = new Response(response.clone().body, {
@@ -265,8 +265,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
       headers,
     });
 
-    // Write to edge cache (non-blocking via fire-and-forget)
-    cache.put(cacheKey, cacheable);
+    await caches.default.put(cacheKey, cacheable);
   }
 
   return response;

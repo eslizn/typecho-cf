@@ -97,7 +97,6 @@ async function handler({ request, locals, url }: { request: Request; locals: App
     }
   }
 
-  // Purge edge cache
   await purgeContentCache(options.siteUrl || '');
 
   const referer = request.headers.get('referer') || (type === 'page' ? '/admin/manage-pages' : '/admin/manage-posts');

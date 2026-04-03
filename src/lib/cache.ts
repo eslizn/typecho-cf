@@ -43,13 +43,15 @@ export async function getCachedOptions(): Promise<Record<string, any> | null> {
 
 /**
  * Write options JSON to cache (TTL = 10 minutes).
+ * Strips `secret` to avoid storing sensitive material in Cache API.
  */
 export async function setCachedOptions(data: Record<string, any>): Promise<void> {
+  const { secret: _, ...safe } = data;
   const cache = caches.default;
-  const res = new Response(JSON.stringify(data), {
+  const res = new Response(JSON.stringify(safe), {
     headers: {
       'Content-Type': 'application/json',
-      'Cache-Control': 'public, max-age=600', // 10 min
+      'Cache-Control': 'public, max-age=600',
     },
   });
   await cache.put(new Request(`${INTERNAL_ORIGIN}/__options`), res);
@@ -62,8 +64,8 @@ export async function setCachedOptions(data: Record<string, any>): Promise<void>
 export function buildContentPurgeUrls(siteUrl: string, cid?: number): string[] {
   const base = siteUrl.replace(/\/$/, '');
   const urls = [
-    base + '/',                 // index
-    base + '/feed',             // RSS
+    base + '/',
+    base + '/feed',
     base + '/feed/atom',
     base + '/feed/rss',
     base + '/feed/comments',
@@ -75,29 +77,20 @@ export function buildContentPurgeUrls(siteUrl: string, cid?: number): string[] {
 }
 
 /**
- * Purge everything related to content changes (index + feeds + options + specific post).
+ * Purge content-related cache entries (index + feeds + specific post).
+ * Does NOT purge the options cache — use purgeSiteCache for settings changes.
  */
 export async function purgeContentCache(siteUrl: string, cid?: number): Promise<void> {
-  await Promise.all([
-    purgeCache(buildContentPurgeUrls(siteUrl, cid)),
-    purgeOptionsCache(),
-  ]);
+  await purgeCache(buildContentPurgeUrls(siteUrl, cid));
 }
 
 /**
- * Purge site-wide cache: index + all feeds.
+ * Purge site-wide cache: index + all feeds + options.
  * Used when site settings, theme, or plugin change.
  */
 export async function purgeSiteCache(siteUrl: string): Promise<void> {
-  const base = siteUrl.replace(/\/$/, '');
   await Promise.all([
-    purgeCache([
-      base + '/',
-      base + '/feed',
-      base + '/feed/atom',
-      base + '/feed/rss',
-      base + '/feed/comments',
-    ]),
+    purgeCache(buildContentPurgeUrls(siteUrl)),
     purgeOptionsCache(),
   ]);
 }

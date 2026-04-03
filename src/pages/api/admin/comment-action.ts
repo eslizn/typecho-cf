@@ -70,7 +70,6 @@ export const GET: APIRoute = async ({ request, locals, url }) => {
     }
   }
 
-  // Purge edge cache for affected post
   await purgeContentCache(options.siteUrl || '', comment.cid || 0);
 
   const referer = request.headers.get('referer') || '/admin/manage-comments';

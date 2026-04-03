@@ -99,7 +99,7 @@ async function handler({ request, locals, url }: { request: Request; locals: App
     }
   }
 
-  // Purge edge cache — comments affect post pages and feeds
+  // Comments affect post pages and feeds
   await purgeContentCache(options.siteUrl || '');
 
   const referer = request.headers.get('referer') || '/admin/manage-comments';

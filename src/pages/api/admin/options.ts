@@ -120,7 +120,6 @@ export const POST: APIRoute = async ({ request, locals }) => {
     }
   }
 
-  // Purge all caches when settings change
   await purgeSiteCache(options.siteUrl || '');
 
   return new Response(null, {

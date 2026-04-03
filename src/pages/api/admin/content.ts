@@ -182,7 +182,6 @@ export const POST: APIRoute = async ({ request, locals }) => {
     }
     await doHook(type === 'page' ? 'page:finishSave' : 'post:finishSave', finishData);
 
-    // Purge edge cache
     await purgeContentCache(options.siteUrl || '', newCid);
 
     const editUrl = type === 'page' ? `/admin/write-page?cid=${newCid}` : `/admin/write-post?cid=${newCid}`;
@@ -278,7 +277,6 @@ export const POST: APIRoute = async ({ request, locals }) => {
       }
     }
 
-    // Purge edge cache
     await purgeContentCache(options.siteUrl || '', cid);
 
     const editUrl = type === 'page' ? `/admin/write-page?cid=${cid}` : `/admin/write-post?cid=${cid}`;
@@ -321,7 +319,6 @@ export const POST: APIRoute = async ({ request, locals }) => {
     // Trigger post-delete hook
     await doHook(isPage ? 'page:finishDelete' : 'post:finishDelete', existing);
 
-    // Purge edge cache
     await purgeContentCache(options.siteUrl || '', cid);
 
     const redirectTo = isPage ? '/admin/manage-pages' : '/admin/manage-posts';

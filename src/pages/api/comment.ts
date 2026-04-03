@@ -200,7 +200,6 @@ export const POST: APIRoute = async ({ request, locals }) => {
   // Trigger feedback:finishComment hook — plugins can act after comment saved
   await doHook('feedback:finishComment', commentData);
 
-  // Purge edge cache for the commented post
   await purgeContentCache(options.siteUrl || '', cid);
 
   // Redirect back to the post

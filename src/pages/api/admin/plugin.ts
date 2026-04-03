@@ -89,7 +89,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     setActivatedPlugins(newIds);
     await setOption(auth.db, 'activatedPlugins', JSON.stringify(newIds));
 
-    // Purge all caches — plugin changes affect page rendering
+    // Plugin changes affect page rendering
     await purgeSiteCache(auth.options.siteUrl || '');
 
     return new Response(JSON.stringify({

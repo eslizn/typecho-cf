@@ -1,6 +1,6 @@
 # Typecho-CF
 
-[English](README.en.md) | 中文
+[English](README.en.md)
 
 基于 [Typecho](https://typecho.org) 完整重写的现代博客系统，运行在 **Astro + Cloudflare Workers + D1** 之上。保留 Typecho 数据库表结构，支持从 PHP 版 Typecho 直接迁移数据。
 

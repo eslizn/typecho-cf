@@ -1,6 +1,6 @@
 # Typecho-CF
 
-中文 | [English](README.en.md)
+[English](README.en.md)
 
 A modern rewrite of [Typecho](https://typecho.org) in TypeScript, running on **Astro + Cloudflare Workers + D1**. Preserves Typecho's database schema for seamless data migration from PHP Typecho.
 

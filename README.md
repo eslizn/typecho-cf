@@ -143,72 +143,13 @@ pnpm run reset-password:cloudflare
 
 ## 插件开发
 
-插件通过 npm 包分发，以 Hook 机制扩展系统功能。
-
-**快速开始**：参考 [插件开发规范](src/plugins/README.md)（含完整 Props 接口、Hook 点列表和 captcha 示例）。
-
-### 最小插件结构
-
-```
-typecho-plugin-example/
-├── package.json   # keywords 必须包含 ["typecho", "plugin"]
-├── plugin.json    # 插件元数据（含可选配置声明）
-└── index.js       # ESM 入口，export default function init({ addHook, pluginId }) {}
-```
-
-### Hook 示例
-
-```javascript
-export default function init({ addHook, pluginId }) {
-  // filter 钩子：修改渲染后的 HTML
-  addHook('content:content', pluginId, (html) => {
-    return html + '<!-- by example plugin -->';
-  });
-
-  // call 钩子：评论提交后通知
-  addHook('feedback:finishComment', pluginId, (comment) => {
-    console.log('new comment:', comment.coid);
-  });
-}
-```
-
-### 安装插件
-
-```bash
-pnpm add typecho-plugin-example
-pnpm run build
-```
+参考 [插件开发规范](src/plugins/README.md)。
 
 ---
 
 ## 主题开发
 
-主题通过 npm 包分发，可提供完整自定义模板或仅覆盖 CSS。
-
-**快速开始**：参考 [主题开发规范](src/themes/README.md)（含完整 Props 类型和 minimal 示例）。
-
-### 最小主题结构
-
-```
-typecho-theme-example/
-├── package.json   # keywords 必须包含 ["typecho", "theme"]
-├── theme.json     # 主题元数据（样式表声明）
-├── style.css      # 主样式
-└── components/    # 可选：自定义 Astro 模板组件
-    ├── Index.astro
-    ├── Post.astro
-    ├── Page.astro
-    ├── Archive.astro
-    └── NotFound.astro
-```
-
-### 安装主题
-
-```bash
-pnpm add typecho-theme-example
-pnpm run build
-# 然后在管理后台「外观」页面切换
-```
+参考 [主题开发规范](src/themes/README.md)。
 
 ---
 

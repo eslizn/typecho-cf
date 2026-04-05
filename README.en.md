@@ -143,72 +143,13 @@ pnpm run reset-password:cloudflare
 
 ## Plugin Development
 
-Plugins are distributed as npm packages and extend the system via a Hook mechanism.
-
-**Full guide**: [Plugin Development Guide](src/plugins/README.md) — includes complete Props interfaces, all hook points, and the captcha plugin as an example.
-
-### Minimal Plugin Structure
-
-```
-typecho-plugin-example/
-├── package.json   # keywords must include ["typecho", "plugin"]
-├── plugin.json    # Plugin metadata (with optional config declaration)
-└── index.js       # ESM entry: export default function init({ addHook, pluginId }) {}
-```
-
-### Hook Example
-
-```javascript
-export default function init({ addHook, pluginId }) {
-  // filter hook: transform rendered HTML
-  addHook('content:content', pluginId, (html) => {
-    return html + '<!-- by example plugin -->';
-  });
-
-  // call hook: notify after comment is saved
-  addHook('feedback:finishComment', pluginId, (comment) => {
-    console.log('new comment:', comment.coid);
-  });
-}
-```
-
-### Install a Plugin
-
-```bash
-pnpm add typecho-plugin-example
-pnpm run build
-```
+See [Plugin Development Guide](src/plugins/README.md).
 
 ---
 
 ## Theme Development
 
-Themes are distributed as npm packages and can provide full custom templates or CSS-only styling.
-
-**Full guide**: [Theme Development Guide](src/themes/README.md) — includes complete Props types and the minimal theme as an example.
-
-### Minimal Theme Structure
-
-```
-typecho-theme-example/
-├── package.json   # keywords must include ["typecho", "theme"]
-├── theme.json     # Theme metadata (stylesheet declaration)
-├── style.css      # Main stylesheet
-└── components/    # Optional: custom Astro template components
-    ├── Index.astro
-    ├── Post.astro
-    ├── Page.astro
-    ├── Archive.astro
-    └── NotFound.astro
-```
-
-### Install a Theme
-
-```bash
-pnpm add typecho-theme-example
-pnpm run build
-# Then switch to the new theme in the admin panel under "Appearance"
-```
+See [Theme Development Guide](src/themes/README.md).
 
 ---
 

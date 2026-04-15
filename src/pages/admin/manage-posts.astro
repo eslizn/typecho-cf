@@ -249,7 +249,7 @@ const waitingCount = await db.select({ count: sql<number>`count(*)` }).from(sche
     </form>
 
     <div class="typecho-list-operate clearfix">
-      <form method="post" class="operate-form">
+      <div class="operate-toolbar">
         <div class="operate">
           <label><i class="sr-only">全选</i><input type="checkbox" class="typecho-table-select-all" /></label>
           <div class="btn-group btn-drop">
@@ -275,7 +275,7 @@ const waitingCount = await db.select({ count: sql<number>`count(*)` }).from(sche
             {page < totalPages && <li><a href={`/admin/manage-posts?page=${page + 1}${status ? '&status=' + status : ''}`}>&raquo;</a></li>}
           </ul>
         )}
-      </form>
+      </div>
     </div>
   </div>
 </Admin>

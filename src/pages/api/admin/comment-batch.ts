@@ -6,6 +6,7 @@ import { purgeContentCache } from '@/lib/cache';
 import { eq, sql } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 
+export const GET: APIRoute = handler;
 export const POST: APIRoute = handler;
 
 async function handler({ request, locals, url }: { request: Request; locals: App.Locals; url: URL }) {

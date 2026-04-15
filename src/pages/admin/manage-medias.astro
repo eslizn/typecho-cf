@@ -167,7 +167,7 @@ function formatBytes(bytes: number): string {
     </form>
 
     <div class="typecho-list-operate clearfix">
-      <form method="post" class="operate-form">
+      <div class="operate-toolbar">
         <div class="operate">
           <label><i class="sr-only">全选</i><input type="checkbox" class="typecho-table-select-all" /></label>
           <div class="btn-group btn-drop">
@@ -185,7 +185,7 @@ function formatBytes(bytes: number): string {
             {page < totalPages && <li><a href={`/admin/manage-medias?page=${page + 1}${keywords ? '&keywords=' + encodeURIComponent(keywords) : ''}`}>&raquo;</a></li>}
           </ul>
         )}
-      </form>
+      </div>
     </div>
   </div>
 </Admin>

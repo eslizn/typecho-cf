@@ -209,7 +209,7 @@ const spamCount = await db.select({ count: sql<number>`count(*)` }).from(schema.
     </form>
 
     <div class="typecho-list-operate clearfix">
-      <form method="post" class="operate-form">
+      <div class="operate-toolbar">
         <div class="operate">
           <label><i class="sr-only">全选</i><input type="checkbox" class="typecho-table-select-all" /></label>
           <div class="btn-group btn-drop">
@@ -230,7 +230,7 @@ const spamCount = await db.select({ count: sql<number>`count(*)` }).from(schema.
             {page < totalPages && <li><a href={`/admin/manage-comments?page=${page + 1}&status=${status}${cid ? '&cid=' + cid : ''}`}>&raquo;</a></li>}
           </ul>
         )}
-      </form>
+      </div>
     </div>
   </div>
 </Admin>

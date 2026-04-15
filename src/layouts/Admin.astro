@@ -207,7 +207,9 @@ const focusGroupIdx = visibleGroups.findIndex(g => g.children.some(c => c.active
           var href = $(this).attr('href');
           // 在 .typecho-list 范围内查找 operate-form
           var list = $(this).closest('.typecho-list');
-          var form = list.find('form.operate-form');
+          // Prefer the named main content form; fall back to any operate-form
+          var form = list.find('form.operate-form[name]');
+          if (!form.length) form = list.find('form.operate-form').first();
           if (!form.length) form = $(this).closest('form.operate-form');
           if (!form.length) return;
 

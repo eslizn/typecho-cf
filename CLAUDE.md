@@ -58,7 +58,13 @@ pnpm run reset-password:cloudflare  # 重置用户密码（Cloudflare）
 
 **数据库**（`src/db/schema.ts`）：Drizzle ORM 定义 7 张表，表名必须保持 `typecho_*` 前缀，不可重命名。建表 SQL 由 `src/lib/schema-sql.ts` 在运行时从 Drizzle schema 反射生成。
 
-**认证**（`src/lib/auth.ts`）：SHA-256 + salt 密码哈希，Session 存储于签名 Cookie。`typecho_options` 中的 `secret` 字段是签名密钥，跨部署必须保留，**不可重置**。
+关键字段枚举值：
+- `contents.type`：`post` | `page` | `post_draft` | `page_draft` | `attachment`
+- `contents.status`：`publish` | `draft` | `hidden` | `private` | `waiting`
+- `comments.status`：`approved` | `waiting` | `spam`
+- `users.group`（权限由高到低，数字越小权限越高）：`administrator`(0) | `editor`(1) | `contributor`(2) | `subscriber`(3) | `visitor`(4)
+
+**认证**（`src/lib/auth.ts`）：PBKDF2-SHA256（100,000 次迭代 + 16 字节 salt）密码哈希，格式 `$PBKDF2$iterations$salt$hash`。Session Token 格式 `uid:sha256(secret+uid:authCode)`，存于 Cookie `__typecho_uid` 和 `__typecho_authCode`。`typecho_options` 中的 `secret` 字段是签名密钥，跨部署必须保留，**不可重置**。
 
 **Cloudflare 环境变量访问**（Astro 6 + @astrojs/cloudflare v13+）：
 ```typescript
@@ -82,6 +88,18 @@ R2 文件通过 `src/pages/usr/uploads/[...path].ts` 代理访问。
 ### 测试
 
 Vitest 在 Node.js 环境运行。`tests/__mocks__/cloudflare-workers.ts` 提供 `cloudflare:workers` 模块的 stub。集成测试通过 `better-sqlite3` 在内存中创建真实 SQLite 数据库，直接调用 API 端点 handler。
+
+**规范**：新增功能和 bug 修复必须同步添加对应测试用例。单元测试放 `tests/unit/`，API 集成测试放 `tests/integration/`。集成测试 mock 模式：
+```typescript
+let testDb: ReturnType<typeof drizzle<typeof schema>>;
+vi.mock('@/db', async () => {
+  const actual = await vi.importActual<typeof import('@/db')>('@/db');
+  return { ...actual, getDb: (_d1: any) => testDb, schema: actual.schema };
+});
+// 若需要 mock cloudflare:workers 中的变量（如 BUCKET.delete），必须用 vi.hoisted() 先声明
+const { mockFn } = vi.hoisted(() => ({ mockFn: vi.fn() }));
+vi.mock('cloudflare:workers', () => ({ env: { DB: null, BUCKET: { delete: mockFn } }, ... }));
+```
 
 ## 设计约定
 

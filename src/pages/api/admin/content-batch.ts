@@ -31,7 +31,7 @@ async function handler({ request, locals, url }: { request: Request; locals: App
   // Get action from query params
   const action = url.searchParams.get('do') || '';
   const markStatusInput = url.searchParams.get('status') || '';
-  const VALID_STATUSES = ['publish', 'draft', 'hidden', 'private'];
+  const VALID_STATUSES = ['publish', 'draft', 'hidden', 'private', 'waiting'];
   const markStatus = VALID_STATUSES.includes(markStatusInput) ? markStatusInput : '';
   const type = url.searchParams.get('type') || 'post';
 

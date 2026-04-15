@@ -12,11 +12,21 @@ const INTERNAL_ORIGIN = 'https://typecho-cf-internal';
 /**
  * Purge a list of public URLs from the edge cache.
  * Safe to call with empty array — returns immediately.
+ * Relative URLs are skipped gracefully (no-op).
  */
 export async function purgeCache(urls: string[]): Promise<void> {
   if (urls.length === 0) return;
   const cache = caches.default;
-  await Promise.all(urls.map((url) => cache.delete(new Request(url))));
+  await Promise.all(urls.map(async (url) => {
+    try {
+      // Only try to purge absolute URLs (skip relative paths)
+      if (url.startsWith('http://') || url.startsWith('https://')) {
+        await cache.delete(new Request(url));
+      }
+    } catch {
+      // Silently ignore errors (e.g., invalid URLs)
+    }
+  }));
 }
 
 /**
@@ -62,6 +72,12 @@ export async function setCachedOptions(data: Record<string, any>): Promise<void>
  */
 export function buildContentPurgeUrls(siteUrl: string, cid?: number): string[] {
   const base = siteUrl.replace(/\/$/, '');
+  
+  // Skip if siteUrl is empty or not an absolute URL (test environment)
+  if (!base || !base.startsWith('http')) {
+    return [];
+  }
+  
   const urls = [
     base + '/',
     base + '/feed',

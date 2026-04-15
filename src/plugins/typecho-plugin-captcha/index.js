@@ -14,7 +14,8 @@
  *     "api":     "https://...",        // API endpoint (default: depends on provider)
  *     "input":   "captcha",            // Form field name for token
  *     "action":  "social",             // reCAPTCHA action/scene
- *     "hidden":  0                     // 1 = hide reCAPTCHA badge
+ *     "hidden":  0,                    // 1 = hide reCAPTCHA badge
+ *     "score":   0.5                   // reCAPTCHA v3 minimum score (0.0–1.0, default 0.5)
  *   }
  *
  * Field names match the original PHP Captcha plugin for compatibility.
@@ -34,19 +35,20 @@ const DEFAULTS = {
   input: 'captcha',
   action: 'social',
   hidden: 0,
+  score: 0.5,  // reCAPTCHA v3 minimum score threshold (0.0–1.0, higher = more strict)
 };
 
 /**
  * Fetch plugin configuration from the options table.
- * Configuration is stored as a single row: name = "plugin:captcha", value = JSON string.
+ * Configuration is stored as a single row: name = "plugin:typecho-plugin-captcha", value = JSON string.
  * This follows the Typecho convention where PHP uses serialize(), we use JSON.
  *
  * The options object is passed from the caller (comment API) via extra.options,
  * which is loaded by loadOptions() and contains all rows from typecho_options.
- * The key "plugin:captcha" maps to a JSON string of plugin settings.
+ * The key "plugin:typecho-plugin-captcha" maps to a JSON string of plugin settings.
  */
 function getPluginConfig(options) {
-  const raw = options?.['plugin:captcha'];
+  const raw = options?.['plugin:typecho-plugin-captcha'];
   if (!raw) {
     return { ...DEFAULTS };
   }
@@ -60,6 +62,7 @@ function getPluginConfig(options) {
       input: config.input || DEFAULTS.input,
       action: config.action || DEFAULTS.action,
       hidden: Number(config.hidden) || DEFAULTS.hidden,
+      score: config.score != null ? Number(config.score) : DEFAULTS.score,
     };
   } catch {
     console.error('[captcha] Failed to parse plugin config');
@@ -79,13 +82,20 @@ async function verifyRecaptcha(token, server, api, remoteIp) {
     remoteip: remoteIp,
   });
 
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: body.toString(),
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 5000);
 
-  return resp.json();
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
+      signal: controller.signal,
+    });
+    return resp.json();
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -141,6 +151,11 @@ export default function init({ addHook, pluginId }) {
         commentData._rejected = '验证码验证失败';
         return commentData;
       }
+      // reCAPTCHA v3: score indicates likelihood of human (1.0 = very likely human, 0.0 = bot)
+      if (typeof result.score === 'number' && result.score < config.score) {
+        commentData._rejected = '验证码验证失败';
+        return commentData;
+      }
     } catch (err) {
       console.error('[captcha] Verification API error:', err);
       commentData._rejected = '验证码服务异常，请稍后重试';
@@ -179,7 +194,31 @@ export function getClientSnippet(options) {
     headHtml += '<style type="text/css">.grecaptcha-badge {display: none !important;}</style>';
   }
 
-  const bodyHtml = `<script>grecaptcha.ready(function() { grecaptcha.execute("${config.client}", {action: "${config.action}"}).then(function(token) { var input = document.createElement("input"); input.id = input.name="${config.input}"; input.type="hidden"; input.value=token; if (document.getElementById("textarea")) { document.getElementById("textarea").parentNode.appendChild(input); } });});</script>`;
+  const bodyHtml = `<script>
+(function() {
+  var form = document.getElementById("comment-form");
+  if (!form) return;
+  form.addEventListener("submit", function(e) {
+    e.preventDefault();
+    var btn = form.querySelector('[type="submit"]');
+    if (btn) btn.disabled = true;
+    grecaptcha.ready(function() {
+      grecaptcha.execute("${config.client}", {action: "${config.action}"}).then(function(token) {
+        var old = document.getElementById("${config.input}");
+        if (old) old.parentNode.removeChild(old);
+        var input = document.createElement("input");
+        input.id = "${config.input}";
+        input.name = "${config.input}";
+        input.type = "hidden";
+        input.value = token;
+        form.appendChild(input);
+        if (btn) btn.disabled = false;
+        form.submit();
+      });
+    });
+  });
+})();
+</script>`;
 
   return { headHtml, bodyHtml };
 }

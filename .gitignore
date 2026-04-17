@@ -1,7 +1,9 @@
 /.idea
+/.astro
 /dist
 /node_modules
 /.wrangler
 /drizzle
+/public/themes
 .DS_Store
 *.log

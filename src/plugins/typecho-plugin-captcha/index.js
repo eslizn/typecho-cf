@@ -194,29 +194,36 @@ export function getClientSnippet(options) {
     headHtml += '<style type="text/css">.grecaptcha-badge {display: none !important;}</style>';
   }
 
-  const bodyHtml = `<script>
+  const bodyHtml = `<script is:inline>
 (function() {
-  var form = document.getElementById("comment-form");
-  if (!form) return;
-  form.addEventListener("submit", function(e) {
-    e.preventDefault();
-    var btn = form.querySelector('[type="submit"]');
-    if (btn) btn.disabled = true;
-    grecaptcha.ready(function() {
-      grecaptcha.execute("${config.client}", {action: "${config.action}"}).then(function(token) {
-        var old = document.getElementById("${config.input}");
-        if (old) old.parentNode.removeChild(old);
-        var input = document.createElement("input");
-        input.id = "${config.input}";
-        input.name = "${config.input}";
-        input.type = "hidden";
-        input.value = token;
-        form.appendChild(input);
-        if (btn) btn.disabled = false;
-        form.submit();
+  function initCaptcha() {
+    var form = document.getElementById("comment-form");
+    if (!form) return;
+    form.addEventListener("submit", function(e) {
+      e.preventDefault();
+      var btn = form.querySelector('[type="submit"]');
+      if (btn) btn.disabled = true;
+      grecaptcha.ready(function() {
+        grecaptcha.execute("${config.client}", {action: "${config.action}"}).then(function(token) {
+          var old = document.getElementById("${config.input}");
+          if (old) old.parentNode.removeChild(old);
+          var input = document.createElement("input");
+          input.id = "${config.input}";
+          input.name = "${config.input}";
+          input.type = "hidden";
+          input.value = token;
+          form.appendChild(input);
+          if (btn) btn.disabled = false;
+          form.submit();
+        });
       });
     });
-  });
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initCaptcha);
+  } else {
+    initCaptcha();
+  }
 })();
 </script>`;
 

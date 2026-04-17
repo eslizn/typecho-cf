@@ -65,6 +65,10 @@ if (Astro.request.method === 'POST') {
 
     await setOption(ctx.db, `plugin:${pluginId}`, JSON.stringify(settings));
 
+    // Purge cached options so subsequent requests read the updated config
+    const { purgeSiteCache } = await import('@/lib/cache');
+    await purgeSiteCache(options.siteUrl || '');
+
     // Update local options cache
     (options as any)[`plugin:${pluginId}`] = JSON.stringify(settings);
 

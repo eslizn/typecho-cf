@@ -1,0 +1,10 @@
+{
+  "name": "typecho-plugin-turnstile",
+  "version": "1.0.0",
+  "description": "Typecho Cloudflare Turnstile 插件 - 集成 Cloudflare Turnstile 保护评论",
+  "keywords": ["typecho", "plugin", "turnstile", "captcha", "antispam"],
+  "author": "eslizn",
+  "license": "MIT",
+  "type": "module",
+  "main": "index.js"
+}

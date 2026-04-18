@@ -1,34 +1,32 @@
 /**
- * Captcha Plugin for Typecho
+ * Cloudflare Turnstile Plugin for Typecho
  *
- * Integrates Google reCAPTCHA v3 to protect comment forms from spam.
- * Ported from the original PHP Captcha plugin.
+ * Integrates Cloudflare Turnstile to protect comment forms from spam.
  *
  * Configuration is stored as a single JSON object in the options table,
- * following the Typecho convention: name = "plugin:typecho-plugin-captcha", value = JSON string.
+ * following the Typecho convention: name = "plugin:typecho-plugin-turnstile", value = JSON string.
  *
  * Hooks used:
- *   - feedback:comment (filter): Validates captcha token before saving comment
- *   - archive:header (filter): Injects reCAPTCHA SDK script into <head>
- *   - archive:footer (filter): Injects comment form interception script before </body>
+ *   - feedback:comment (filter): Validates Turnstile token before saving comment
+ *   - archive:header (filter): Injects Turnstile SDK script into <head>
+ *   - archive:footer (filter): Injects comment form widget/interaction script before </body>
  */
 
 /** Default configuration values */
 const DEFAULTS = {
-  client: '',
-  server: '',
-  api: 'https://www.recaptcha.net',
-  input: 'captcha',
-  action: 'social',
-  hidden: 0,
-  score: 0.5,
+  sitekey: '',
+  secret: '',
+  input: 'cf-turnstile-response',
+  appearance: 'always',
+  theme: 'auto',
+  size: 'normal',
 };
 
 /**
  * Fetch plugin configuration from the options table.
  */
 function getPluginConfig(options) {
-  const raw = options?.['plugin:typecho-plugin-captcha'];
+  const raw = options?.['plugin:typecho-plugin-turnstile'];
   if (!raw) {
     return { ...DEFAULTS };
   }
@@ -36,28 +34,28 @@ function getPluginConfig(options) {
   try {
     const config = typeof raw === 'string' ? JSON.parse(raw) : raw;
     return {
-      client: config.client || DEFAULTS.client,
-      server: config.server || DEFAULTS.server,
-      api: config.api || DEFAULTS.api,
+      sitekey: config.sitekey || DEFAULTS.sitekey,
+      secret: config.secret || DEFAULTS.secret,
       input: config.input || DEFAULTS.input,
-      action: config.action || DEFAULTS.action,
-      hidden: Number(config.hidden) || DEFAULTS.hidden,
-      score: config.score != null ? Number(config.score) : DEFAULTS.score,
+      appearance: config.appearance || DEFAULTS.appearance,
+      theme: config.theme || DEFAULTS.theme,
+      size: config.size || DEFAULTS.size,
     };
   } catch {
-    console.error('[captcha] Failed to parse plugin config');
+    console.error('[turnstile] Failed to parse plugin config');
     return { ...DEFAULTS };
   }
 }
 
 /**
- * Verify a reCAPTCHA v3 token with Google's API.
+ * Verify a Turnstile token with Cloudflare's API.
+ * @see https://developers.cloudflare.com/turnstile/get-started/server-side-validation/
  */
-async function verifyRecaptcha(token, server, api, remoteIp) {
-  const url = `${api}/recaptcha/api/siteverify`;
+async function verifyTurnstile(token, secret, remoteIp) {
+  const url = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
 
   const body = new URLSearchParams({
-    secret: server,
+    secret,
     response: token,
     remoteip: remoteIp,
   });
@@ -86,26 +84,28 @@ async function verifyRecaptcha(token, server, api, remoteIp) {
 function buildClientSnippet(options) {
   const config = getPluginConfig(options);
 
-  if (!config.client) {
+  if (!config.sitekey) {
     return { headHtml: '', bodyHtml: '' };
   }
 
-  let headHtml = `<script src="${config.api}/recaptcha/api.js?render=${config.client}"></script>`;
-  if (config.hidden) {
-    headHtml += '<style type="text/css">.grecaptcha-badge {display: none !important;}</style>';
-  }
+  const headHtml = `<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>`;
 
-  const bodyHtml = `<script is:inline>
+  let bodyHtml;
+
+  if (config.appearance === 'execute') {
+    bodyHtml = `<script is:inline>
 (function() {
-  function initCaptcha() {
+  function initTurnstile() {
     var form = document.getElementById("comment-form");
     if (!form) return;
     form.addEventListener("submit", function(e) {
       e.preventDefault();
       var btn = form.querySelector('[type="submit"]');
       if (btn) btn.disabled = true;
-      grecaptcha.ready(function() {
-        grecaptcha.execute("${config.client}", {action: "${config.action}"}).then(function(token) {
+      turnstile.execute("${config.sitekey}", {
+        theme: "${config.theme}",
+        size: "${config.size}",
+        callback: function(token) {
           var old = document.getElementById("${config.input}");
           if (old) old.parentNode.removeChild(old);
           var input = document.createElement("input");
@@ -116,17 +116,46 @@ function buildClientSnippet(options) {
           form.appendChild(input);
           if (btn) btn.disabled = false;
           form.submit();
-        });
+        }
       });
     });
   }
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", initCaptcha);
+    document.addEventListener("DOMContentLoaded", initTurnstile);
   } else {
-    initCaptcha();
+    initTurnstile();
   }
 })();
 </script>`;
+  } else {
+    bodyHtml = `<script is:inline>
+(function() {
+  function initTurnstile() {
+    var form = document.getElementById("comment-form");
+    if (!form) return;
+    var container = document.createElement("div");
+    container.className = "cf-turnstile";
+    container.dataset.sitekey = "${config.sitekey}";
+    container.dataset.theme = "${config.theme}";
+    container.dataset.size = "${config.size}";
+    if ("${config.appearance}" === "interaction-only") {
+      container.dataset.appearance = "interaction-only";
+    }
+    var submitBtn = form.querySelector('[type="submit"]');
+    if (submitBtn) {
+      submitBtn.parentNode.insertBefore(container, submitBtn);
+    } else {
+      form.appendChild(container);
+    }
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initTurnstile);
+  } else {
+    initTurnstile();
+  }
+})();
+</script>`;
+  }
 
   return { headHtml, bodyHtml };
 }
@@ -135,16 +164,16 @@ function buildClientSnippet(options) {
  * Plugin entry point.
  */
 export default function init({ addHook, pluginId }) {
-  // Filter: feedback:comment — validates reCAPTCHA token before saving comment
+  // Filter: feedback:comment — validates Turnstile token before saving comment
   addHook('feedback:comment', pluginId, async (commentData, extra) => {
     if (!extra || !extra.options) {
-      console.warn('[captcha] No options context provided, skipping verification');
+      console.warn('[turnstile] No options context provided, skipping verification');
       return commentData;
     }
 
     const config = getPluginConfig(extra.options);
 
-    if (!config.client || !config.server) {
+    if (!config.sitekey || !config.secret) {
       return commentData;
     }
 
@@ -154,7 +183,7 @@ export default function init({ addHook, pluginId }) {
 
     const token = extra.formData?.get(config.input)?.toString() || '';
     if (!token) {
-      commentData._rejected = '请完成验证码验证';
+      commentData._rejected = '请完成人机验证';
       return commentData;
     }
 
@@ -165,25 +194,21 @@ export default function init({ addHook, pluginId }) {
       : (xffRaw ? (xffRaw.split(',')[0] ?? '').trim() : '');
 
     try {
-      const result = await verifyRecaptcha(token, config.server, config.api, ip);
+      const result = await verifyTurnstile(token, config.secret, ip);
       if (!result || !result.success) {
-        commentData._rejected = '验证码验证失败';
-        return commentData;
-      }
-      if (typeof result.score === 'number' && result.score < config.score) {
-        commentData._rejected = '验证码验证失败';
+        commentData._rejected = '人机验证失败';
         return commentData;
       }
     } catch (err) {
-      console.error('[captcha] Verification API error:', err);
-      commentData._rejected = '验证码服务异常，请稍后重试';
+      console.error('[turnstile] Verification API error:', err);
+      commentData._rejected = '验证服务异常，请稍后重试';
       return commentData;
     }
 
     return commentData;
   });
 
-  // Filter: archive:header — inject reCAPTCHA SDK into <head>
+  // Filter: archive:header — inject Turnstile SDK into <head>
   addHook('archive:header', pluginId, (headHtml, extra) => {
     const snippet = buildClientSnippet(extra?.options);
     return headHtml + snippet.headHtml;
@@ -198,7 +223,7 @@ export default function init({ addHook, pluginId }) {
 
 /**
  * @deprecated Use archive:header / archive:footer hooks instead.
- * Kept for backward compatibility — themes that import this directly will still work.
+ * Kept for backward compatibility.
  */
 export function getClientSnippet(options) {
   return buildClientSnippet(options);

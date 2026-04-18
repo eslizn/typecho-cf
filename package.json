@@ -26,6 +26,7 @@
     "marked": "^18.0.1",
     "sanitize-html": "^2.17.3",
     "typecho-plugin-captcha": "file:src/plugins/typecho-plugin-captcha",
+    "typecho-plugin-turnstile": "file:src/plugins/typecho-plugin-turnstile",
     "typecho-theme-minimal": "file:src/themes/typecho-theme-minimal"
   },
   "devDependencies": {

@@ -1,0 +1,60 @@
+{
+  "id": "typecho-plugin-turnstile",
+  "name": "Cloudflare Turnstile",
+  "description": "评论验证码插件，集成 Cloudflare Turnstile，防止垃圾评论",
+  "author": "eslizn",
+  "authorUrl": "https://eslizn.com",
+  "version": "1.0.0",
+  "homepage": "https://github.com/eslizn/typecho-cf",
+  "license": "MIT",
+  "tags": ["turnstile", "captcha", "antispam"],
+  "config": {
+    "sitekey": {
+      "type": "text",
+      "label": "Site Key",
+      "default": "",
+      "description": "Cloudflare Turnstile 前端 Key，<a href=\"//dash.cloudflare.com/?to=/:account/turnstile\" target=\"_blank\">点击申请</a>"
+    },
+    "secret": {
+      "type": "text",
+      "label": "Secret Key",
+      "default": ""
+    },
+    "input": {
+      "type": "text",
+      "label": "验证码字段名",
+      "default": "cf-turnstile-response",
+      "description": "用于提交验证 token 的字段名，如遇参数冲突可以修改"
+    },
+    "appearance": {
+      "type": "select",
+      "label": "外观模式",
+      "default": "always",
+      "options": {
+        "always": "始终显示",
+        "execute": "编程式调用",
+        "interaction-only": "仅交互时显示"
+      },
+      "description": "<a href=\"//developers.cloudflare.com/turnstile/reference/configuration/\" target=\"_blank\">详情</a>"
+    },
+    "theme": {
+      "type": "select",
+      "label": "主题",
+      "default": "auto",
+      "options": {
+        "auto": "自动",
+        "light": "浅色",
+        "dark": "深色"
+      }
+    },
+    "size": {
+      "type": "select",
+      "label": "尺寸",
+      "default": "normal",
+      "options": {
+        "normal": "正常",
+        "compact": "紧凑"
+      }
+    }
+  }
+}

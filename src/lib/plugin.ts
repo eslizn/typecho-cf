@@ -417,6 +417,29 @@ export function parseActivatedPlugins(value: string | null | undefined): string[
   }
 }
 
+// ==================== Client Snippets ====================
+
+/**
+ * Collect client-side HTML snippets from all activated plugins.
+ *
+ * Plugins register their frontend output by hooking into:
+ *   - archive:header (filter): receives current headHtml, returns headHtml with appended content
+ *   - archive:footer (filter): receives current bodyHtml, returns bodyHtml with appended content
+ *
+ * This function applies both filters and returns the aggregated result.
+ * Themes should call this once and inject the HTML into <head> and before </body>.
+ *
+ * @param options - Site options object from loadOptions()
+ * @returns {{ headHtml: string, bodyHtml: string }}
+ */
+export async function getClientSnippets(
+  options: Record<string, any>,
+): Promise<{ headHtml: string; bodyHtml: string }> {
+  let headHtml = await applyFilter('archive:header', '', { options });
+  let bodyHtml = await applyFilter('archive:footer', '', { options });
+  return { headHtml, bodyHtml };
+}
+
 // ==================== Plugin Configuration ====================
 
 /**

@@ -9,7 +9,6 @@ import Base from '@/layouts/Base.astro';
 import CommentList from './CommentList.astro';
 import type { ThemePostProps } from '@/lib/theme-props';
 import { formatDate, buildAuthorLink } from '@/lib/content';
-import { getClientSnippet } from 'typecho-plugin-captcha';
 
 type Props = ThemePostProps;
 
@@ -30,14 +29,6 @@ function countAll(nodes: typeof comments): number {
   return n;
 }
 const totalComments = countAll(comments);
-
-// Captcha client snippet (headHtml / bodyHtml will be empty strings if plugin not configured)
-let captchaSnippet = { headHtml: '', bodyHtml: '' };
-try {
-  captchaSnippet = getClientSnippet(options);
-} catch {
-  // Plugin not installed or not activated — silently skip
-}
 ---
 <Base
   title={post.title}
@@ -46,7 +37,6 @@ try {
   user={user}
   isLoggedIn={isLoggedIn}
 >
-  <Fragment slot="head" set:html={captchaSnippet.headHtml} />
   <header id="header" class="clearfix">
     <div class="container">
       <div class="row">
@@ -183,7 +173,6 @@ try {
                     <p>
                       <button type="submit" class="submit">提交评论</button>
                     </p>
-                    <Fragment set:html={captchaSnippet.bodyHtml} />
                   </form>
                 </div>
                 <script is:inline>

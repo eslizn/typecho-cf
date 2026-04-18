@@ -200,30 +200,28 @@ addHook('feedback:comment', pluginId, async (commentData, extra) => {
 
 ## 向主题提供客户端代码
 
-如需向主题页面注入 HTML/JS（如验证码组件），暴露具名导出供主题调用：
+插件可通过 `archive:header` 和 `archive:footer` filter 自动向前端页面注入 HTML/JS，无需主题手动适配：
 
 ```javascript
 // index.js
-export default function init({ addHook, pluginId }) { /* ... */ }
+export default function init({ addHook, pluginId }) {
+  // 注入 <head> 内容（如 SDK 脚本）
+  addHook('archive:header', pluginId, (headHtml, extra) => {
+    const config = getPluginConfig(extra?.options);
+    if (!config.sitekey) return headHtml;
+    return headHtml + '<script src="..."></script>';
+  });
 
-// 主题可导入此 helper
-export function getClientSnippet(options) {
-  return {
-    headHtml: '<script src="..."></script>',
-    bodyHtml: '<script>/* ... */</script>',
-  };
+  // 注入 </body> 前内容（如交互脚本）
+  addHook('archive:footer', pluginId, (bodyHtml, extra) => {
+    const config = getPluginConfig(extra?.options);
+    if (!config.sitekey) return bodyHtml;
+    return bodyHtml + '<script>/* ... */</script>';
+  });
 }
 ```
 
-主题中的 Astro 用法：
-```astro
----
-import { getClientSnippet } from 'typecho-plugin-captcha';
-const captcha = getClientSnippet(options);
----
-<Fragment set:html={captcha.headHtml} />  <!-- 放在 <head> 内 -->
-<Fragment set:html={captcha.bodyHtml} />  <!-- 放在 </body> 前 -->
-```
+`Base.astro` 布局会自动调用 `getClientSnippets(options)` 收集所有激活插件的注入内容，主题无需任何额外代码。
 
 ---
 

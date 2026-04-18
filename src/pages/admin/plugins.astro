@@ -71,6 +71,10 @@ if (Astro.request.method === 'POST') {
         const serialized = JSON.stringify(newIds);
         await setOption(db, 'activatedPlugins', serialized);
         (options as any).activatedPlugins = serialized;
+
+        // Purge options cache so next request reads fresh data from DB
+        const { purgeSiteCache } = await import('@/lib/cache');
+        await purgeSiteCache(options.siteUrl || '');
       }
     }
   } catch (e) {

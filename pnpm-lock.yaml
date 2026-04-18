@@ -26,6 +26,9 @@ importers:
       typecho-plugin-captcha:
         specifier: file:src/plugins/typecho-plugin-captcha
         version: file:src/plugins/typecho-plugin-captcha
+      typecho-plugin-turnstile:
+        specifier: file:src/plugins/typecho-plugin-turnstile
+        version: file:src/plugins/typecho-plugin-turnstile
       typecho-theme-minimal:
         specifier: file:src/themes/typecho-theme-minimal
         version: file:src/themes/typecho-theme-minimal
@@ -2298,6 +2301,9 @@ packages:
 
   typecho-plugin-captcha@file:src/plugins/typecho-plugin-captcha:
     resolution: {directory: src/plugins/typecho-plugin-captcha, type: directory}
+
+  typecho-plugin-turnstile@file:src/plugins/typecho-plugin-turnstile:
+    resolution: {directory: src/plugins/typecho-plugin-turnstile, type: directory}
 
   typecho-theme-minimal@file:src/themes/typecho-theme-minimal:
     resolution: {directory: src/themes/typecho-theme-minimal, type: directory}
@@ -4861,6 +4867,8 @@ snapshots:
       safe-buffer: 5.2.1
 
   typecho-plugin-captcha@file:src/plugins/typecho-plugin-captcha: {}
+
+  typecho-plugin-turnstile@file:src/plugins/typecho-plugin-turnstile: {}
 
   typecho-theme-minimal@file:src/themes/typecho-theme-minimal: {}
 

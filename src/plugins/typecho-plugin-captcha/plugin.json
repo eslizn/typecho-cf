@@ -1,13 +1,13 @@
 {
   "id": "typecho-plugin-captcha",
   "name": "Captcha 验证码",
-  "description": "评论验证码插件，支持 Google reCAPTCHA v3 和 Cloudflare Turnstile，防止垃圾评论",
+  "description": "评论验证码插件，支持 Google reCAPTCHA v3，防止垃圾评论",
   "author": "eslizn",
   "authorUrl": "https://eslizn.com",
   "version": "1.0.0",
   "homepage": "https://github.com/eslizn/typecho-cf",
   "license": "MIT",
-  "tags": ["captcha", "recaptcha", "turnstile", "antispam"],
+  "tags": ["captcha", "recaptcha", "antispam"],
   "config": {
     "client": {
       "type": "text",

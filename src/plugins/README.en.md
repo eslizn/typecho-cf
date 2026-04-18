@@ -200,30 +200,28 @@ addHook('feedback:comment', pluginId, async (commentData, extra) => {
 
 ## Providing Client-Side Code to Themes
 
-To inject HTML/JS into theme pages (e.g., a CAPTCHA widget), expose a named export that themes can call:
+Plugins can automatically inject HTML/JS into frontend pages via `archive:header` and `archive:footer` filters — no theme modification required:
 
 ```javascript
 // index.js
-export default function init({ addHook, pluginId }) { /* ... */ }
+export default function init({ addHook, pluginId }) {
+  // Inject <head> content (e.g., SDK scripts)
+  addHook('archive:header', pluginId, (headHtml, extra) => {
+    const config = getPluginConfig(extra?.options);
+    if (!config.sitekey) return headHtml;
+    return headHtml + '<script src="..."></script>';
+  });
 
-// Themes can import this helper
-export function getClientSnippet(options) {
-  return {
-    headHtml: '<script src="..."></script>',
-    bodyHtml: '<script>/* ... */</script>',
-  };
+  // Inject content before </body> (e.g., interaction scripts)
+  addHook('archive:footer', pluginId, (bodyHtml, extra) => {
+    const config = getPluginConfig(extra?.options);
+    if (!config.sitekey) return bodyHtml;
+    return bodyHtml + '<script>/* ... */</script>';
+  });
 }
 ```
 
-Theme usage in Astro:
-```astro
----
-import { getClientSnippet } from 'typecho-plugin-captcha';
-const captcha = getClientSnippet(options);
----
-<Fragment set:html={captcha.headHtml} />  <!-- inside <head> -->
-<Fragment set:html={captcha.bodyHtml} />  <!-- before </body> -->
-```
+The `Base.astro` layout automatically calls `getClientSnippets(options)` to collect injections from all activated plugins — themes need no additional code.
 
 ---
 

@@ -3,6 +3,7 @@ import type { SiteOptions } from '@/lib/options';
 import type { computeUrls } from '@/lib/options';
 import type { UserRow } from '@/lib/context';
 import { getThemeStylesheets } from '@/lib/theme';
+import { getClientSnippets } from '@/lib/plugin';
 
 interface Props {
   title?: string;
@@ -28,6 +29,9 @@ const {
 
 const pageTitle = title ? `${title} - ${options.title}` : options.title;
 const themeStylesheets = getThemeStylesheets(options.theme || 'typecho-theme-minimal');
+
+// Collect client-side snippets from all activated plugins
+const pluginSnippets = await getClientSnippets(options as Record<string, any>);
 ---
 <!DOCTYPE html>
 <html lang={options.lang === 'zh_CN' ? 'zh-CN' : 'en'}>
@@ -43,8 +47,10 @@ const themeStylesheets = getThemeStylesheets(options.theme || 'typecho-theme-min
   ))}
   <link rel="alternate" type="application/rss+xml" title={`${options.title} RSS`} href={urls.feedUrl} />
   <slot name="head" />
+  <Fragment set:html={pluginSnippets.headHtml} />
 </head>
 <body class={bodyClass}>
   <slot />
+  <Fragment set:html={pluginSnippets.bodyHtml} />
 </body>
 </html>

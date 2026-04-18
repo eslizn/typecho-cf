@@ -32,6 +32,11 @@ if (Astro.request.method === 'POST') {
         await setOption(ctx.db, 'theme', themeId);
         // Update local options to reflect change
         (options as any).theme = themeId;
+
+        // Purge options cache so next request reads fresh data from DB
+        const { purgeSiteCache } = await import('@/lib/cache');
+        await purgeSiteCache(options.siteUrl || '');
+
         message = `主题已切换为 "${themeId}"`;
         messageType = 'success';
       } else {

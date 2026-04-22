@@ -10,7 +10,7 @@ binding = "ASSETS"
 [[d1_databases]]
 binding = "DB"
 database_name = "typecho-cf-db"
-database_id = "ad5d27bc-2d74-4a43-a464-e5f6c00eddcc"
+database_id = "<YOUR_D1_DATABASE_ID>"
 migrations_dir = "drizzle"
 
 [[r2_buckets]]

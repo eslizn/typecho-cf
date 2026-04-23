@@ -127,6 +127,7 @@ async function seedOptions(
     commentsWhitelist: '0',
     commentsAutoClose: '0',
     commentsCheckReferer: '0',
+    commentsAntiSpam: '0',
     ...opts,
   };
   for (const [name, value] of Object.entries(defaults)) {
@@ -523,5 +524,35 @@ describe('POST /api/comment', () => {
     );
     const res3 = await POST({ request: req3, locals: {} } as any);
     expect(res3.status).toBe(429);
+  });
+
+  it('rejects comment when commentsAntiSpam is enabled and token is missing', async () => {
+    await seedOptions(testDb, { commentsAntiSpam: '1' });
+    const content = await seedContent(testDb);
+    const req = makeCommentRequest({ cid: String(content.cid), text: 'Spam?', author: 'Bot' });
+    const res = await POST({ request: req, locals: {} } as any);
+    expect(res.status).toBe(403);
+  });
+
+  it('rejects comment when commentsAntiSpam is enabled and token is wrong', async () => {
+    await seedOptions(testDb, { commentsAntiSpam: '1' });
+    const content = await seedContent(testDb);
+    const req = makeCommentRequest({ cid: String(content.cid), text: 'Spam?', author: 'Bot', _: 'wrong-token' });
+    const res = await POST({ request: req, locals: {} } as any);
+    expect(res.status).toBe(403);
+  });
+
+  it('accepts comment when commentsAntiSpam is enabled and token is correct', async () => {
+    await seedOptions(testDb, { commentsAntiSpam: '1' });
+    const content = await seedContent(testDb);
+    // Token = SHA256(secret + '&' + requestUrl), requestUrl = 'https://example.com/api/comment'
+    const secret = 'test-secret';
+    const requestUrl = 'https://example.com/api/comment';
+    const msgUint8 = new TextEncoder().encode(`${secret}&${requestUrl}`);
+    const hashBuf = await crypto.subtle.digest('SHA-256', msgUint8);
+    const token = Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
+    const req = makeCommentRequest({ cid: String(content.cid), text: 'Legit comment', author: 'Alice', _: token });
+    const res = await POST({ request: req, locals: {} } as any);
+    expect(res.status).toBe(302);
   });
 });

@@ -132,6 +132,11 @@ export interface CommentOptions {
   dateFormat: string;
   /** Timezone offset in seconds */
   timezone: number;
+  /**
+   * CSRF token for the comment form `<input name="_">`.
+   * Empty string when anti-spam is disabled (commentsAntiSpam = 0).
+   */
+  securityToken: string;
 
   // ─── Display Settings ────────────────────────
   /** Only show comments, not pingback/trackback */

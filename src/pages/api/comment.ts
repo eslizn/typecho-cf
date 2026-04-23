@@ -1,7 +1,7 @@
 import type { APIRoute } from 'astro';
 import { getDb, schema } from '@/db';
 import { loadOptions } from '@/lib/options';
-import { getAuthCookies, validateAuthToken } from '@/lib/auth';
+import { getAuthCookies, validateAuthToken, validateCommentToken } from '@/lib/auth';
 import { setActivatedPlugins, parseActivatedPlugins, applyFilter, doHook } from '@/lib/plugin';
 import { purgeContentCache } from '@/lib/cache';
 import { getClientIp } from '@/lib/context';
@@ -175,20 +175,26 @@ export const POST: APIRoute = async ({ request, locals }) => {
     parent,
   };
 
-  // Apply feedback:comment filter — plugins can modify comment data before save
-  // Extra context is passed so plugins (e.g. captcha) can access form data and request
-  // Note: This filter is only applied if anti-spam protection is enabled and user is not logged in
+  // Anti-spam: CSRF token check (matches Typecho's Security::protect())
+  // Token = SHA256(secret + '&' + requestUrl), embedded in comment form as <input name="_">
   if (options.commentsAntiSpam && !userId) {
-    commentData = await applyFilter('feedback:comment', commentData, {
-      request, formData, db, options, isLoggedIn: !!userId,
-    });
-
-    // Check if any plugin rejected the comment (e.g. captcha verification failed)
-    if (commentData._rejected) {
-      const reason = commentData._rejected;
-      delete commentData._rejected;
-      return new Response(reason, { status: 403 });
+    const submittedToken = formData.get('_')?.toString() || '';
+    const valid = await validateCommentToken(submittedToken, options.secret as string, request.url);
+    if (!valid) {
+      return new Response('评论来源验证失败', { status: 403 });
     }
+  }
+
+  // Apply feedback:comment filter — plugins can modify/reject comment data before save
+  commentData = await applyFilter('feedback:comment', commentData, {
+    request, formData, db, options, isLoggedIn: !!userId,
+  });
+
+  // Check if any plugin rejected the comment (e.g. captcha verification failed)
+  if (commentData._rejected) {
+    const reason = commentData._rejected;
+    delete commentData._rejected;
+    return new Response(reason, { status: 403 });
   }
 
   await db.insert(schema.comments).values(commentData as any);

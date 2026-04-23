@@ -122,6 +122,27 @@ export async function validateSecurityToken(
   return timeSafeEqual(token, expected);
 }
 
+/**
+ * Generate a comment form CSRF token for anonymous users.
+ * Matches Typecho's Security::getToken(referer): md5(secret + '&' + referer)
+ * We use SHA-256 instead of MD5 for stronger security.
+ */
+export async function generateCommentToken(secret: string, refererUrl: string): Promise<string> {
+  return await sha256(`${secret}&${refererUrl}`);
+}
+
+/**
+ * Validate a comment form CSRF token.
+ */
+export async function validateCommentToken(
+  token: string,
+  secret: string,
+  refererUrl: string,
+): Promise<boolean> {
+  const expected = await generateCommentToken(secret, refererUrl);
+  return timeSafeEqual(token, expected);
+}
+
 // ---- Utilities ----
 
 /**

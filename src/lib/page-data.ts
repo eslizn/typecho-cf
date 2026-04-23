@@ -14,6 +14,7 @@ import {
 } from '@/lib/content';
 import { renderContentExcerpt, renderMarkdown, renderMarkdownFiltered } from '@/lib/markdown';
 import { paginate } from '@/lib/pagination';
+import { generateCommentToken } from '@/lib/auth';
 import type { RequestContext } from '@/lib/context';
 import type {
   ThemeIndexProps, ThemePostProps, ThemePageProps, ThemeArchiveProps, ThemeNotFoundProps,
@@ -81,7 +82,7 @@ async function buildGravatarMap(allComments: any[], avatarRating: string): Promi
   return Object.fromEntries(entries);
 }
 
-function buildCommentOptions(options: any): CommentOptions {
+function buildCommentOptions(options: any, securityToken: string): CommentOptions {
   return {
     allowComment: true, // caller overrides as needed
     requireMail: !!options.commentsRequireMail,
@@ -91,6 +92,7 @@ function buildCommentOptions(options: any): CommentOptions {
     order: options.commentsOrder === 'DESC' ? 'DESC' : 'ASC',
     dateFormat: options.commentDateFormat || 'Y-m-d H:i',
     timezone: options.timezone || 28800,
+    securityToken,
     
     // Display settings
     showCommentOnly: !!options.commentsShowCommentOnly,
@@ -329,6 +331,11 @@ export async function preparePostData(
 
   const common = await loadCommon(ctx, requestUrl);
 
+  // Generate CSRF token for comment form (empty when anti-spam is disabled)
+  const securityToken = options.commentsAntiSpam
+    ? await generateCommentToken(options.secret as string, requestUrl)
+    : '';
+
   return {
     ...common,
     post: {
@@ -347,7 +354,7 @@ export async function preparePostData(
     categories,
     tags,
     comments: commentTree,
-    commentOptions: { ...buildCommentOptions(options), allowComment },
+    commentOptions: { ...buildCommentOptions(options, securityToken), allowComment },
     prevPost: prevPost[0] ? {
       title: prevPost[0].title || '无标题',
       permalink: buildPermalink(prevPost[0], urls.siteUrl, options.permalinkPattern as string | undefined),
@@ -411,6 +418,11 @@ export async function preparePageData(
 
   const common = await loadCommon(ctx, requestUrl);
 
+  // Generate CSRF token for comment form (empty when anti-spam is disabled)
+  const securityToken = options.commentsAntiSpam
+    ? await generateCommentToken(options.secret as string, requestUrl)
+    : '';
+
   return {
     ...common,
     page: {
@@ -425,7 +437,7 @@ export async function preparePageData(
       passwordVerified,
     },
     comments: commentTree,
-    commentOptions: { ...buildCommentOptions(options), allowComment },
+    commentOptions: { ...buildCommentOptions(options, securityToken), allowComment },
     gravatarMap,
   };
 }

@@ -174,15 +174,18 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
   // Apply feedback:comment filter — plugins can modify comment data before save
   // Extra context is passed so plugins (e.g. captcha) can access form data and request
-  commentData = await applyFilter('feedback:comment', commentData, {
-    request, formData, db, options, isLoggedIn: !!userId,
-  });
+  // Note: This filter is only applied if anti-spam protection is enabled and user is not logged in
+  if (options.commentsAntiSpam && !userId) {
+    commentData = await applyFilter('feedback:comment', commentData, {
+      request, formData, db, options, isLoggedIn: !!userId,
+    });
 
-  // Check if any plugin rejected the comment (e.g. captcha verification failed)
-  if (commentData._rejected) {
-    const reason = commentData._rejected;
-    delete commentData._rejected;
-    return new Response(reason, { status: 403 });
+    // Check if any plugin rejected the comment (e.g. captcha verification failed)
+    if (commentData._rejected) {
+      const reason = commentData._rejected;
+      delete commentData._rejected;
+      return new Response(reason, { status: 403 });
+    }
   }
 
   await db.insert(schema.comments).values(commentData as any);

@@ -132,6 +132,30 @@ export interface CommentOptions {
   dateFormat: string;
   /** Timezone offset in seconds */
   timezone: number;
+
+  // ─── Display Settings ────────────────────────
+  /** Only show comments, not pingback/trackback */
+  showCommentOnly: boolean;
+  /** Support Markdown syntax in comments */
+  markdown: boolean;
+  /** Add nofollow attribute to comment author URLs */
+  urlNofollow: boolean;
+
+  // ─── Threading & Pagination ─────────────────
+  /** Enable nested comments (replies) */
+  threaded: boolean;
+  /** Maximum nesting level for comment replies */
+  maxNestingLevels: number;
+  /** Enable comment pagination */
+  pageBreak: boolean;
+  /** Comments per page when pagination enabled */
+  pageSize: number;
+  /** Default page to show: 'first' or 'last' */
+  pageDisplay: 'first' | 'last';
+
+  // ─── HTML Filtering ─────────────────────────
+  /** Allowed HTML tags/attributes in comments (semicolon-separated) */
+  htmlTagAllowed: string;
 }
 
 // ─── 404 Not Found ──────────────────────────────────────────────────────

@@ -91,21 +91,6 @@ function buildCommentOptions(options: any): CommentOptions {
     order: options.commentsOrder === 'DESC' ? 'DESC' : 'ASC',
     dateFormat: options.commentDateFormat || 'Y-m-d H:i',
     timezone: options.timezone || 28800,
-    
-    // Display settings
-    showCommentOnly: !!options.commentsShowCommentOnly,
-    markdown: !!options.commentsMarkdown,
-    urlNofollow: !!options.commentsUrlNofollow,
-    
-    // Threading & pagination
-    threaded: !!options.commentsThreaded,
-    maxNestingLevels: Number(options.commentsMaxNestingLevels) || 2,
-    pageBreak: !!options.commentsPageBreak,
-    pageSize: Number(options.commentsPageSize) || 20,
-    pageDisplay: (options.commentsPageDisplay === 'first' ? 'first' : 'last') as 'first' | 'last',
-    
-    // HTML filtering
-    htmlTagAllowed: options.commentsHTMLTagAllowed || '',
   };
 }
 

@@ -20,8 +20,8 @@
     "reset-password:cloudflare": "tsx scripts/reset-password.ts --target cloudflare"
   },
   "dependencies": {
-    "@astrojs/cloudflare": "^13.1.10",
-    "astro": "^6.1.8",
+    "@astrojs/cloudflare": "^13.2.0",
+    "astro": "^6.1.9",
     "drizzle-orm": "^0.45.2",
     "marked": "^18.0.2",
     "sanitize-html": "^2.17.3",

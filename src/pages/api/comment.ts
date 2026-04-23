@@ -109,7 +109,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const recentComment = await db
       .select({ created: schema.comments.created })
       .from(schema.comments)
-      .where(eq(schema.comments.ip, ip))
+      .where(and(
+        eq(schema.comments.cid, cid),
+        eq(schema.comments.ip, ip)
+      ))
       .orderBy(sql`${schema.comments.created} DESC`)
       .limit(1);
 

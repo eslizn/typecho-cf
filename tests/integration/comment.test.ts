@@ -467,4 +467,61 @@ describe('POST /api/comment', () => {
     expect(location).toContain('/archives/1/');
     expect(location).toContain('#comments');
   });
+
+  // NEW: Per-article rate limiting test
+  it('allows same IP to comment on different articles (rate limit is per-article)', async () => {
+    await seedOptions(testDb, {
+      commentsPostIntervalEnable: '1',
+      commentsPostInterval: '60',  // 60 seconds
+    });
+    
+    // Create two separate articles
+    await testDb.insert(schema.contents).values({
+      title: 'Post 1',
+      slug: 'post-1',
+      created: Math.floor(Date.now() / 1000) - 100,
+      type: 'post',
+      status: 'publish',
+      allowComment: '1',
+    });
+    const post1 = await testDb.query.contents.findFirst({
+      where: (contents, { eq }) => eq(contents.slug, 'post-1'),
+    });
+
+    await testDb.insert(schema.contents).values({
+      title: 'Post 2',
+      slug: 'post-2',
+      created: Math.floor(Date.now() / 1000) - 100,
+      type: 'post',
+      status: 'publish',
+      allowComment: '1',
+    });
+    const post2 = await testDb.query.contents.findFirst({
+      where: (contents, { eq }) => eq(contents.slug, 'post-2'),
+    });
+
+    // Comment on Post 1 from IP 7.7.7.7
+    const req1 = makeCommentRequest(
+      { cid: String(post1!.cid), text: 'Comment on post 1', author: 'Test' },
+      { 'cf-connecting-ip': '7.7.7.7' },
+    );
+    const res1 = await POST({ request: req1, locals: {} } as any);
+    expect(res1.status).toBe(302);
+
+    // Immediately comment on Post 2 from same IP (should succeed since it's a different article)
+    const req2 = makeCommentRequest(
+      { cid: String(post2!.cid), text: 'Comment on post 2', author: 'Test' },
+      { 'cf-connecting-ip': '7.7.7.7' },
+    );
+    const res2 = await POST({ request: req2, locals: {} } as any);
+    expect(res2.status).toBe(302);
+
+    // But immediate follow-up comment on Post 1 should fail (rate limit)
+    const req3 = makeCommentRequest(
+      { cid: String(post1!.cid), text: 'Another comment on post 1', author: 'Test' },
+      { 'cf-connecting-ip': '7.7.7.7' },
+    );
+    const res3 = await POST({ request: req3, locals: {} } as any);
+    expect(res3.status).toBe(429);
+  });
 });

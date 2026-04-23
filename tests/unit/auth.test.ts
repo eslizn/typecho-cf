@@ -13,6 +13,8 @@ import {
   validateAuthToken,
   generateSecurityToken,
   validateSecurityToken,
+  generateCommentToken,
+  validateCommentToken,
   generateRandomString,
   getAuthCookies,
   setAuthCookieHeaders,
@@ -369,5 +371,50 @@ describe('generateRandomString() rejection sampling', () => {
     expect(s).toMatch(/[a-z]/);
     expect(s).toMatch(/[A-Z]/);
     expect(s).toMatch(/[0-9]/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Comment CSRF token (anti-spam, matches Typecho Security::getToken)
+// ---------------------------------------------------------------------------
+describe('generateCommentToken() / validateCommentToken()', () => {
+  it('generates a 64-char hex string', async () => {
+    const token = await generateCommentToken('mysecret', 'https://example.com/post/');
+    expect(token).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it('validates a correct token', async () => {
+    const token = await generateCommentToken('mysecret', 'https://example.com/post/');
+    expect(await validateCommentToken(token, 'mysecret', 'https://example.com/post/')).toBe(true);
+  });
+
+  it('rejects token with wrong secret', async () => {
+    const token = await generateCommentToken('mysecret', 'https://example.com/post/');
+    expect(await validateCommentToken(token, 'wrong-secret', 'https://example.com/post/')).toBe(false);
+  });
+
+  it('rejects token with wrong URL', async () => {
+    const token = await generateCommentToken('mysecret', 'https://example.com/post/');
+    expect(await validateCommentToken(token, 'mysecret', 'https://example.com/other/')).toBe(false);
+  });
+
+  it('rejects an empty token', async () => {
+    expect(await validateCommentToken('', 'mysecret', 'https://example.com/post/')).toBe(false);
+  });
+
+  it('rejects a completely invalid token string', async () => {
+    expect(await validateCommentToken('not-a-token', 'mysecret', 'https://example.com/')).toBe(false);
+  });
+
+  it('different URLs produce different tokens', async () => {
+    const t1 = await generateCommentToken('secret', 'https://example.com/a/');
+    const t2 = await generateCommentToken('secret', 'https://example.com/b/');
+    expect(t1).not.toBe(t2);
+  });
+
+  it('different secrets produce different tokens for same URL', async () => {
+    const t1 = await generateCommentToken('secret1', 'https://example.com/');
+    const t2 = await generateCommentToken('secret2', 'https://example.com/');
+    expect(t1).not.toBe(t2);
   });
 });

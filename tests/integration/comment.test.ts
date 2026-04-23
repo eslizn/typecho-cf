@@ -8,6 +8,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import * as schema from '@/db/schema';
+import { generateCommentToken } from '@/lib/auth';
 
 // ---- helpers ----------------------------------------------------------------
 
@@ -545,12 +546,8 @@ describe('POST /api/comment', () => {
   it('accepts comment when commentsAntiSpam is enabled and token is correct', async () => {
     await seedOptions(testDb, { commentsAntiSpam: '1' });
     const content = await seedContent(testDb);
-    // Token = SHA256(secret + '&' + requestUrl), requestUrl = 'https://example.com/api/comment'
-    const secret = 'test-secret';
     const requestUrl = 'https://example.com/api/comment';
-    const msgUint8 = new TextEncoder().encode(`${secret}&${requestUrl}`);
-    const hashBuf = await crypto.subtle.digest('SHA-256', msgUint8);
-    const token = Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
+    const token = await generateCommentToken('test-secret', requestUrl);
     const req = makeCommentRequest({ cid: String(content.cid), text: 'Legit comment', author: 'Alice', _: token });
     const res = await POST({ request: req, locals: {} } as any);
     expect(res.status).toBe(302);

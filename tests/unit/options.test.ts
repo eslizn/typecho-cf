@@ -5,27 +5,12 @@
  * using an in-memory better-sqlite3 database via Drizzle ORM.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
-import * as schema from '@/db/schema';
+import { createTestDb } from '../helpers';
 import { loadOptions, getOption, setOption, deleteOption, computeUrls } from '@/lib/options';
-
-function makeDb() {
-  const sqlite = new Database(':memory:');
-  sqlite.exec(`
-    CREATE TABLE typecho_options (
-      name TEXT NOT NULL,
-      "user" INTEGER NOT NULL DEFAULT 0,
-      value TEXT,
-      PRIMARY KEY (name, "user")
-    );
-  `);
-  return drizzle(sqlite, { schema });
-}
 
 describe('loadOptions()', () => {
   it('returns defaults when database is empty', async () => {
-    const db = makeDb();
+    const db = createTestDb();
     const opts = await loadOptions(db);
     expect(opts.title).toBe('Hello World');
     expect(opts.pageSize).toBe(5);
@@ -34,7 +19,7 @@ describe('loadOptions()', () => {
   });
 
   it('overrides defaults with values from DB', async () => {
-    const db = makeDb();
+    const db = createTestDb();
     await setOption(db, 'title', 'My Blog');
     await setOption(db, 'pageSize', '10');
     const opts = await loadOptions(db);
@@ -43,7 +28,7 @@ describe('loadOptions()', () => {
   });
 
   it('parses numeric option keys as integers', async () => {
-    const db = makeDb();
+    const db = createTestDb();
     await setOption(db, 'allowRegister', '1');
     const opts = await loadOptions(db);
     expect(typeof opts.allowRegister).toBe('number');
@@ -51,7 +36,7 @@ describe('loadOptions()', () => {
   });
 
   it('auto-generates secret when missing and persists it', async () => {
-    const db = makeDb();
+    const db = createTestDb();
     const opts1 = await loadOptions(db);
     expect(opts1.secret).toBeTruthy();
     expect(opts1.secret.length).toBeGreaterThan(0);
@@ -64,12 +49,12 @@ describe('loadOptions()', () => {
 
 describe('getOption()', () => {
   it('returns null for non-existent option', async () => {
-    const db = makeDb();
+    const db = createTestDb();
     expect(await getOption(db, 'nonexistent')).toBeNull();
   });
 
   it('returns stored value', async () => {
-    const db = makeDb();
+    const db = createTestDb();
     await setOption(db, 'title', 'Test Blog');
     expect(await getOption(db, 'title')).toBe('Test Blog');
   });
@@ -77,13 +62,13 @@ describe('getOption()', () => {
 
 describe('setOption()', () => {
   it('inserts a new option', async () => {
-    const db = makeDb();
+    const db = createTestDb();
     await setOption(db, 'theme', 'my-theme');
     expect(await getOption(db, 'theme')).toBe('my-theme');
   });
 
   it('updates an existing option (upsert)', async () => {
-    const db = makeDb();
+    const db = createTestDb();
     await setOption(db, 'title', 'First');
     await setOption(db, 'title', 'Updated');
     expect(await getOption(db, 'title')).toBe('Updated');
@@ -92,14 +77,14 @@ describe('setOption()', () => {
 
 describe('deleteOption()', () => {
   it('removes an option', async () => {
-    const db = makeDb();
+    const db = createTestDb();
     await setOption(db, 'toDelete', 'value');
     await deleteOption(db, 'toDelete');
     expect(await getOption(db, 'toDelete')).toBeNull();
   });
 
   it('does not throw when deleting non-existent option', async () => {
-    const db = makeDb();
+    const db = createTestDb();
     await expect(deleteOption(db, 'ghost')).resolves.toBeUndefined();
   });
 });

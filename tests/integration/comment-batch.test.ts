@@ -5,9 +5,8 @@
  * Verifies auth guards, commentsNum adjustments, and redirect behaviour.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
 import * as schema from '@/db/schema';
+import { createTestDb } from '../helpers';
 import { hashPassword, generateAuthToken } from '@/lib/auth';
 
 // ---- shared DB ref (mutated in beforeEach) -----------------------------------
@@ -23,71 +22,16 @@ vi.mock('@/db', async () => {
   };
 });
 
+vi.mock('@/lib/auth', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/auth')>('@/lib/auth');
+  return {
+    ...actual,
+    requireAdminCSRF: async () => null,
+  };
+});
+
 // Import both GET and POST exports (GET was the fix for delete-spam)
 import { GET, POST } from '@/pages/api/admin/comment-batch';
-
-// ---- helpers -----------------------------------------------------------------
-
-function createTestDb() {
-  const sqlite = new Database(':memory:');
-  sqlite.exec(`
-    CREATE TABLE typecho_options (
-      name TEXT NOT NULL,
-      "user" INTEGER NOT NULL DEFAULT 0,
-      value TEXT,
-      PRIMARY KEY (name, "user")
-    );
-    CREATE TABLE typecho_users (
-      uid INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT,
-      password TEXT,
-      mail TEXT,
-      url TEXT,
-      screenName TEXT,
-      created INTEGER DEFAULT 0,
-      activated INTEGER DEFAULT 0,
-      logged INTEGER DEFAULT 0,
-      "group" TEXT DEFAULT 'visitor',
-      authCode TEXT
-    );
-    CREATE TABLE typecho_contents (
-      cid INTEGER PRIMARY KEY AUTOINCREMENT,
-      title TEXT,
-      slug TEXT UNIQUE,
-      created INTEGER DEFAULT 0,
-      modified INTEGER DEFAULT 0,
-      text TEXT,
-      "order" INTEGER DEFAULT 0,
-      authorId INTEGER DEFAULT 0,
-      template TEXT,
-      type TEXT DEFAULT 'post',
-      status TEXT DEFAULT 'publish',
-      password TEXT,
-      commentsNum INTEGER DEFAULT 0,
-      allowComment TEXT DEFAULT '0',
-      allowPing TEXT DEFAULT '0',
-      allowFeed TEXT DEFAULT '0',
-      parent INTEGER DEFAULT 0
-    );
-    CREATE TABLE typecho_comments (
-      coid INTEGER PRIMARY KEY AUTOINCREMENT,
-      cid INTEGER DEFAULT 0,
-      created INTEGER DEFAULT 0,
-      author TEXT,
-      authorId INTEGER DEFAULT 0,
-      ownerId INTEGER DEFAULT 0,
-      mail TEXT,
-      url TEXT,
-      ip TEXT,
-      agent TEXT,
-      text TEXT,
-      type TEXT DEFAULT 'comment',
-      status TEXT DEFAULT 'approved',
-      parent INTEGER DEFAULT 0
-    );
-  `);
-  return drizzle(sqlite, { schema });
-}
 
 const TEST_SECRET = 'test-secret-batch';
 const TEST_AUTH_CODE = 'batchauthcode';

@@ -48,6 +48,8 @@ export interface PostListItem {
 export interface ThemeIndexProps extends ThemeBaseProps {
   posts: PostListItem[];
   pagination: PaginationInfo;
+  archiveTitle?: string;
+  archiveType?: string;
 }
 
 // ─── Post detail ────────────────────────────────────────────────────────
@@ -103,7 +105,7 @@ export interface ThemePageProps extends ThemeBaseProps {
 export interface ThemeArchiveProps extends ThemeBaseProps {
   /** Display title, e.g. "分类 技术 下的文章" */
   archiveTitle: string;
-  archiveType: 'category' | 'tag' | 'author' | 'search';
+  archiveType: 'category' | 'tag' | 'author' | 'search' | 'index';
   posts: PostListItem[];
   pagination: PaginationInfo;
 }

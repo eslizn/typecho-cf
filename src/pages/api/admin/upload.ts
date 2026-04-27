@@ -1,7 +1,7 @@
 import type { APIRoute } from 'astro';
 import { getDb, schema } from '@/db';
 import { loadOptions } from '@/lib/options';
-import { getAuthCookies, validateAuthToken, hasPermission } from '@/lib/auth';
+import { getAuthCookies, validateAuthToken, hasPermission, requireAdminCSRF } from '@/lib/auth';
 import { uploadToR2, deleteFromR2 } from '@/lib/upload';
 import { setActivatedPlugins, parseActivatedPlugins, doHook } from '@/lib/plugin';
 import { eq } from 'drizzle-orm';
@@ -40,6 +40,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
   }
 
   const { db, options, auth } = ctx;
+
+  const csrfError = await requireAdminCSRF(request, options.secret as string, auth.user.authCode!, auth.uid);
+  if (csrfError) return csrfError;
 
   try {
     const formData = await request.formData();
@@ -101,7 +104,11 @@ export const DELETE: APIRoute = async ({ request, locals, url }) => {
     return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: jsonHeaders });
   }
 
-  const { db } = ctx;
+  const { db, options, auth } = ctx;
+
+  const csrfError = await requireAdminCSRF(request, options.secret as string, auth.user.authCode!, auth.uid);
+  if (csrfError) return csrfError;
+
   const cid = parseInt(url.searchParams.get('cid') || '0', 10);
   if (!cid) {
     return new Response(JSON.stringify({ error: '缺少 cid 参数' }), { status: 400, headers: jsonHeaders });

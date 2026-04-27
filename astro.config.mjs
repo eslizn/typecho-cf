@@ -9,7 +9,7 @@ export default defineConfig({
     imageService: 'passthrough',
   }),
   security: {
-    checkOrigin: false,
+    checkOrigin: true,
   },
   integrations: [themeLoader(), pluginLoader()],
 });

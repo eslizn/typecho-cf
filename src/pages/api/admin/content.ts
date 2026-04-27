@@ -1,7 +1,7 @@
 import type { APIRoute } from 'astro';
 import { getDb, schema } from '@/db';
 import { loadOptions } from '@/lib/options';
-import { getAuthCookies, validateAuthToken, hasPermission } from '@/lib/auth';
+import { getAuthCookies, validateAuthToken, hasPermission, requireAdminCSRF } from '@/lib/auth';
 import { generateSlug } from '@/lib/content';
 import { setActivatedPlugins, parseActivatedPlugins, applyFilter, doHook } from '@/lib/plugin';
 import { purgeContentCache } from '@/lib/cache';
@@ -57,6 +57,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
     return new Response('Forbidden', { status: 403 });
   }
 
+  // CSRF check for all state-changing operations
+  const csrfError = await requireAdminCSRF(request, options.secret as string, auth.user.authCode!, auth.uid);
+  if (csrfError) return csrfError;
+
   const formData = await request.formData();
   const action = formData.get('do')?.toString() || 'create';
   const typeInput = formData.get('type')?.toString() || 'post';
@@ -89,7 +93,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
   if (action === 'create') {
     // Build content data — slug will be backfilled with cid if empty
-    let contentData: Record<string, any> = {
+    let contentData: Record<string, unknown> = {
       title,
       slug: slugInput || `temp-${Date.now().toString(36)}`,
       created: now,

@@ -1,7 +1,7 @@
 import type { APIRoute } from 'astro';
 import { getDb, schema } from '@/db';
 import { loadOptions } from '@/lib/options';
-import { getAuthCookies, validateAuthToken, hasPermission, hashPassword, generateRandomString } from '@/lib/auth';
+import { getAuthCookies, validateAuthToken, hasPermission, hashPassword, generateRandomString, requireAdminCSRF } from '@/lib/auth';
 import { eq } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 
@@ -17,6 +17,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
   if (!auth || !hasPermission(auth.user.group || 'visitor', 'administrator')) {
     return new Response('Forbidden', { status: 403 });
   }
+
+  const csrfError = await requireAdminCSRF(request, options.secret as string, auth.user.authCode!, auth.uid);
+  if (csrfError) return csrfError;
 
   const formData = await request.formData();
   const action = formData.get('do')?.toString() || 'create';
@@ -93,7 +96,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       return new Response('邮箱不能为空', { status: 400 });
     }
 
-    const updateData: Record<string, any> = {
+    const updateData: Record<string, unknown> = {
       mail,
       screenName: screenName || existing.name,
       url: url || null,

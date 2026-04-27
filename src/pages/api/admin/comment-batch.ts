@@ -1,7 +1,7 @@
 import type { APIRoute } from 'astro';
 import { getDb, schema } from '@/db';
 import { loadOptions } from '@/lib/options';
-import { getAuthCookies, validateAuthToken, hasPermission } from '@/lib/auth';
+import { getAuthCookies, validateAuthToken, hasPermission, requireAdminCSRF } from '@/lib/auth';
 import { purgeContentCache } from '@/lib/cache';
 import { eq, sql } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
@@ -21,6 +21,9 @@ async function handler({ request, locals, url }: { request: Request; locals: App
   if (!auth || !hasPermission(auth.user.group || 'visitor', 'contributor')) {
     return new Response('Forbidden', { status: 403 });
   }
+
+  const csrfError = await requireAdminCSRF(request, options.secret as string, auth.user.authCode!, auth.uid);
+  if (csrfError) return csrfError;
 
   const action = url.searchParams.get('do') || '';
 

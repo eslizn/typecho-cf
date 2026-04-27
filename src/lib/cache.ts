@@ -40,7 +40,7 @@ export async function purgeOptionsCache(): Promise<void> {
 /**
  * Try to read cached options JSON.
  */
-export async function getCachedOptions(): Promise<Record<string, any> | null> {
+export async function getCachedOptions(): Promise<Record<string, unknown> | null> {
   const cache = caches.default;
   const res = await cache.match(new Request(`${INTERNAL_ORIGIN}/__options`));
   if (!res) return null;
@@ -55,7 +55,7 @@ export async function getCachedOptions(): Promise<Record<string, any> | null> {
  * Write options JSON to cache (TTL = 10 minutes).
  * Cache API storage is per-isolate and not publicly accessible.
  */
-export async function setCachedOptions(data: Record<string, any>): Promise<void> {
+export async function setCachedOptions(data: Record<string, unknown>): Promise<void> {
   const cache = caches.default;
   const res = new Response(JSON.stringify(data), {
     headers: {

@@ -1,7 +1,7 @@
 import type { APIRoute } from 'astro';
 import { getDb, schema } from '@/db';
 import { loadOptions } from '@/lib/options';
-import { getAuthCookies, validateAuthToken, hashPassword } from '@/lib/auth';
+import { getAuthCookies, validateAuthToken, hashPassword, requireAdminCSRF } from '@/lib/auth';
 import { eq, and, ne } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 
@@ -15,6 +15,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
   const auth = await validateAuthToken(token, options.secret, db);
   if (!auth) return new Response('Unauthorized', { status: 401 });
+
+  const csrfError = await requireAdminCSRF(request, options.secret as string, auth.user.authCode!, auth.uid);
+  if (csrfError) return csrfError;
 
   const formData = await request.formData();
   const screenName = formData.get('screenName')?.toString()?.trim() || auth.user.name;
@@ -38,7 +41,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     return new Response('邮箱已被其他用户使用', { status: 409 });
   }
 
-  const updateData: Record<string, any> = {
+  const updateData: Record<string, unknown> = {
     screenName,
     mail,
     url: url || null,

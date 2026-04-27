@@ -6,7 +6,7 @@
 import type { APIRoute } from 'astro';
 import { getDb } from '@/db';
 import { loadOptions, setOption } from '@/lib/options';
-import { getAuthCookies, validateAuthToken, hasPermission } from '@/lib/auth';
+import { getAuthCookies, validateAuthToken, hasPermission, requireAdminCSRF } from '@/lib/auth';
 import { getPlugin, pluginHasConfig, isPluginActive, loadPluginConfig, getPluginConfigDefaults } from '@/lib/plugin';
 import { purgeSiteCache } from '@/lib/cache';
 import { env } from 'cloudflare:workers';
@@ -67,8 +67,11 @@ export const POST: APIRoute = async ({ request }) => {
     });
   }
 
+  const csrfError = await requireAdminCSRF(request, auth.options.secret as string, auth.user.authCode!, auth.user.uid);
+  if (csrfError) return csrfError;
+
   try {
-    const body = await request.json() as { plugin?: string; settings?: Record<string, any> };
+    const body = await request.json() as { plugin?: string; settings?: Record<string, unknown> };
     const pluginId = body.plugin;
     const settings = body.settings;
 
@@ -103,7 +106,7 @@ export const POST: APIRoute = async ({ request }) => {
 
     // Only keep keys that are defined in the plugin's config
     const configDef = plugin.manifest.config!;
-    const sanitized: Record<string, any> = {};
+    const sanitized: Record<string, unknown> = {};
     for (const key of Object.keys(configDef)) {
       if (key in settings) {
         sanitized[key] = settings[key];

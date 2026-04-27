@@ -159,7 +159,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const agent = request.headers.get('user-agent') || '';
 
   // Insert comment
-  let commentData: Record<string, any> = {
+  let commentData: Record<string, unknown> = {
     cid,
     created: now,
     author,
@@ -192,7 +192,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
   // Check if any plugin rejected the comment (e.g. captcha verification failed)
   if (commentData._rejected) {
-    const reason = commentData._rejected;
+    const reason = String(commentData._rejected);
     delete commentData._rejected;
     return new Response(reason, { status: 403 });
   }

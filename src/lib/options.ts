@@ -136,7 +136,7 @@ export async function loadOptions(db: Database): Promise<SiteOptions> {
     .from(schema.options)
     .where(eq(schema.options.user, 0));
 
-  const opts: Record<string, string | number | null> = { ...defaultOptions } as any;
+  const opts: Record<string, string | number | null | undefined> = { ...defaultOptions };
   for (const row of rows) {
     opts[row.name] = row.value;
   }

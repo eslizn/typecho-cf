@@ -5,11 +5,12 @@
  * Each function returns a standardized Props object for theme components.
  * This separation allows theme components to be purely presentational.
  */
-import { eq, and, desc, asc, lt, gt, sql, like } from 'drizzle-orm';
-import { schema } from '@/db';
+import { eq, and, desc, asc, lt, gt, sql } from 'drizzle-orm';
+import { schema, type Database } from '@/db';
+import type { SiteOptions } from '@/lib/options';
 import { loadSidebarData, loadNavPages } from '@/lib/sidebar';
 import {
-  buildPermalink, formatDate, buildAuthorLink,
+  buildPermalink, buildAuthorLink,
   buildCategoryLink, buildTagLink, buildSearchLink,
 } from '@/lib/content';
 import { renderContentExcerpt, renderMarkdown, renderMarkdownFiltered } from '@/lib/markdown';
@@ -20,6 +21,16 @@ import type {
   ThemeIndexProps, ThemePostProps, ThemePageProps, ThemeArchiveProps, ThemeNotFoundProps,
   PostListItem, CommentNode, CommentOptions,
 } from '@/lib/theme-props';
+
+// ─── Local row types (derived from Drizzle schema) ───────────────────────
+
+type ContentRow = typeof schema.contents.$inferSelect;
+type CommentRow = typeof schema.comments.$inferSelect;
+type UserRow = typeof schema.users.$inferSelect;
+
+type CategoryEntry = { name: string; slug: string; permalink: string };
+type CategoryMap = Map<number, CategoryEntry[]>;
+type AuthorMap = Map<number, UserRow>;
 
 // ─── Helpers ────────────────────────────────────────────────────────────
 
@@ -33,8 +44,8 @@ async function loadCommon(ctx: RequestContext, requestUrl: string) {
   return { options, urls, user, isLoggedIn, pages, sidebarData, currentPath };
 }
 
-function getPage(locals: any, url: URL): number {
-  const pageParam = locals._page || url.searchParams.get('page');
+function getPage(locals: Record<string, unknown>, url: URL): number {
+  const pageParam = (locals._page as number | undefined) ?? url.searchParams.get('page');
   return pageParam ? (typeof pageParam === 'number' ? pageParam : parseInt(pageParam, 10) || 1) : 1;
 }
 
@@ -44,7 +55,7 @@ async function sha256hex(str: string): Promise<string> {
   return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-function buildCommentTree(allComments: any[]): CommentNode[] {
+function buildCommentTree(allComments: CommentRow[]): CommentNode[] {
   const map = new Map<number, CommentNode>();
   const roots: CommentNode[] = [];
 
@@ -72,7 +83,7 @@ function buildCommentTree(allComments: any[]): CommentNode[] {
   return roots;
 }
 
-async function buildGravatarMap(allComments: any[], avatarRating: string): Promise<Record<number, string>> {
+async function buildGravatarMap(allComments: CommentRow[], avatarRating: string): Promise<Record<number, string>> {
   const entries = await Promise.all(
     allComments.map(async (c) => {
       const hash = c.mail ? await sha256hex(c.mail) : '';
@@ -82,9 +93,9 @@ async function buildGravatarMap(allComments: any[], avatarRating: string): Promi
   return Object.fromEntries(entries);
 }
 
-function buildCommentOptions(options: any, securityToken: string): CommentOptions {
+function buildCommentOptions(options: SiteOptions, securityToken: string): CommentOptions {
   return {
-    allowComment: true, // caller overrides as needed
+    allowComment: true,
     requireMail: !!options.commentsRequireMail,
     showUrl: !!options.commentsShowUrl,
     showAvatar: !!options.commentsAvatar,
@@ -93,35 +104,32 @@ function buildCommentOptions(options: any, securityToken: string): CommentOption
     dateFormat: options.commentDateFormat || 'Y-m-d H:i',
     timezone: options.timezone || 28800,
     securityToken,
-    
-    // Display settings
     showCommentOnly: !!options.commentsShowCommentOnly,
     markdown: !!options.commentsMarkdown,
     urlNofollow: !!options.commentsUrlNofollow,
-    
-    // Threading & pagination
     threaded: !!options.commentsThreaded,
     maxNestingLevels: Number(options.commentsMaxNestingLevels) || 2,
     pageBreak: !!options.commentsPageBreak,
     pageSize: Number(options.commentsPageSize) || 20,
     pageDisplay: (options.commentsPageDisplay === 'first' ? 'first' : 'last') as 'first' | 'last',
-    
-    // HTML filtering
     htmlTagAllowed: options.commentsHTMLTagAllowed || '',
   };
 }
 
-// Fetch authors for a set of posts
-async function fetchAuthors(db: any, authorIds: number[]) {
-  if (authorIds.length === 0) return new Map<number, any>();
+async function fetchAuthors(db: Database, authorIds: number[]): Promise<AuthorMap> {
+  if (authorIds.length === 0) return new Map();
   const authors = await db.select().from(schema.users)
-    .where(sql`${schema.users.uid} IN (${sql.join(authorIds.map((id: number) => sql`${id}`), sql`, `)})`);
-  return new Map<number, any>(authors.map((a: any) => [a.uid, a]));
+    .where(sql`${schema.users.uid} IN (${sql.join(authorIds.map(id => sql`${id}`), sql`, `)})`);
+  return new Map(authors.map(a => [a.uid, a]));
 }
 
-// Fetch categories for a set of post IDs
-async function fetchPostCategories(db: any, postIds: number[], siteUrl: string, categoryPattern?: string | null) {
-  if (postIds.length === 0) return new Map<number, Array<{ name: string; slug: string; permalink: string }>>();
+async function fetchPostCategories(
+  db: Database,
+  postIds: number[],
+  siteUrl: string,
+  categoryPattern?: string | null,
+): Promise<CategoryMap> {
+  if (postIds.length === 0) return new Map();
   const rows = await db
     .select({
       cid: schema.relationships.cid,
@@ -133,12 +141,12 @@ async function fetchPostCategories(db: any, postIds: number[], siteUrl: string, 
     .innerJoin(schema.metas, eq(schema.relationships.mid, schema.metas.mid))
     .where(
       and(
-        sql`${schema.relationships.cid} IN (${sql.join(postIds.map((id: number) => sql`${id}`), sql`, `)})`,
+        sql`${schema.relationships.cid} IN (${sql.join(postIds.map(id => sql`${id}`), sql`, `)})`,
         eq(schema.metas.type, 'category')
       )
     );
 
-  const map = new Map<number, Array<{ name: string; slug: string; permalink: string }>>();
+  const map: CategoryMap = new Map();
   for (const row of rows) {
     if (!map.has(row.cid)) map.set(row.cid, []);
     map.get(row.cid)!.push({
@@ -151,9 +159,9 @@ async function fetchPostCategories(db: any, postIds: number[], siteUrl: string, 
 }
 
 function toPostListItem(
-  post: any,
-  authorMap: Map<number, any>,
-  categoryMap: Map<number, Array<{ name: string; slug: string; permalink: string }>>,
+  post: ContentRow,
+  authorMap: AuthorMap,
+  categoryMap: CategoryMap,
   siteUrl: string,
   permalinkPattern?: string | null,
 ): PostListItem {
@@ -171,8 +179,84 @@ function toPostListItem(
     excerpt: renderContentExcerpt(post.text || '', '- 阅读剩余部分 -', permalink),
     created: post.created || 0,
     commentsNum: post.commentsNum || 0,
-    author: author ? { uid: author.uid, name: author.name, screenName: author.screenName || author.name } : null,
+    author: author ? { uid: author.uid, name: author.name || '', screenName: author.screenName || author.name || '' } : null,
     categories,
+  };
+}
+
+// ─── Shared archive query ───────────────────────────────────────────────
+// All five list pages (index, category, tag, author, search) share this
+// pattern: count → paginated query → batch fetch authors+categories → map.
+
+interface ArchiveParams {
+  archiveTitle: string;
+  archiveType: 'index' | 'category' | 'tag' | 'author' | 'search';
+  baseUrl: string;
+  /** Additional WHERE conditions beyond type='post' + status='publish' */
+  extraWhere?: ReturnType<typeof sql>;
+  /** If set, INNER JOIN relationships and filter on this meta ID */
+  joinMid?: number;
+  authorOverride?: AuthorMap;
+}
+
+async function prepareArchiveData(
+  ctx: RequestContext,
+  requestUrl: string,
+  locals: Record<string, unknown>,
+  url: URL,
+  params: ArchiveParams,
+): Promise<ThemeArchiveProps> {
+  const { db, options, urls } = ctx;
+  const common = await loadCommon(ctx, requestUrl);
+  const page = getPage(locals, url);
+  const pageSize = options.pageSize || 5;
+
+  const baseConditions = [eq(schema.contents.type, 'post'), eq(schema.contents.status, 'publish')];
+  if (params.extraWhere) baseConditions.push(params.extraWhere);
+
+  const hasJoin = params.joinMid !== undefined;
+
+  const countBase = hasJoin
+    ? db.select({ count: sql<number>`count(*)` }).from(schema.contents)
+        .innerJoin(schema.relationships, eq(schema.contents.cid, schema.relationships.cid))
+    : db.select({ count: sql<number>`count(*)` }).from(schema.contents);
+
+  const countWhere = hasJoin
+    ? and(eq(schema.relationships.mid, params.joinMid!), ...baseConditions)
+    : and(...baseConditions);
+
+  const countResult = await countBase.where(countWhere);
+  const totalPosts = countResult[0]?.count || 0;
+  const pg = paginate(totalPosts, page, pageSize, params.baseUrl);
+
+  const listBase = hasJoin
+    ? db.select({ content: schema.contents }).from(schema.contents)
+        .innerJoin(schema.relationships, eq(schema.contents.cid, schema.relationships.cid))
+    : db.select().from(schema.contents);
+
+  const posts = await listBase
+    .where(countWhere)
+    .orderBy(desc(schema.contents.created))
+    .limit(pageSize)
+    .offset((pg.currentPage - 1) * pageSize);
+
+  const rawPosts: ContentRow[] = hasJoin
+    ? (posts as { content: ContentRow }[]).map(p => p.content)
+    : (posts as ContentRow[]);
+  const authorIds = [...new Set(rawPosts.map(p => p.authorId).filter((id): id is number => Boolean(id)))];
+  const postIds = rawPosts.map(p => p.cid).filter((id): id is number => id !== null);
+
+  const authorMap = params.authorOverride ?? await fetchAuthors(db, authorIds);
+  const categoryMap = await fetchPostCategories(db, postIds, urls.siteUrl, options.categoryPattern as string | undefined);
+
+  return {
+    ...common,
+    archiveTitle: params.archiveTitle,
+    archiveType: params.archiveType,
+    posts: rawPosts.map(p =>
+      toPostListItem(p, authorMap, categoryMap, urls.siteUrl, options.permalinkPattern as string | undefined)
+    ),
+    pagination: pg,
   };
 }
 
@@ -181,57 +265,15 @@ function toPostListItem(
 export async function prepareIndexData(
   ctx: RequestContext,
   requestUrl: string,
-  locals: any,
+  locals: Record<string, unknown>,
   url: URL,
 ): Promise<ThemeIndexProps> {
-  const { db, options, urls } = ctx;
-  const common = await loadCommon(ctx, requestUrl);
-  const page = getPage(locals, url);
-
-  // Count
-  const countResult = await db
-    .select({ count: sql<number>`count(*)` })
-    .from(schema.contents)
-    .where(
-      and(
-        eq(schema.contents.type, 'post'),
-        eq(schema.contents.status, 'publish'),
-        sql`${schema.contents.created} < ${Math.floor(Date.now() / 1000)}`
-      )
-    );
-  const totalPosts = countResult[0]?.count || 0;
-  const pagination = paginate(totalPosts, page, options.pageSize || 5, urls.siteUrl + '/');
-
-  // Posts
-  const posts = await db
-    .select()
-    .from(schema.contents)
-    .where(
-      and(
-        eq(schema.contents.type, 'post'),
-        eq(schema.contents.status, 'publish'),
-        sql`${schema.contents.created} < ${Math.floor(Date.now() / 1000)}`
-      )
-    )
-    .orderBy(desc(schema.contents.created))
-    .limit(options.pageSize || 5)
-    .offset((pagination.currentPage - 1) * (options.pageSize || 5));
-
-  const authorIds = [...new Set(posts.map((p: any) => p.authorId).filter(Boolean))];
-  const postIds = posts.map((p: any) => p.cid);
-
-  const [authorMap, categoryMap] = await Promise.all([
-    fetchAuthors(db, authorIds),
-    fetchPostCategories(db, postIds, urls.siteUrl, options.categoryPattern as string | undefined),
-  ]);
-
-  return {
-    ...common,
-    posts: posts.map((p: any) =>
-      toPostListItem(p, authorMap, categoryMap, urls.siteUrl, options.permalinkPattern as string | undefined)
-    ),
-    pagination,
-  };
+  return prepareArchiveData(ctx, requestUrl, locals, url, {
+    archiveTitle: '',
+    archiveType: 'index',
+    baseUrl: ctx.urls.siteUrl + '/',
+    extraWhere: sql`${schema.contents.created} < ${Math.floor(Date.now() / 1000)}`,
+  });
 }
 
 // ─── Post detail ────────────────────────────────────────────────────────
@@ -281,12 +323,13 @@ export async function preparePostData(
     .innerJoin(schema.metas, eq(schema.relationships.mid, schema.metas.mid))
     .where(eq(schema.relationships.cid, cidNum));
 
-  const categories = relatedMetas.filter((m: any) => m.type === 'category').map((m: any) => ({
+  type MetaEntry = { name: string | null; slug: string | null; type: string | null };
+  const categories = (relatedMetas as MetaEntry[]).filter(m => m.type === 'category').map(m => ({
     name: m.name || '',
     slug: m.slug || '',
     permalink: buildCategoryLink(m.slug || '', urls.siteUrl, options.categoryPattern as string | undefined),
   }));
-  const tags = relatedMetas.filter((m: any) => m.type === 'tag').map((m: any) => ({
+  const tags = (relatedMetas as MetaEntry[]).filter(m => m.type === 'tag').map(m => ({
     name: m.name || '',
     slug: m.slug || '',
     permalink: buildTagLink(m.slug || '', urls.siteUrl),
@@ -350,7 +393,7 @@ export async function preparePostData(
       hasPassword,
       passwordVerified,
     },
-    author: author ? { uid: author.uid, name: author.name, screenName: author.screenName || author.name } : null,
+    author: author ? { uid: author.uid, name: author.name || '', screenName: author.screenName || author.name || '' } : null,
     categories,
     tags,
     comments: commentTree,
@@ -448,220 +491,80 @@ export async function prepareCategoryData(
   ctx: RequestContext,
   slug: string,
   requestUrl: string,
-  locals: any,
+  locals: Record<string, unknown>,
   url: URL,
 ): Promise<ThemeArchiveProps | Response> {
-  const { db, options, urls } = ctx;
-
-  const category = await db.query.metas.findFirst({
+  const category = await ctx.db.query.metas.findFirst({
     where: and(eq(schema.metas.slug, slug), eq(schema.metas.type, 'category')),
   });
   if (!category) return new Response('Not Found', { status: 404 });
 
-  const page = getPage(locals, url);
-  const countResult = await db
-    .select({ count: sql<number>`count(*)` })
-    .from(schema.contents)
-    .innerJoin(schema.relationships, eq(schema.contents.cid, schema.relationships.cid))
-    .where(and(eq(schema.relationships.mid, category.mid), eq(schema.contents.type, 'post'), eq(schema.contents.status, 'publish')));
-
-  const totalPosts = countResult[0]?.count || 0;
-  const pagination = paginate(totalPosts, page, options.pageSize || 5, buildCategoryLink(slug, urls.siteUrl, options.categoryPattern as string | undefined));
-
-  const posts = await db
-    .select({ content: schema.contents })
-    .from(schema.contents)
-    .innerJoin(schema.relationships, eq(schema.contents.cid, schema.relationships.cid))
-    .where(and(eq(schema.relationships.mid, category.mid), eq(schema.contents.type, 'post'), eq(schema.contents.status, 'publish')))
-    .orderBy(desc(schema.contents.created))
-    .limit(options.pageSize || 5)
-    .offset((pagination.currentPage - 1) * (options.pageSize || 5));
-
-  const rawPosts = posts.map((p: any) => p.content);
-  const authorIds = [...new Set(rawPosts.map((p: any) => p.authorId).filter(Boolean))];
-  const postIds = rawPosts.map((p: any) => p.cid);
-
-  const [authorMap, categoryMap] = await Promise.all([
-    fetchAuthors(db, authorIds),
-    fetchPostCategories(db, postIds, urls.siteUrl, options.categoryPattern as string | undefined),
-  ]);
-
-  const common = await loadCommon(ctx, requestUrl);
-
-  return {
-    ...common,
+  return prepareArchiveData(ctx, requestUrl, locals, url, {
     archiveTitle: `分类 ${category.name} 下的文章`,
     archiveType: 'category',
-    posts: rawPosts.map((p: any) =>
-      toPostListItem(p, authorMap, categoryMap, urls.siteUrl, options.permalinkPattern as string | undefined)
-    ),
-    pagination,
-  };
+    baseUrl: buildCategoryLink(slug, ctx.urls.siteUrl, ctx.options.categoryPattern as string | undefined),
+    joinMid: category.mid,
+  });
 }
 
 export async function prepareTagData(
   ctx: RequestContext,
   slug: string,
   requestUrl: string,
-  locals: any,
+  locals: Record<string, unknown>,
   url: URL,
 ): Promise<ThemeArchiveProps | Response> {
-  const { db, options, urls } = ctx;
-
-  const tag = await db.query.metas.findFirst({
+  const tag = await ctx.db.query.metas.findFirst({
     where: and(eq(schema.metas.slug, slug), eq(schema.metas.type, 'tag')),
   });
   if (!tag) return new Response('Not Found', { status: 404 });
 
-  const page = getPage(locals, url);
-  const countResult = await db
-    .select({ count: sql<number>`count(*)` })
-    .from(schema.contents)
-    .innerJoin(schema.relationships, eq(schema.contents.cid, schema.relationships.cid))
-    .where(and(eq(schema.relationships.mid, tag.mid), eq(schema.contents.type, 'post'), eq(schema.contents.status, 'publish')));
-
-  const totalPosts = countResult[0]?.count || 0;
-  const pagination = paginate(totalPosts, page, options.pageSize || 5, buildTagLink(slug, urls.siteUrl));
-
-  const posts = await db
-    .select({ content: schema.contents })
-    .from(schema.contents)
-    .innerJoin(schema.relationships, eq(schema.contents.cid, schema.relationships.cid))
-    .where(and(eq(schema.relationships.mid, tag.mid), eq(schema.contents.type, 'post'), eq(schema.contents.status, 'publish')))
-    .orderBy(desc(schema.contents.created))
-    .limit(options.pageSize || 5)
-    .offset((pagination.currentPage - 1) * (options.pageSize || 5));
-
-  const rawPosts = posts.map((p: any) => p.content);
-  const authorIds = [...new Set(rawPosts.map((p: any) => p.authorId).filter(Boolean))];
-  const postIds = rawPosts.map((p: any) => p.cid);
-
-  const [authorMap, categoryMap] = await Promise.all([
-    fetchAuthors(db, authorIds),
-    fetchPostCategories(db, postIds, urls.siteUrl, options.categoryPattern as string | undefined),
-  ]);
-
-  const common = await loadCommon(ctx, requestUrl);
-
-  return {
-    ...common,
+  return prepareArchiveData(ctx, requestUrl, locals, url, {
     archiveTitle: `标签 ${tag.name} 下的文章`,
     archiveType: 'tag',
-    posts: rawPosts.map((p: any) =>
-      toPostListItem(p, authorMap, categoryMap, urls.siteUrl, options.permalinkPattern as string | undefined)
-    ),
-    pagination,
-  };
+    baseUrl: buildTagLink(slug, ctx.urls.siteUrl),
+    joinMid: tag.mid,
+  });
 }
 
 export async function prepareAuthorData(
   ctx: RequestContext,
   uidNum: number,
   requestUrl: string,
-  locals: any,
+  locals: Record<string, unknown>,
   url: URL,
 ): Promise<ThemeArchiveProps | Response> {
-  const { db, options, urls } = ctx;
-
-  const author = await db.query.users.findFirst({
+  const author = await ctx.db.query.users.findFirst({
     where: eq(schema.users.uid, uidNum),
   });
   if (!author) return new Response('Not Found', { status: 404 });
 
-  const page = getPage(locals, url);
-  const countResult = await db
-    .select({ count: sql<number>`count(*)` })
-    .from(schema.contents)
-    .where(and(eq(schema.contents.authorId, uidNum), eq(schema.contents.type, 'post'), eq(schema.contents.status, 'publish')));
+  const authorMap: AuthorMap = new Map([[author.uid, author]]);
 
-  const totalPosts = countResult[0]?.count || 0;
-  const pagination = paginate(totalPosts, page, options.pageSize || 5, buildAuthorLink(uidNum, urls.siteUrl));
-
-  const posts = await db
-    .select()
-    .from(schema.contents)
-    .where(and(eq(schema.contents.authorId, uidNum), eq(schema.contents.type, 'post'), eq(schema.contents.status, 'publish')))
-    .orderBy(desc(schema.contents.created))
-    .limit(options.pageSize || 5)
-    .offset((pagination.currentPage - 1) * (options.pageSize || 5));
-
-  // Author is already known, build a simple map
-  const authorMap = new Map<number, any>([[author.uid, author]]);
-  const postIds = posts.map((p: any) => p.cid);
-  const categoryMap = await fetchPostCategories(db, postIds, urls.siteUrl, options.categoryPattern as string | undefined);
-
-  const common = await loadCommon(ctx, requestUrl);
-
-  return {
-    ...common,
+  return prepareArchiveData(ctx, requestUrl, locals, url, {
     archiveTitle: `${author.screenName || author.name} 发布的文章`,
     archiveType: 'author',
-    posts: posts.map((p: any) =>
-      toPostListItem(p, authorMap, categoryMap, urls.siteUrl, options.permalinkPattern as string | undefined)
-    ),
-    pagination,
-  };
+    baseUrl: buildAuthorLink(uidNum, ctx.urls.siteUrl),
+    extraWhere: eq(schema.contents.authorId, uidNum),
+    authorOverride: authorMap,
+  });
 }
 
 export async function prepareSearchData(
   ctx: RequestContext,
   keywords: string,
   requestUrl: string,
-  locals: any,
+  locals: Record<string, unknown>,
   url: URL,
 ): Promise<ThemeArchiveProps> {
-  const { db, options, urls } = ctx;
-
-  const page = getPage(locals, url);
   const searchTerm = `%${keywords}%`;
 
-  const countResult = await db
-    .select({ count: sql<number>`count(*)` })
-    .from(schema.contents)
-    .where(
-      and(
-        eq(schema.contents.type, 'post'),
-        eq(schema.contents.status, 'publish'),
-        sql`(${schema.contents.title} LIKE ${searchTerm} OR ${schema.contents.text} LIKE ${searchTerm})`
-      )
-    );
-
-  const totalPosts = countResult[0]?.count || 0;
-  const pagination = paginate(totalPosts, page, options.pageSize || 5, buildSearchLink(keywords, urls.siteUrl));
-
-  const posts = await db
-    .select()
-    .from(schema.contents)
-    .where(
-      and(
-        eq(schema.contents.type, 'post'),
-        eq(schema.contents.status, 'publish'),
-        sql`(${schema.contents.title} LIKE ${searchTerm} OR ${schema.contents.text} LIKE ${searchTerm})`
-      )
-    )
-    .orderBy(desc(schema.contents.created))
-    .limit(options.pageSize || 5)
-    .offset((pagination.currentPage - 1) * (options.pageSize || 5));
-
-  const authorIds = [...new Set(posts.map((p: any) => p.authorId).filter(Boolean))];
-  const postIds = posts.map((p: any) => p.cid);
-
-  const [authorMap, categoryMap] = await Promise.all([
-    fetchAuthors(db, authorIds),
-    fetchPostCategories(db, postIds, urls.siteUrl, options.categoryPattern as string | undefined),
-  ]);
-
-  const common = await loadCommon(ctx, requestUrl);
-
-  return {
-    ...common,
+  return prepareArchiveData(ctx, requestUrl, locals, url, {
     archiveTitle: `包含关键字 ${keywords} 的文章`,
     archiveType: 'search',
-    posts: posts.map((p: any) =>
-      toPostListItem(p, authorMap, categoryMap, urls.siteUrl, options.permalinkPattern as string | undefined)
-    ),
-    pagination,
-  };
+    baseUrl: buildSearchLink(keywords, ctx.urls.siteUrl),
+    extraWhere: sql`(${schema.contents.title} LIKE ${searchTerm} OR ${schema.contents.text} LIKE ${searchTerm})`,
+  });
 }
 
 // ─── 404 Not Found ──────────────────────────────────────────────────────

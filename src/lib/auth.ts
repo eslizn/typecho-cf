@@ -44,25 +44,33 @@ export async function hashPassword(password: string): Promise<string> {
 
 /**
  * Verify a password against a stored hash.
- * Supports PBKDF2 hashes. Legacy SHA-256 hashes return false to force password reset.
+ *
+ * @returns `true` if the password matches, `'wrong_password'` if it doesn't,
+ *          or `'needs_reset'` if the stored hash is a legacy format that
+ *          requires the user to reset their password.
  */
-export async function verifyPassword(password: string, storedHash: string): Promise<boolean> {
+export async function verifyPassword(
+  password: string,
+  storedHash: string,
+): Promise<true | 'wrong_password' | 'needs_reset'> {
   if (storedHash.startsWith('$PBKDF2$')) {
-    // "$PBKDF2$iterations$salt$hash".split('$') => ['', 'PBKDF2', iterations, salt, hash] (length 5)
     const parts = storedHash.split('$');
-    if (parts.length !== 5) return false;
+    if (parts.length !== 5) return 'wrong_password';
     const iterations = parseInt(parts[2], 10);
     const salt = parts[3];
     const hash = parts[4];
-    if (isNaN(iterations) || !salt || !hash) return false;
+    if (isNaN(iterations) || !salt || !hash) return 'wrong_password';
     const computed = await pbkdf2Hash(password, salt, iterations);
-    return timeSafeEqual(hash, computed);
+    return timeSafeEqual(hash, computed) ? true : 'wrong_password';
   }
-  if (storedHash.startsWith('$SHA256$')) {
-    // Legacy SHA-256 hash — force password reset
-    return false;
+  // Legacy hash formats — password verification not possible, force reset
+  if (storedHash.startsWith('$SHA256$') ||
+      storedHash.startsWith('$PHPASS$') ||
+      storedHash.startsWith('$MD5$') ||
+      storedHash.startsWith('$LEGACY$')) {
+    return 'needs_reset';
   }
-  return false;
+  return 'wrong_password';
 }
 
 /**
@@ -120,6 +128,66 @@ export async function validateSecurityToken(
 ): Promise<boolean> {
   const expected = await generateSecurityToken(secret, authCode, uid);
   return timeSafeEqual(token, expected);
+}
+
+/**
+ * Validate an admin CSRF token from a request and return an error Response
+ * if invalid, or null if valid. Handles token extraction from FormData (_ field),
+ * query string (_ param), or JSON body (_ field).
+ *
+ * Use this after auth validation in admin API endpoints that perform state changes.
+ */
+export async function requireAdminCSRF(
+  request: Request,
+  secret: string,
+  authCode: string,
+  uid: number,
+): Promise<Response | null> {
+  const token = await extractAdminCSRFToken(request);
+  if (!token) {
+    return new Response('CSRF validation failed', { status: 403 });
+  }
+  const valid = await validateSecurityToken(token, secret, authCode, uid);
+  if (!valid) {
+    return new Response('CSRF validation failed', { status: 403 });
+  }
+  return null;
+}
+
+/**
+ * Extract admin CSRF token from request.
+ * Priority: form data _ field > query string _ param > JSON body _ field
+ */
+async function extractAdminCSRFToken(request: Request): Promise<string | null> {
+  const url = new URL(request.url);
+  const method = request.method.toUpperCase();
+
+  // POST with FormData → read from body
+  if (method === 'POST') {
+    const contentType = request.headers.get('content-type') || '';
+    if (contentType.includes('application/x-www-form-urlencoded') ||
+        contentType.includes('multipart/form-data')) {
+      try {
+        const cloned = request.clone();
+        const formData = await cloned.formData();
+        const token = formData.get('_')?.toString();
+        if (token) return token;
+      } catch { /* ignore parse errors */ }
+    }
+    if (contentType.includes('application/json')) {
+      try {
+        const cloned = request.clone();
+        const body = await cloned.json() as Record<string, unknown>;
+        if (body._) return String(body._);
+      } catch { /* ignore parse errors */ }
+    }
+  }
+
+  // Fallback: query string
+  const queryToken = url.searchParams.get('_');
+  if (queryToken) return queryToken;
+
+  return null;
 }
 
 /**

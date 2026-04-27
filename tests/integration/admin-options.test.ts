@@ -5,9 +5,8 @@
  * permalink pattern handling, and access control.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
 import * as schema from '@/db/schema';
+import { createTestDb } from '../helpers';
 import { hashPassword, generateAuthToken } from '@/lib/auth';
 
 // ---- shared DB ref (mutated in beforeEach) ----------------------------------
@@ -23,35 +22,18 @@ vi.mock('@/db', async () => {
   };
 });
 
+vi.mock('@/lib/auth', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/auth')>('@/lib/auth');
+  return {
+    ...actual,
+    requireAdminCSRF: async () => null,
+  };
+});
+
 import { POST } from '@/pages/api/admin/options';
 
 // ---- helpers ----------------------------------------------------------------
 
-function createTestDb() {
-  const sqlite = new Database(':memory:');
-  sqlite.exec(`
-    CREATE TABLE typecho_options (
-      name TEXT NOT NULL,
-      "user" INTEGER NOT NULL DEFAULT 0,
-      value TEXT,
-      PRIMARY KEY (name, "user")
-    );
-    CREATE TABLE typecho_users (
-      uid INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT,
-      password TEXT,
-      mail TEXT,
-      url TEXT,
-      screenName TEXT,
-      created INTEGER DEFAULT 0,
-      activated INTEGER DEFAULT 0,
-      logged INTEGER DEFAULT 0,
-      "group" TEXT DEFAULT 'visitor',
-      authCode TEXT
-    );
-  `);
-  return drizzle(sqlite, { schema });
-}
 
 const TEST_SECRET = 'test-secret-admin';
 const TEST_AUTH_CODE = 'adminauthcode123';

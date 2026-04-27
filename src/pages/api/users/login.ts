@@ -47,7 +47,13 @@ export const POST: APIRoute = async ({ request, locals, redirect }) => {
 
   // Verify password
   const valid = await verifyPassword(password, user.password || '');
-  if (!valid) {
+  if (valid === 'needs_reset') {
+    return new Response(null, {
+      status: 302,
+      headers: { Location: '/admin/login?error=' + encodeURIComponent('密码格式已升级，请使用忘记密码功能重置密码') },
+    });
+  }
+  if (valid !== true) {
     return new Response(null, {
       status: 302,
       headers: { Location: '/admin/login?error=' + encodeURIComponent('用户名或密码无效') },

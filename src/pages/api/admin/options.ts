@@ -1,7 +1,7 @@
 import type { APIRoute } from 'astro';
 import { getDb } from '@/db';
 import { loadOptions, setOption } from '@/lib/options';
-import { getAuthCookies, validateAuthToken, hasPermission } from '@/lib/auth';
+import { getAuthCookies, validateAuthToken, hasPermission, requireAdminCSRF } from '@/lib/auth';
 import { purgeSiteCache } from '@/lib/cache';
 
 import { env } from 'cloudflare:workers';
@@ -18,6 +18,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
   if (!auth || !hasPermission(auth.user.group || 'visitor', 'administrator')) {
     return new Response('Forbidden', { status: 403 });
   }
+
+  const csrfError = await requireAdminCSRF(request, options.secret as string, auth.user.authCode!, auth.uid);
+  if (csrfError) return csrfError;
 
   const formData = await request.formData();
 

@@ -5,7 +5,7 @@
 import type { APIRoute } from 'astro';
 import { getDb } from '@/db';
 import { loadOptions, setOption } from '@/lib/options';
-import { getAuthCookies, validateAuthToken, hasPermission } from '@/lib/auth';
+import { getAuthCookies, validateAuthToken, hasPermission, requireAdminCSRF } from '@/lib/auth';
 import { themeExists } from '@/lib/theme';
 import { purgeSiteCache } from '@/lib/cache';
 import { env } from 'cloudflare:workers';
@@ -33,6 +33,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
       headers: { 'Content-Type': 'application/json' },
     });
   }
+
+  const csrfError = await requireAdminCSRF(request, auth.options.secret as string, auth.user.authCode!, auth.user.uid);
+  if (csrfError) return csrfError;
 
   try {
     const body = await request.json() as { theme?: string };

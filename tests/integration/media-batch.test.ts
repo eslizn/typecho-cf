@@ -7,9 +7,8 @@
  * R2 deletion attempt, and redirect behaviour.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
 import * as schema from '@/db/schema';
+import { createTestDb } from '../helpers';
 import { hashPassword, generateAuthToken } from '@/lib/auth';
 
 // ---- shared DB ref -----------------------------------------------------------
@@ -30,6 +29,14 @@ vi.mock('@/db', async () => {
   };
 });
 
+vi.mock('@/lib/auth', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/auth')>('@/lib/auth');
+  return {
+    ...actual,
+    requireAdminCSRF: async () => null,
+  };
+});
+
 vi.mock('cloudflare:workers', () => ({
   env: {
     DB: null,
@@ -41,51 +48,6 @@ vi.mock('cloudflare:workers', () => ({
 import { POST } from '@/pages/api/admin/media-batch';
 
 // ---- helpers -----------------------------------------------------------------
-
-function createTestDb() {
-  const sqlite = new Database(':memory:');
-  sqlite.exec(`
-    CREATE TABLE typecho_options (
-      name TEXT NOT NULL,
-      "user" INTEGER NOT NULL DEFAULT 0,
-      value TEXT,
-      PRIMARY KEY (name, "user")
-    );
-    CREATE TABLE typecho_users (
-      uid INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT,
-      password TEXT,
-      mail TEXT,
-      url TEXT,
-      screenName TEXT,
-      created INTEGER DEFAULT 0,
-      activated INTEGER DEFAULT 0,
-      logged INTEGER DEFAULT 0,
-      "group" TEXT DEFAULT 'visitor',
-      authCode TEXT
-    );
-    CREATE TABLE typecho_contents (
-      cid INTEGER PRIMARY KEY AUTOINCREMENT,
-      title TEXT,
-      slug TEXT UNIQUE,
-      created INTEGER DEFAULT 0,
-      modified INTEGER DEFAULT 0,
-      text TEXT,
-      "order" INTEGER DEFAULT 0,
-      authorId INTEGER DEFAULT 0,
-      template TEXT,
-      type TEXT DEFAULT 'post',
-      status TEXT DEFAULT 'publish',
-      password TEXT,
-      commentsNum INTEGER DEFAULT 0,
-      allowComment TEXT DEFAULT '0',
-      allowPing TEXT DEFAULT '0',
-      allowFeed TEXT DEFAULT '0',
-      parent INTEGER DEFAULT 0
-    );
-  `);
-  return drizzle(sqlite, { schema });
-}
 
 const TEST_SECRET = 'media-batch-secret';
 const TEST_AUTH_CODE = 'mediabatchcode';

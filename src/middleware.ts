@@ -8,8 +8,12 @@ import { env } from 'cloudflare:workers';
 const redirectToInstall = () =>
   new Response(null, { status: 302, headers: { Location: '/install' } });
 
-// ── Permalink regex cache (module-level, reused across requests within the same isolate) ──
+// ── Module-level caches (persist across requests within the same isolate) ──
 const regexCache = new Map<string, RegExp | null>();
+
+// Once we confirm the DB tables exist, skip the sqlite_master check on subsequent requests.
+// Negative results are NOT cached — each request retries until installation succeeds.
+let tableCheckPassed = false;
 
 /**
  * Build a regex from a permalink pattern to match incoming URLs.
@@ -72,24 +76,29 @@ export const onRequest = defineMiddleware(async (context, next) => {
     return context.rewrite(basePath === '' ? '/' : basePath + '/');
   }
 
-  // Check installation status — redirect to /install if DB not ready
+  // Check installation status — redirect to /install if DB not ready.
+  // Once tables are confirmed, skip the check for the isolate's lifetime.
   const d1 = env.DB;
 
-  try {
-    const tableCheck = await d1
-      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='typecho_options'")
-      .first<{ name: string }>();
+  if (!tableCheckPassed) {
+    try {
+      const tableCheck = await d1
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='typecho_options'")
+        .first<{ name: string }>();
 
-    if (!tableCheck) {
+      if (!tableCheck) {
+        return redirectToInstall();
+      }
+      tableCheckPassed = true;
+    } catch {
       return redirectToInstall();
     }
-  } catch {
-    return redirectToInstall();
   }
+
+  const db = getDb(d1);
 
   let options;
   try {
-    const db = getDb(d1);
     options = await loadOptions(db);
     if (!options.installed) {
       return redirectToInstall();
@@ -146,8 +155,6 @@ export const onRequest = defineMiddleware(async (context, next) => {
     !path.startsWith('/feed') &&
     !path.startsWith('/usr/')
   ) {
-    const db = getDb(d1);
-
     // ── Post permalink rewriting ──
     if (
       postPattern &&

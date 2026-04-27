@@ -79,7 +79,7 @@ describe('hashPassword() / verifyPassword()', () => {
 
   it('rejects wrong password', async () => {
     const hash = await hashPassword('correct-horse-battery-staple');
-    expect(await verifyPassword('wrong-password', hash)).toBe(false);
+    expect(await verifyPassword('wrong-password', hash)).toBe('wrong_password');
   });
 
   it('produces different hashes for same password (random salt)', async () => {
@@ -88,12 +88,12 @@ describe('hashPassword() / verifyPassword()', () => {
     expect(h1).not.toBe(h2);
   });
 
-  it('returns false for non-SHA256 hash format', async () => {
-    expect(await verifyPassword('password', 'md5hash')).toBe(false);
+  it('returns wrong_password for unrecognized hash format', async () => {
+    expect(await verifyPassword('password', 'unknownhash')).toBe('wrong_password');
   });
 
-  it('returns false for malformed $SHA256$ hash (wrong segment count)', async () => {
-    expect(await verifyPassword('password', '$SHA256$onlytwoparts')).toBe(false);
+  it('returns needs_reset for legacy $SHA256$ hash', async () => {
+    expect(await verifyPassword('password', '$SHA256$onlytwoparts')).toBe('needs_reset');
   });
 });
 
@@ -272,17 +272,28 @@ describe('PBKDF2 password hashing', () => {
   });
 
   it('legacy $SHA256$ hashes are rejected (force password reset)', async () => {
-    // Simulate a legacy hash
     const legacyHash = '$SHA256$abcdef1234$' + 'a'.repeat(64);
-    expect(await verifyPassword('anything', legacyHash)).toBe(false);
+    expect(await verifyPassword('anything', legacyHash)).toBe('needs_reset');
   });
 
-  it('malformed $PBKDF2$ hashes with wrong part count return false', async () => {
-    expect(await verifyPassword('test', '$PBKDF2$tooFewParts')).toBe(false);
+  it('malformed $PBKDF2$ hashes with wrong part count return wrong_password', async () => {
+    expect(await verifyPassword('test', '$PBKDF2$tooFewParts')).toBe('wrong_password');
   });
 
-  it('$PBKDF2$ hash with non-numeric iterations returns false', async () => {
-    expect(await verifyPassword('test', '$PBKDF2$abc$salt$hash')).toBe(false);
+  it('$PBKDF2$ hash with non-numeric iterations returns wrong_password', async () => {
+    expect(await verifyPassword('test', '$PBKDF2$abc$salt$hash')).toBe('wrong_password');
+  });
+
+  it('returns needs_reset for $PHPASS$ legacy hashes', async () => {
+    expect(await verifyPassword('anything', '$PHPASS$$P$Babcdef')).toBe('needs_reset');
+  });
+
+  it('returns needs_reset for $MD5$ legacy hashes', async () => {
+    expect(await verifyPassword('anything', '$MD5$d41d8cd98f00b204e9800998ecf8427e')).toBe('needs_reset');
+  });
+
+  it('returns needs_reset for $LEGACY$ hashes', async () => {
+    expect(await verifyPassword('anything', '$LEGACY$someoldhash')).toBe('needs_reset');
   });
 });
 

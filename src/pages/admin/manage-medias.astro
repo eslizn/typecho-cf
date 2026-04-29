@@ -14,7 +14,7 @@ if (!hasPermission(ctx.user!.group || 'visitor', 'editor')) {
   return new Response('Forbidden', { status: 403 });
 }
 
-const { db, options, urls, user } = ctx;
+const { db, options, urls, user, csrfToken } = ctx;
 const isAdmin = hasPermission(user!.group || 'visitor', 'administrator');
 
 const page = parseInt(Astro.url.searchParams.get('page') || '1', 10) || 1;
@@ -106,6 +106,7 @@ function formatBytes(bytes: number): string {
     </div>
 
     <form method="post" name="manage_medias" class="operate-form">
+      <input type="hidden" name="_" value={csrfToken} />
       <div class="typecho-table-wrap">
         <table class="typecho-list-table">
           <colgroup>

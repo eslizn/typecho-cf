@@ -11,7 +11,7 @@ if (!hasPermission(ctx.user!.group || 'visitor', 'administrator')) {
   return new Response('Forbidden', { status: 403 });
 }
 
-const { options, urls, user } = ctx;
+const { options, urls, user, csrfToken } = ctx;
 
 // Typecho post permalink patterns
 const postPatterns = [
@@ -30,6 +30,7 @@ const currentCategoryPattern = (options.categoryPattern as string) || '/category
 <Admin title="永久链接设置" options={options} urls={urls} user={user} activeMenu="options-permalink">
   <div class="col-mb-12 col-tb-8 col-tb-offset-2" role="form">
     <form method="post" action="/api/admin/options">
+      <input type="hidden" name="_" value={csrfToken} />
       <ul class="typecho-option">
         <li>
           <label class="typecho-label">自定义文章路径</label>

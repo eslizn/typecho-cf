@@ -1,7 +1,7 @@
 ---
 import Admin from '@/layouts/Admin.astro';
 import { createContext, requireAuth } from '@/lib/context';
-import { hasPermission } from '@/lib/auth';
+import { hasPermission, requireAdminCSRF } from '@/lib/auth';
 import { getAvailablePlugins, getPluginCount, isPluginActive, pluginHasConfig, parseActivatedPlugins } from '@/lib/plugin';
 
 const ctx = await createContext(Astro.locals, Astro.request);
@@ -12,13 +12,15 @@ if (!hasPermission(ctx.user!.group || 'visitor', 'administrator')) {
   return new Response('Forbidden', { status: 403 });
 }
 
-const { options, urls, user, db } = ctx;
+const { options, urls, user, db, csrfToken } = ctx;
 
 // Handle plugin activation/deactivation via POST
 let message = '';
 let messageType = '';
 
 if (Astro.request.method === 'POST') {
+  const csrfError = await requireAdminCSRF(Astro.request, options.secret as string, user!.authCode!, user!.uid);
+  if (csrfError) return csrfError;
   try {
     const formData = await Astro.request.formData();
     const action = formData.get('action') as string;
@@ -179,6 +181,7 @@ const pluginCount = getPluginCount();
                   </td>
                   <td>
                     <form method="post" action="/admin/plugins" style="display: inline;">
+                      <input type="hidden" name="_" value={csrfToken} />
                       <input type="hidden" name="plugin" value={plugin.id} />
                       {plugin.isActive ? (
                         <>

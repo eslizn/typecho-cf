@@ -13,7 +13,7 @@ if (!hasPermission(ctx.user!.group || 'visitor', 'editor')) {
   return new Response('Forbidden', { status: 403 });
 }
 
-const { db, options, urls, user } = ctx;
+const { db, options, urls, user, csrfToken } = ctx;
 const keywords = Astro.url.searchParams.get('keywords') || '';
 
 const conditions: any[] = [
@@ -58,6 +58,7 @@ const authorMap = new Map(authors.map(a => [a.uid, a]));
     </div>
 
     <form method="post" name="manage_pages" class="operate-form">
+      <input type="hidden" name="_" value={csrfToken} />
       <div class="typecho-table-wrap">
         <table class="typecho-list-table">
           <colgroup>

@@ -10,7 +10,7 @@ const ctx = await createContext(Astro.locals, Astro.request);
 const authCheck = requireAuth(ctx);
 if (authCheck) return authCheck;
 
-const { db, options, urls, user } = ctx;
+const { db, options, urls, user, csrfToken } = ctx;
 const isAdmin = hasPermission(user!.group || 'visitor', 'administrator');
 const isEditor = hasPermission(user!.group || 'visitor', 'editor');
 
@@ -180,6 +180,7 @@ const waitingCount = await db.select({ count: sql<number>`count(*)` }).from(sche
     </div>
 
     <form method="post" name="manage_posts" class="operate-form">
+      <input type="hidden" name="_" value={csrfToken} />
       <div class="typecho-table-wrap">
         <table class="typecho-list-table">
           <colgroup>

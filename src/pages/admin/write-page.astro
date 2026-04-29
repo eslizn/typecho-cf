@@ -13,7 +13,7 @@ if (!hasPermission(ctx.user!.group || 'visitor', 'editor')) {
   return new Response('Forbidden', { status: 403 });
 }
 
-const { db, options, urls, user } = ctx;
+const { db, options, urls, user, csrfToken } = ctx;
 const cid = Astro.url.searchParams.get('cid');
 let page: any = null;
 let isEdit = false;
@@ -70,6 +70,7 @@ if (isEdit && page) {
   bodyClass="typecho-post-area"
 >
   <form action="/api/admin/content" method="post" name="write_page">
+    <input type="hidden" name="_" value={csrfToken} />
     <div class="col-mb-12 col-tb-9" role="main">
       {isEdit && page.type === 'page_draft' && (
         <cite class="edit-draft-notice">当前正在编辑的是未发布的草稿</cite>

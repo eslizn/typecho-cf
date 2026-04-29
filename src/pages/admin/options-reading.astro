@@ -11,11 +11,12 @@ if (!hasPermission(ctx.user!.group || 'visitor', 'administrator')) {
   return new Response('Forbidden', { status: 403 });
 }
 
-const { options, urls, user } = ctx;
+const { options, urls, user, csrfToken } = ctx;
 ---
 <Admin title="阅读设置" options={options} urls={urls} user={user} activeMenu="options-reading">
   <div class="col-mb-12 col-tb-8 col-tb-offset-2" role="form">
     <form method="post" action="/api/admin/options">
+      <input type="hidden" name="_" value={csrfToken} />
       <ul class="typecho-option">
         <li>
           <label for="postDateFormat" class="typecho-label">文章日期格式</label>

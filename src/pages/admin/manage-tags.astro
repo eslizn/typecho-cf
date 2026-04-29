@@ -13,7 +13,7 @@ if (!hasPermission(ctx.user!.group || 'visitor', 'editor')) {
   return new Response('Forbidden', { status: 403 });
 }
 
-const { db, options, urls, user } = ctx;
+const { db, options, urls, user, csrfToken } = ctx;
 
 // Fetch all tags with count
 const tags = await db.select().from(schema.metas)
@@ -32,6 +32,7 @@ if (editMid) {
 <Admin title="管理标签" options={options} urls={urls} user={user} activeMenu="manage-tags">
   <div class="col-mb-12 col-tb-8" role="main">
     <form method="post" name="manage_tags" class="operate-form">
+      <input type="hidden" name="_" value={csrfToken} />
       <div class="typecho-list-operate clearfix">
         <div class="operate">
           <label><i class="sr-only">全选</i><input type="checkbox" class="typecho-table-select-all" /></label>
@@ -90,6 +91,7 @@ if (editMid) {
   <div class="col-mb-12 col-tb-4" role="form">
     <div class="typecho-mini-panel">
       <form method="post" action="/api/admin/meta">
+        <input type="hidden" name="_" value={csrfToken} />
         <input type="hidden" name="action" value={editTag ? 'update' : 'create'} />
         <input type="hidden" name="type" value="tag" />
         {editTag && <input type="hidden" name="mid" value={String(editTag.mid)} />}

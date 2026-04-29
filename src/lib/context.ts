@@ -5,7 +5,7 @@
 
 import { getDb, type Database } from '@/db';
 import { loadOptions, type SiteOptions, computeUrls } from '@/lib/options';
-import { getAuthCookies, validateAuthToken, hasPermission } from '@/lib/auth';
+import { getAuthCookies, validateAuthToken, hasPermission, generateSecurityToken } from '@/lib/auth';
 import { setActivatedPlugins, parseActivatedPlugins, doHook } from '@/lib/plugin';
 import { schema } from '@/db';
 import { env } from 'cloudflare:workers';
@@ -43,6 +43,7 @@ export interface RequestContext {
   urls: ReturnType<typeof computeUrls>;
   user: UserRow | null;
   isLoggedIn: boolean;
+  csrfToken: string | null;
 }
 
 /**
@@ -73,7 +74,11 @@ export async function createContext(locals: App.Locals, request: Request): Promi
     }
   }
 
-  const ctx = { db, options, urls, user, isLoggedIn };
+  const csrfToken = (user && options.secret)
+    ? await generateSecurityToken(options.secret as string, user.authCode!, user.uid)
+    : null;
+
+  const ctx = { db, options, urls, user, isLoggedIn, csrfToken };
 
   // Trigger system:begin hook
   await doHook('system:begin', ctx);

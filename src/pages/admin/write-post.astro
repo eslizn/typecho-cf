@@ -10,7 +10,7 @@ const ctx = await createContext(Astro.locals, Astro.request);
 const authCheck = requireAuth(ctx);
 if (authCheck) return authCheck;
 
-const { db, options, urls, user } = ctx;
+const { db, options, urls, user, csrfToken } = ctx;
 const isEditor = hasPermission(user!.group || 'visitor', 'editor');
 
 // Check if editing existing post
@@ -89,6 +89,7 @@ if (isEdit && post) {
   bodyClass="typecho-post-area"
 >
   <form action="/api/admin/content" method="post" name="write_post">
+    <input type="hidden" name="_" value={csrfToken} />
     <div class="col-mb-12 col-tb-9" role="main">
       {isEdit && post.type === 'post_draft' && (
         <cite class="edit-draft-notice">当前正在编辑的是未发布的草稿</cite>

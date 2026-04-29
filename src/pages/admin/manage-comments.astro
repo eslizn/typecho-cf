@@ -10,7 +10,7 @@ const ctx = await createContext(Astro.locals, Astro.request);
 const authCheck = requireAuth(ctx);
 if (authCheck) return authCheck;
 
-const { db, options, urls, user } = ctx;
+const { db, options, urls, user, csrfToken } = ctx;
 const isAdmin = hasPermission(user!.group || 'visitor', 'administrator');
 const isEditor = hasPermission(user!.group || 'visitor', 'editor');
 
@@ -110,7 +110,7 @@ const spamCount = await db.select({ count: sql<number>`count(*)` }).from(schema.
             </ul>
             {status === 'spam' && (
               <button class="btn btn-s btn-warn btn-operate" type="button"
-                onclick="if(confirm('你确认要删除所有垃圾评论吗?'))location.href='/api/admin/comment-batch?do=delete-spam'">删除所有垃圾评论</button>
+                onclick={`if(confirm('你确认要删除所有垃圾评论吗?'))location.href='/api/admin/comment-batch?do=delete-spam&_=${csrfToken}'`}>删除所有垃圾评论</button>
             )}
           </div>
         </div>
@@ -127,6 +127,7 @@ const spamCount = await db.select({ count: sql<number>`count(*)` }).from(schema.
     </div>
 
     <form method="post" name="manage_comments" class="operate-form">
+      <input type="hidden" name="_" value={csrfToken} />
       <div class="typecho-table-wrap">
         <table class="typecho-list-table">
           <colgroup>
@@ -182,20 +183,20 @@ const spamCount = await db.select({ count: sql<number>`count(*)` }).from(schema.
                     <div class="comment-action hidden-by-mouse">
                       {status === 'approved'
                         ? <span class="weak">通过</span>
-                        : <a href={`/api/admin/comment-action?action=approve&coid=${comment.coid}`} class="operate-approved">通过</a>
+                        : <a href={`/api/admin/comment-action?action=approve&coid=${comment.coid}&_=${csrfToken}`} class="operate-approved">通过</a>
                       }
 
                       {status === 'waiting'
                         ? <span class="weak">待审核</span>
-                        : <a href={`/api/admin/comment-action?action=waiting&coid=${comment.coid}`} class="operate-waiting">待审核</a>
+                        : <a href={`/api/admin/comment-action?action=waiting&coid=${comment.coid}&_=${csrfToken}`} class="operate-waiting">待审核</a>
                       }
 
                       {status === 'spam'
                         ? <span class="weak">垃圾</span>
-                        : <a href={`/api/admin/comment-action?action=spam&coid=${comment.coid}`} class="operate-spam">垃圾</a>
+                        : <a href={`/api/admin/comment-action?action=spam&coid=${comment.coid}&_=${csrfToken}`} class="operate-spam">垃圾</a>
                       }
 
-                      <a href={`/api/admin/comment-action?action=delete&coid=${comment.coid}`}
+                      <a href={`/api/admin/comment-action?action=delete&coid=${comment.coid}&_=${csrfToken}`}
                         class="operate-delete"
                         onclick={`return confirm('你确认要删除${(comment.author || '匿名').replace(/'/g, "\\'")}的评论吗?')`}>删除</a>
                     </div>

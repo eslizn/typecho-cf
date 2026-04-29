@@ -1,7 +1,7 @@
 ---
 import Admin from '@/layouts/Admin.astro';
 import { createContext, requireAuth } from '@/lib/context';
-import { hasPermission } from '@/lib/auth';
+import { hasPermission, requireAdminCSRF } from '@/lib/auth';
 import { getAvailableThemes, getThemeCount } from '@/lib/theme';
 
 const ctx = await createContext(Astro.locals, Astro.request);
@@ -12,13 +12,15 @@ if (!hasPermission(ctx.user!.group || 'visitor', 'administrator')) {
   return new Response('Forbidden', { status: 403 });
 }
 
-const { options, urls, user } = ctx;
+const { options, urls, user, csrfToken } = ctx;
 
 // Handle theme activation via POST
 let message = '';
 let messageType = '';
 
 if (Astro.request.method === 'POST') {
+  const csrfError = await requireAdminCSRF(Astro.request, options.secret as string, user!.authCode!, user!.uid);
+  if (csrfError) return csrfError;
   try {
     const formData = await Astro.request.formData();
     const action = formData.get('action') as string;
@@ -131,6 +133,7 @@ const themeCount = getThemeCount();
                 <span class="btn" style="cursor: default; opacity: 0.6;">已启用</span>
               ) : (
                 <form method="post" action="/admin/themes" style="display: inline;">
+                  <input type="hidden" name="_" value={csrfToken} />
                   <input type="hidden" name="action" value="activate" />
                   <input type="hidden" name="theme" value={theme.id} />
                   <button type="submit" class="btn primary">启用</button>

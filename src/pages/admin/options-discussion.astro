@@ -11,7 +11,7 @@ if (!hasPermission(ctx.user!.group || 'visitor', 'administrator')) {
   return new Response('Forbidden', { status: 403 });
 }
 
-const { options, urls, user } = ctx;
+const { options, urls, user, csrfToken } = ctx;
 
 // Convert commentsPostTimeout from seconds to days for display
 const commentsPostTimeoutDays = options.commentsPostTimeout
@@ -26,6 +26,7 @@ const commentsPostIntervalMinutes = options.commentsPostInterval
 <Admin title="评论设置" options={options} urls={urls} user={user} activeMenu="options-discussion">
   <div class="col-mb-12 col-tb-8 col-tb-offset-2" role="form">
     <form method="post" action="/api/admin/options">
+      <input type="hidden" name="_" value={csrfToken} />
       <ul class="typecho-option">
         <li>
           <label class="typecho-label" for="commentsListSize">评论列表数目</label>

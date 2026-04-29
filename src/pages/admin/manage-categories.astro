@@ -13,7 +13,7 @@ if (!hasPermission(ctx.user!.group || 'visitor', 'editor')) {
   return new Response('Forbidden', { status: 403 });
 }
 
-const { db, options, urls, user } = ctx;
+const { db, options, urls, user, csrfToken } = ctx;
 
 const categories = await db.select().from(schema.metas)
   .where(eq(schema.metas.type, 'category'))
@@ -33,6 +33,7 @@ const isDefault = (mid: number) => options.defaultCategory === mid;
 <Admin title="管理分类" options={options} urls={urls} user={user} activeMenu="manage-categories">
   <div class="col-mb-12" role="main">
     <form method="post" name="manage_categories" class="operate-form">
+      <input type="hidden" name="_" value={csrfToken} />
       <div class="typecho-list-operate clearfix">
         <div class="operate">
           <label><i class="sr-only">全选</i><input type="checkbox" class="typecho-table-select-all" /></label>
@@ -83,7 +84,7 @@ const isDefault = (mid: number) => options.defaultCategory === mid;
                       <span>默认</span>
                     ) : (
                       <a class="hidden-by-mouse"
-                        href={`/api/admin/meta?action=default&mid=${cat.mid}&type=category`}
+                        href={`/api/admin/meta?action=default&mid=${cat.mid}&type=category&_=${csrfToken}`}
                         title="设为默认">默认</a>
                     )}
                   </td>
@@ -100,6 +101,7 @@ const isDefault = (mid: number) => options.defaultCategory === mid;
 
     <div class="typecho-mini-panel" style="margin-top: 20px;">
       <form method="post" action="/api/admin/meta">
+        <input type="hidden" name="_" value={csrfToken} />
         <input type="hidden" name="action" value={editCat ? 'update' : 'create'} />
         <input type="hidden" name="type" value="category" />
         {editCat && <input type="hidden" name="mid" value={String(editCat.mid)} />}

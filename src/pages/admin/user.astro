@@ -13,7 +13,7 @@ if (!hasPermission(ctx.user!.group || 'visitor', 'administrator')) {
   return new Response('Forbidden', { status: 403 });
 }
 
-const { db, options, urls, user } = ctx;
+const { db, options, urls, user, csrfToken } = ctx;
 const uid = parseInt(Astro.url.searchParams.get('uid') || '0', 10);
 
 let editUser: any = null;
@@ -36,6 +36,7 @@ const groups = [
 <Admin title={isEdit ? '编辑用户' : '增加用户'} options={options} urls={urls} user={user} activeMenu="manage-users">
   <div class="col-mb-12 col-tb-8 col-tb-offset-2" role="form">
     <form method="post" action="/api/admin/user">
+      <input type="hidden" name="_" value={csrfToken} />
       <input type="hidden" name="do" value={isEdit ? 'update' : 'create'} />
       {isEdit && <input type="hidden" name="uid" value={String(editUser.uid)} />}
 

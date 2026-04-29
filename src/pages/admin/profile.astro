@@ -9,7 +9,7 @@ const ctx = await createContext(Astro.locals, Astro.request);
 const authCheck = requireAuth(ctx);
 if (authCheck) return authCheck;
 
-const { db, options, urls, user } = ctx;
+const { db, options, urls, user, csrfToken } = ctx;
 
 // Stats
 const postCount = await db.select({ count: sql<number>`count(*)` }).from(schema.contents)
@@ -44,6 +44,7 @@ const gravatarUrl = `https://www.gravatar.com/avatar/?s=220&d=mm`;
     <section>
       <h3>个人资料</h3>
       <form method="post" action="/api/admin/profile">
+        <input type="hidden" name="_" value={csrfToken} />
         <ul class="typecho-option">
           <li>
             <label class="typecho-label">用户名</label>
@@ -79,6 +80,7 @@ const gravatarUrl = `https://www.gravatar.com/avatar/?s=220&d=mm`;
     <section id="change-password">
       <h3>密码修改</h3>
       <form method="post" action="/api/admin/profile">
+        <input type="hidden" name="_" value={csrfToken} />
         <ul class="typecho-option">
           <li>
             <label for="password" class="typecho-label">用户密码</label>

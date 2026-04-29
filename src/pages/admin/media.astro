@@ -14,7 +14,7 @@ if (!hasPermission(ctx.user!.group || 'visitor', 'editor')) {
   return new Response('Forbidden', { status: 403 });
 }
 
-const { db, options, urls, user } = ctx;
+const { db, options, urls, user, csrfToken } = ctx;
 const cid = parseInt(Astro.url.searchParams.get('cid') || '0', 10);
 
 if (!cid) {
@@ -115,6 +115,7 @@ function formatBytes(bytes: number): string {
 
   <div class="col-mb-12 col-tb-6 col-tb-offset-1" role="form">
     <form method="post" action="/api/admin/media">
+      <input type="hidden" name="_" value={csrfToken} />
       <input type="hidden" name="cid" value={String(cid)} />
 
       <ul class="typecho-option">
@@ -145,6 +146,7 @@ function formatBytes(bytes: number): string {
     <br />
 
     <form method="post" action="/api/admin/media" style="margin-top: 20px;">
+      <input type="hidden" name="_" value={csrfToken} />
       <input type="hidden" name="cid" value={String(cid)} />
       <input type="hidden" name="do" value="delete" />
       <p>

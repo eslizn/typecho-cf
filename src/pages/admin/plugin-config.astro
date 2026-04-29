@@ -8,7 +8,7 @@
  */
 import Admin from '@/layouts/Admin.astro';
 import { createContext, requireAuth } from '@/lib/context';
-import { hasPermission } from '@/lib/auth';
+import { hasPermission, requireAdminCSRF } from '@/lib/auth';
 import {
   getPlugin,
   pluginHasConfig,
@@ -25,7 +25,7 @@ if (!hasPermission(ctx.user!.group || 'visitor', 'administrator')) {
   return new Response('Forbidden', { status: 403 });
 }
 
-const { options, urls, user } = ctx;
+const { options, urls, user, csrfToken } = ctx;
 
 // Get plugin ID from query string
 const pluginId = Astro.url.searchParams.get('id') || '';
@@ -49,6 +49,8 @@ let message = '';
 let messageType = '';
 
 if (Astro.request.method === 'POST') {
+  const csrfError = await requireAdminCSRF(Astro.request, options.secret as string, user!.authCode!, user!.uid);
+  if (csrfError) return csrfError;
   try {
     const formData = await Astro.request.formData();
     const { setOption } = await import('@/lib/options');
@@ -95,6 +97,7 @@ const pageTitle = `设置插件 ${manifest.name || pluginId}`;
     )}
 
     <form method="post" action={`/admin/plugin-config?id=${pluginId}`}>
+      <input type="hidden" name="_" value={csrfToken} />
       <ul class="typecho-option">
         {Object.entries(configDef).map(([key, field]: [string, PluginConfigField]) => {
           const value = configValues[key] ?? field.default ?? '';

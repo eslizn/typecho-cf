@@ -14,7 +14,7 @@ if (!hasPermission(ctx.user!.group || 'visitor', 'administrator')) {
   return new Response('Forbidden', { status: 403 });
 }
 
-const { db, options, urls, user } = ctx;
+const { db, options, urls, user, csrfToken } = ctx;
 const keywords = Astro.url.searchParams.get('keywords') || '';
 const page = parseInt(Astro.url.searchParams.get('page') || '1', 10) || 1;
 const pageSize = 20;
@@ -79,6 +79,7 @@ const groupNames: Record<string, string> = {
     </div>
 
     <form method="post" name="manage_users" class="operate-form">
+      <input type="hidden" name="_" value={csrfToken} />
       <div class="typecho-table-wrap">
         <table class="typecho-list-table">
           <colgroup>

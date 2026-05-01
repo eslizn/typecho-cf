@@ -9,3 +9,4 @@
 *.log
 wrangler.toml
 /.claude
+/.env

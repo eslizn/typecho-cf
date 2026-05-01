@@ -356,6 +356,13 @@ if (isEdit && page) {
         return false;
       });
 
+      $('#btn-preview').click(function () {
+        $('.wmd-edittab a[href="#wmd-preview"]').trigger('click');
+      });
+      $('#btn-cancel-preview').click(function () {
+        $('.wmd-edittab a[href="#wmd-editarea"]').trigger('click');
+      });
+
       // 高级选项面板
       $('#advance-panel-btn').click(function () {
         $('#advance-panel').toggle();

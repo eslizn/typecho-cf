@@ -228,9 +228,10 @@ const focusGroupIdx = visibleGroups.findIndex(g => g.children.some(c => c.active
           form.submit();
         });
 
-        // 表单提交防重复
+        // 表单提交防重复（不 disable 按钮，否则被点击按钮的 name/value 不会随表单提交）
         $('.main form').submit(function () {
-          $('button[type=submit]', this).attr('disabled', 'disabled');
+          if ($(this).data('submitted')) return false;
+          $(this).data('submitted', true);
         });
 
         // 外部链接新窗口打开

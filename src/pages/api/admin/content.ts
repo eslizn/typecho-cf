@@ -100,6 +100,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
   const now = Math.floor(Date.now() / 1000);
   const contentType = isDraft ? `${type}_draft` : type;
+  console.log(`[content:${action}] cid=${cid} isDraft=${isDraft} contentType=${contentType} status=${status} visibility=${formData.get('visibility')?.toString()}`);
 
   if (action === 'create') {
     // Build content data — slug will be backfilled with cid if empty

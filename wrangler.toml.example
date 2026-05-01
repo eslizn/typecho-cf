@@ -16,3 +16,12 @@ migrations_dir = "drizzle"
 [[r2_buckets]]
 binding = "BUCKET"
 bucket_name = "typecho-cf-uploads"
+
+[observability]
+[observability.logs]
+enabled = true
+invocation_logs = false
+persist = false
+
+[observability.traces]
+enabled = false

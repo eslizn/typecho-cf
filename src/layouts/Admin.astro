@@ -233,6 +233,10 @@ const focusGroupIdx = visibleGroups.findIndex(g => g.children.some(c => c.active
           if ($(this).data('submitted')) return false;
           $(this).data('submitted', true);
         });
+        // 清除 bfcache 恢复时残留的 submitted 标记，否则后退回来表单无法再次提交
+        $(window).on('pageshow', function () {
+          $('.main form').removeData('submitted');
+        });
 
         // 外部链接新窗口打开
         if ($('.typecho-login').length == 0) {

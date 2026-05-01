@@ -8,6 +8,16 @@ import { purgeContentCache } from '@/lib/cache';
 import { eq, and, sql } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 
+// Typecho convention: visibility dropdown maps to db status column.
+// 'password' visibility stores the password in a separate column, status falls back to 'publish'.
+const VISIBILITY_TO_STATUS: Record<string, string> = {
+  publish: 'publish',
+  hidden: 'hidden',
+  password: 'publish',
+  private: 'private',
+  waiting: 'waiting',
+};
+
 /**
  * Save custom fields for a content item.
  * Handles the field[name], fieldNames[], fieldTypes[] form pattern from Typecho.
@@ -76,9 +86,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
   }
   // Slug: use provided value, otherwise leave empty and fill with cid after insert (Typecho convention)
   const slugInput = formData.get('slug')?.toString()?.trim() || '';
-  const statusInput = formData.get('status')?.toString() || 'publish';
-  const VALID_STATUSES = ['publish', 'draft', 'hidden', 'private'];
-  const status = VALID_STATUSES.includes(statusInput) ? statusInput : 'publish';
+  const submitAction = formData.get('status')?.toString() || 'publish'; // 'draft' or 'publish' from submit button
+  const isDraft = submitAction === 'draft';
+  const status = VISIBILITY_TO_STATUS[formData.get('visibility')?.toString() || ''] || 'publish';
   const password = formData.get('password')?.toString()?.trim() || null;
   const allowComment = formData.get('allowComment') ? '1' : '0';
   const allowPing = formData.get('allowPing') ? '1' : '0';
@@ -89,7 +99,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const order = parseInt(formData.get('order')?.toString() || '0', 10) || 0;
 
   const now = Math.floor(Date.now() / 1000);
-  const contentType = status === 'draft' ? `${type}_draft` : type;
+  const contentType = isDraft ? `${type}_draft` : type;
 
   if (action === 'create') {
     // Build content data — slug will be backfilled with cid if empty
@@ -103,7 +113,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       authorId: auth.uid,
       template,
       type: contentType,
-      status: status === 'draft' ? 'publish' : status,
+      status,
       password,
       allowComment,
       allowPing,
@@ -181,7 +191,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     // Trigger post/page finish hooks
     const finishData = { ...contentData, cid: newCid };
-    if (status !== 'draft') {
+    if (!isDraft) {
       await doHook(type === 'page' ? 'page:finishPublish' : 'post:finishPublish', finishData);
     }
     await doHook(type === 'page' ? 'page:finishSave' : 'post:finishSave', finishData);
@@ -215,7 +225,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       order,
       template,
       type: contentType,
-      status: status === 'draft' ? 'publish' : status,
+      status,
       password,
       allowComment,
       allowPing,

@@ -109,6 +109,8 @@ export const HookPoints = {
   'admin:navBar': 'admin:navBar',                    // Admin navigation extension
   'admin:begin': 'admin:begin',                      // Admin page begin
   'admin:end': 'admin:end',                          // Admin page end
+  'admin:loginHead': 'admin:loginHead',              // Filter: HTML injected into login page <head>
+  'admin:loginForm': 'admin:loginForm',              // Filter: HTML injected into login page form
 
   // --- Content Editing (Admin) ---
   'admin:writePost:option': 'admin:writePost:option',          // Post editor sidebar options

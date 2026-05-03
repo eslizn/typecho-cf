@@ -2,12 +2,15 @@ import type { APIRoute } from 'astro';
 import { getDb, schema } from '@/db';
 import { loadOptions } from '@/lib/options';
 import { verifyPassword, generateAuthToken, setAuthCookieHeaders, generateRandomString } from '@/lib/auth';
+import { applyFilter, setActivatedPlugins, parseActivatedPlugins } from '@/lib/plugin';
 import { eq } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 
 export const POST: APIRoute = async ({ request, locals, redirect }) => {
   const db = getDb(env.DB);
   const options = await loadOptions(db);
+  const activatedIds = parseActivatedPlugins(options.activatedPlugins as string | undefined);
+  setActivatedPlugins(activatedIds);
 
   const formData = await request.formData();
   const name = formData.get('name')?.toString() || '';
@@ -30,6 +33,14 @@ export const POST: APIRoute = async ({ request, locals, redirect }) => {
     return new Response(null, {
       status: 302,
       headers: { Location: '/admin/login?error=' + encodeURIComponent('请输入密码') },
+    });
+  }
+
+  const loginContext = await applyFilter('user:login', {}, { request, formData, options });
+  if (loginContext._rejected) {
+    return new Response(null, {
+      status: 302,
+      headers: { Location: '/admin/login?error=' + encodeURIComponent(loginContext._rejected) },
     });
   }
 

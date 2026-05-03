@@ -4,9 +4,10 @@
  */
 
 import { getDb, type Database } from '@/db';
-import { loadOptions, type SiteOptions, computeUrls } from '@/lib/options';
+import { loadOptions, type SiteOptions, computeUrls, setOption } from '@/lib/options';
 import { getAuthCookies, validateAuthToken, hasPermission, generateSecurityToken } from '@/lib/auth';
-import { setActivatedPlugins, parseActivatedPlugins, doHook } from '@/lib/plugin';
+import { setActivatedPlugins, parseActivatedPlugins, doHook, getAvailablePlugins } from '@/lib/plugin';
+import { purgeOptionsCache } from '@/lib/cache';
 import { schema } from '@/db';
 import { env } from 'cloudflare:workers';
 
@@ -58,6 +59,19 @@ export async function createContext(locals: App.Locals, request: Request): Promi
 
   // Load activated plugins from DB options
   const activatedIds = parseActivatedPlugins(options.activatedPlugins as string | undefined);
+
+  // Fresh-install and legacy-upgrade: auto-activate all discovered plugins
+  if (activatedIds.length === 0 && options.installed) {
+    const availableIds = getAvailablePlugins().map(p => p.id);
+    if (availableIds.length > 0) {
+      activatedIds.push(...availableIds);
+      await Promise.all([
+        setOption(db, 'activatedPlugins', JSON.stringify(activatedIds)),
+        purgeOptionsCache(),
+      ]);
+    }
+  }
+
   setActivatedPlugins(activatedIds);
 
   // Check auth

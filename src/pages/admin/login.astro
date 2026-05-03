@@ -1,5 +1,6 @@
 ---
 import { createContext } from '@/lib/context';
+import { applyFilter } from '@/lib/plugin';
 
 let options: any = { title: 'Blog', charset: 'UTF-8', lang: 'zh_CN', description: '' };
 let urls: any = { siteUrl: '' };
@@ -19,6 +20,11 @@ try {
 }
 
 const error = Astro.url.searchParams.get('error') || '';
+
+const [loginHeadHtml, loginFormHtml] = await Promise.all([
+  applyFilter('admin:loginHead', '', { options }),
+  applyFilter('admin:loginForm', '', { options }),
+]);
 ---
 <!DOCTYPE html>
 <html lang={options.lang === 'zh_CN' ? 'zh-CN' : 'en'}>
@@ -29,6 +35,7 @@ const error = Astro.url.searchParams.get('error') || '';
   <title>{`登录 - ${options.title}`}</title>
   <meta name="robots" content="noindex, nofollow" />
   <link rel="stylesheet" href="/css/normalize.css" />
+  {loginHeadHtml && <Fragment set:html={loginHeadHtml} />}
   <link rel="stylesheet" href="/css/grid.css" />
   <link rel="stylesheet" href="/css/admin.css" />
 </head>
@@ -37,7 +44,7 @@ const error = Astro.url.searchParams.get('error') || '';
     <div class="typecho-login">
       <h1>{options.title}</h1>
       {error && <p class="message error">{error}</p>}
-      <form action="/api/users/login" method="post" name="login" role="form">
+      <form action="/api/users/login" method="post" name="login" id="login-form" role="form">
         <p>
           <label for="name" class="sr-only">用户名</label>
           <input type="text" id="name" name="name" placeholder="用户名" class="text-l w-100" autofocus required />
@@ -46,6 +53,7 @@ const error = Astro.url.searchParams.get('error') || '';
           <label for="password" class="sr-only">密码</label>
           <input type="password" id="password" name="password" placeholder="密码" class="text-l w-100" required />
         </p>
+        {loginFormHtml && <Fragment set:html={loginFormHtml} />}
         <p class="submit">
           <button type="submit" class="btn btn-l w-100 primary">登录</button>
           <input type="hidden" name="referer" value="/admin/" />

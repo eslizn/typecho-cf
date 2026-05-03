@@ -1,7 +1,8 @@
 /**
  * Cloudflare Turnstile Plugin for Typecho
  *
- * Integrates Cloudflare Turnstile to protect comment forms from spam.
+ * Integrates Cloudflare Turnstile to protect comment forms from spam
+ * and admin login from brute-force attacks.
  *
  * Configuration is stored as a single JSON object in the options table,
  * following the Typecho convention: name = "plugin:typecho-plugin-turnstile", value = JSON string.
@@ -10,6 +11,9 @@
  *   - feedback:comment (filter): Validates Turnstile token before saving comment
  *   - archive:header (filter): Injects Turnstile SDK script into <head>
  *   - archive:footer (filter): Injects comment form widget/interaction script before </body>
+ *   - admin:loginHead (filter): Injects Turnstile SDK script into login page <head>
+ *   - admin:loginForm (filter): Injects Turnstile widget into login form
+ *   - user:login (filter): Validates Turnstile token before admin login
  */
 
 /** Default configuration values */
@@ -77,11 +81,11 @@ async function verifyTurnstile(token, secret, remoteIp) {
 }
 
 /**
- * Generate the client-side HTML snippets.
  * @param {object} options - Site options object (from loadOptions)
+ * @param {string} formId - Target form element ID
  * @returns {{headHtml: string, bodyHtml: string}}
  */
-function buildClientSnippet(options) {
+function buildSnippet(options, formId) {
   const config = getPluginConfig(options);
 
   if (!config.sitekey) {
@@ -96,7 +100,7 @@ function buildClientSnippet(options) {
     bodyHtml = `<script is:inline>
 (function() {
   function initTurnstile() {
-    var form = document.getElementById("comment-form");
+    var form = document.getElementById("${formId}");
     if (!form) return;
     form.addEventListener("submit", function(e) {
       e.preventDefault();
@@ -131,7 +135,7 @@ function buildClientSnippet(options) {
     bodyHtml = `<script is:inline>
 (function() {
   function initTurnstile() {
-    var form = document.getElementById("comment-form");
+    var form = document.getElementById("${formId}");
     if (!form) return;
     var container = document.createElement("div");
     container.className = "cf-turnstile";
@@ -161,63 +165,100 @@ function buildClientSnippet(options) {
 }
 
 /**
- * Plugin entry point.
+ * Read client IP from request headers.
  */
+function getIp(request) {
+  if (!request) return '';
+  const cfIp = request.headers?.get('cf-connecting-ip');
+  if (cfIp) return cfIp.trim();
+  const xff = request.headers?.get('x-forwarded-for');
+  if (xff) {
+    const first = xff.split(',')[0];
+    return first ? first.trim() : '';
+  }
+  return '';
+}
+
+/**
+ * Verify a Turnstile token. Returns an error message if rejected, or null if valid.
+ * Returns null (skip) when the plugin is not fully configured.
+ */
+async function checkTurnstile(config, extra) {
+  if (!config.sitekey || !config.secret) {
+    return null; // not configured, skip silently
+  }
+
+  if (extra.skipIfLoggedIn && extra.isLoggedIn) {
+    return null;
+  }
+
+  const token = extra.formData?.get(config.input)?.toString() || '';
+  if (!token) {
+    return '请完成人机验证';
+  }
+
+  const ip = getIp(extra.request);
+
+  try {
+    const result = await verifyTurnstile(token, config.secret, ip);
+    if (!result || !result.success) {
+      return '人机验证失败';
+    }
+  } catch (err) {
+    console.error('[turnstile] Verification API error:', err);
+    return '验证服务异常，请稍后重试';
+  }
+
+  return null;
+}
+
 export default function init({ addHook, pluginId }) {
   // Filter: feedback:comment — validates Turnstile token before saving comment
   addHook('feedback:comment', pluginId, async (commentData, extra) => {
-    if (!extra || !extra.options) {
-      console.warn('[turnstile] No options context provided, skipping verification');
-      return commentData;
-    }
+    if (!extra?.options) return commentData;
 
     const config = getPluginConfig(extra.options);
-
-    if (!config.sitekey || !config.secret) {
-      return commentData;
+    const msg = await checkTurnstile(config, { ...extra, skipIfLoggedIn: true });
+    if (msg) {
+      commentData._rejected = msg;
     }
-
-    if (extra.isLoggedIn) {
-      return commentData;
-    }
-
-    const token = extra.formData?.get(config.input)?.toString() || '';
-    if (!token) {
-      commentData._rejected = '请完成人机验证';
-      return commentData;
-    }
-
-    const cfIp = extra.request?.headers?.get('cf-connecting-ip');
-    const xffRaw = extra.request?.headers?.get('x-forwarded-for');
-    const ip = cfIp
-      ? cfIp.trim()
-      : (xffRaw ? (xffRaw.split(',')[0] ?? '').trim() : '');
-
-    try {
-      const result = await verifyTurnstile(token, config.secret, ip);
-      if (!result || !result.success) {
-        commentData._rejected = '人机验证失败';
-        return commentData;
-      }
-    } catch (err) {
-      console.error('[turnstile] Verification API error:', err);
-      commentData._rejected = '验证服务异常，请稍后重试';
-      return commentData;
-    }
-
     return commentData;
   });
 
   // Filter: archive:header — inject Turnstile SDK into <head>
   addHook('archive:header', pluginId, (headHtml, extra) => {
-    const snippet = buildClientSnippet(extra?.options);
+    const snippet = buildSnippet(extra?.options, 'comment-form');
     return headHtml + snippet.headHtml;
   });
 
   // Filter: archive:footer — inject comment form script before </body>
   addHook('archive:footer', pluginId, (bodyHtml, extra) => {
-    const snippet = buildClientSnippet(extra?.options);
+    const snippet = buildSnippet(extra?.options, 'comment-form');
     return bodyHtml + snippet.bodyHtml;
+  });
+
+  // Filter: admin:loginHead — inject Turnstile SDK into login page <head>
+  addHook('admin:loginHead', pluginId, (headHtml, extra) => {
+    const snippet = buildSnippet(extra?.options, 'login-form');
+    return headHtml + snippet.headHtml;
+  });
+
+  // Filter: admin:loginForm — inject Turnstile widget into login form
+  addHook('admin:loginForm', pluginId, (formHtml, extra) => {
+    const snippet = buildSnippet(extra?.options, 'login-form');
+    return formHtml + snippet.bodyHtml;
+  });
+
+  // Filter: user:login — validate Turnstile token before admin login
+  addHook('user:login', pluginId, async (loginContext, extra) => {
+    if (!extra?.options) return loginContext;
+
+    const config = getPluginConfig(extra.options);
+    const msg = await checkTurnstile(config, extra);
+    if (msg) {
+      loginContext._rejected = msg;
+    }
+    return loginContext;
   });
 }
 
@@ -226,5 +267,5 @@ export default function init({ addHook, pluginId }) {
  * Kept for backward compatibility.
  */
 export function getClientSnippet(options) {
-  return buildClientSnippet(options);
+  return buildSnippet(options, 'comment-form');
 }

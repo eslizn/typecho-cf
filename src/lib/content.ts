@@ -76,6 +76,29 @@ export function buildPermalink(
   return `${base}${url}`;
 }
 
+function normalizePathForRedirect(pathname: string): string {
+  if (pathname === '/') return pathname;
+  return pathname.replace(/\/+$/, '');
+}
+
+/**
+ * Return a safe redirect target only when it differs from the current URL.
+ * This prevents route handlers from issuing a 302 to the same canonical path.
+ */
+export function getRedirectPathIfDifferent(currentUrl: string, targetUrl: string): string | null {
+  const current = new URL(currentUrl, 'http://typecho-cf.local');
+  const target = new URL(targetUrl, current.origin);
+
+  const currentPath = normalizePathForRedirect(current.pathname);
+  const targetPath = normalizePathForRedirect(target.pathname);
+
+  if (currentPath === targetPath && current.search === target.search) {
+    return null;
+  }
+
+  return `${target.pathname}${target.search}${target.hash}`;
+}
+
 /**
  * Build category permalink
  * Supports custom category path patterns.

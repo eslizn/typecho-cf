@@ -70,7 +70,18 @@ export async function setCachedOptions(data: Record<string, unknown>): Promise<v
  * Build a list of URLs that should be purged after a content write operation.
  * Covers index, feed, and the specific post page.
  */
-export function buildContentPurgeUrls(siteUrl: string, cid?: number): string[] {
+export interface ContentPurgeUrlsOptions {
+  contentUrl?: string | null;
+  categoryUrls?: Array<string | null | undefined>;
+  tagUrls?: Array<string | null | undefined>;
+  authorUrl?: string | null;
+}
+
+export function buildContentPurgeUrls(
+  siteUrl: string,
+  cid?: number,
+  related: ContentPurgeUrlsOptions = {},
+): string[] {
   const base = siteUrl.replace(/\/$/, '');
   
   // Skip if siteUrl is empty or not an absolute URL (test environment)
@@ -84,19 +95,33 @@ export function buildContentPurgeUrls(siteUrl: string, cid?: number): string[] {
     base + '/feed/atom',
     base + '/feed/rss',
     base + '/feed/comments',
+    base + '/feed/rss/comments',
+    base + '/feed/atom/comments',
   ];
   if (cid) {
     urls.push(base + `/archives/${cid}/`);
   }
-  return urls;
+  if (related.contentUrl) urls.push(related.contentUrl);
+  if (related.authorUrl) urls.push(related.authorUrl);
+  for (const url of related.categoryUrls || []) {
+    if (url) urls.push(url);
+  }
+  for (const url of related.tagUrls || []) {
+    if (url) urls.push(url);
+  }
+  return [...new Set(urls)];
 }
 
 /**
  * Purge content-related cache entries (index + feeds + specific post).
  * Does NOT purge the options cache — use purgeSiteCache for settings changes.
  */
-export async function purgeContentCache(siteUrl: string, cid?: number): Promise<void> {
-  await purgeCache(buildContentPurgeUrls(siteUrl, cid));
+export async function purgeContentCache(
+  siteUrl: string,
+  cid?: number,
+  related: ContentPurgeUrlsOptions = {},
+): Promise<void> {
+  await purgeCache(buildContentPurgeUrls(siteUrl, cid, related));
 }
 
 /**

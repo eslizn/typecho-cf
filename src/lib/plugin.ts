@@ -341,7 +341,7 @@ export async function doHook(hookPoint: string, ...args: any[]): Promise<void> {
   for (const reg of handlers) {
     if (!activatedPlugins.has(reg.pluginId)) continue;
     try {
-      await reg.handler(...args);
+      await (reg.handler as CallHandler)(...args);
     } catch (err) {
       console.error(`[plugin] Error in hook ${hookPoint} from plugin ${reg.pluginId}:`, err);
     }

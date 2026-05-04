@@ -9,6 +9,45 @@ declare module '*.sql?raw' {
 // Cloudflare Workers environment bindings
 // In Astro 6 + @astrojs/cloudflare v13, bindings are accessed via
 // `import { env } from 'cloudflare:workers'` instead of `locals.runtime.env`
+interface D1PreparedStatement {
+  first<T = unknown>(): Promise<T | null>;
+}
+
+interface D1Database {
+  prepare(query: string): D1PreparedStatement;
+  batch<T = unknown>(statements: D1PreparedStatement[]): Promise<T[]>;
+}
+
+interface R2HTTPMetadata {
+  contentType?: string;
+  contentDisposition?: string;
+}
+
+interface R2ObjectBody {
+  body: ReadableStream;
+  httpEtag: string;
+  httpMetadata?: R2HTTPMetadata;
+}
+
+interface R2Bucket {
+  put(
+    key: string,
+    value: ArrayBuffer,
+    options?: { httpMetadata?: R2HTTPMetadata },
+  ): Promise<unknown>;
+  get(key: string): Promise<R2ObjectBody | null>;
+  delete(key: string): Promise<void>;
+}
+
+interface ExecutionContext {
+  waitUntil(promise: Promise<unknown>): void;
+  passThroughOnException(): void;
+}
+
+interface CacheStorage {
+  readonly default: Cache;
+}
+
 interface CloudflareEnv {
   DB: D1Database;
   BUCKET: R2Bucket;

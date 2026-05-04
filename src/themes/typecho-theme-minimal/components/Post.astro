@@ -145,6 +145,9 @@ const totalComments = countAll(comments);
                   <form method="post" action="/api/comment" id="comment-form" role="form">
                     <input type="hidden" name="cid" value={String(post.cid)} />
                     <input type="hidden" name="parent" id="comment-parent" value="0" />
+                    {commentOptions.securityToken && (
+                      <input type="hidden" name="_" value={commentOptions.securityToken} />
+                    )}
                     {isLoggedIn ? (
                       <p>
                         登录身份: <a href={urls.profileUrl}>{user?.screenName || user?.name}</a>.

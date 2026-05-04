@@ -5,7 +5,7 @@ import { buildPermalink } from '@/lib/content';
 import { renderMarkdown, generateExcerpt } from '@/lib/markdown';
 import { generateRss2, generateAtom, generateRss1 } from '@/lib/feed';
 import { setActivatedPlugins, parseActivatedPlugins, applyFilter } from '@/lib/plugin';
-import { eq, and, desc, sql } from 'drizzle-orm';
+import { eq, and, desc, sql, or } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 
 export const GET: APIRoute = async ({ locals, params }) => {
@@ -129,10 +129,17 @@ async function generateCommentsFeed(
   isAtom: boolean,
   isRss1: boolean
 ) {
-  const recentComments = await db
-    .select()
+  const recentRows = await db
+    .select({ comment: schema.comments, content: schema.contents })
     .from(schema.comments)
-    .where(eq(schema.comments.status, 'approved'))
+    .innerJoin(schema.contents, eq(schema.comments.cid, schema.contents.cid))
+    .where(and(
+      eq(schema.comments.status, 'approved'),
+      eq(schema.contents.status, 'publish'),
+      eq(schema.contents.allowFeed, '1'),
+      or(eq(schema.contents.type, 'post'), eq(schema.contents.type, 'page')),
+      sql`(${schema.contents.password} IS NULL OR ${schema.contents.password} = '')`,
+    ))
     .orderBy(desc(schema.comments.created))
     .limit(10);
 
@@ -140,17 +147,22 @@ async function generateCommentsFeed(
     title: `${options.title} - 最近的评论`,
     description: `${options.title} 上的最近评论`,
     link: urls.siteUrl,
-    feedUrl: isAtom ? urls.commentsFeedAtomUrl : urls.commentsFeedUrl,
+    feedUrl: isAtom ? urls.commentsFeedAtomUrl : isRss1 ? urls.commentsFeedRssUrl : urls.commentsFeedUrl,
     language: 'zh-CN',
-    lastBuildDate: recentComments[0] ? new Date((recentComments[0].created || 0) * 1000) : new Date(),
+    lastBuildDate: recentRows[0] ? new Date((recentRows[0].comment.created || 0) * 1000) : new Date(),
   };
 
-  const items = recentComments.map((c) => ({
-    title: `${c.author || '匿名'} 的评论`,
-    link: `${urls.siteUrl}/archives/${c.cid}/#comment-${c.coid}`,
-    content: renderMarkdown(c.text || ''),
-    date: new Date((c.created || 0) * 1000),
-    author: c.author || '匿名',
+  const items = recentRows.map(({ comment, content }) => ({
+    title: `${comment.author || '匿名'} 的评论`,
+    link: `${buildPermalink(
+      { cid: content.cid, slug: content.slug, type: content.type, created: content.created },
+      urls.siteUrl,
+      options.permalinkPattern as string | undefined,
+      options.pagePattern as string | undefined,
+    )}#comment-${comment.coid}`,
+    content: renderMarkdown(comment.text || ''),
+    date: new Date((comment.created || 0) * 1000),
+    author: comment.author || '匿名',
   }));
 
   let xml: string;
@@ -159,6 +171,9 @@ async function generateCommentsFeed(
   if (isAtom) {
     xml = generateAtom(config, items);
     contentType = 'application/atom+xml; charset=utf-8';
+  } else if (isRss1) {
+    xml = generateRss1(config, items);
+    contentType = 'application/rdf+xml; charset=utf-8';
   } else {
     xml = generateRss2(config, items);
     contentType = 'application/rss+xml; charset=utf-8';

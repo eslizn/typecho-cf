@@ -1,7 +1,8 @@
 ---
 import { themeTemplates } from 'virtual:theme-templates';
 import { createContext } from '@/lib/context';
-import { preparePostData } from '@/lib/page-data';
+import { preparePageData, preparePostData } from '@/lib/page-data';
+import { buildPermalink, getRedirectPathIfDifferent } from '@/lib/content';
 
 const { cid } = Astro.params;
 const cidNum = parseInt(cid || '0', 10);
@@ -21,26 +22,36 @@ const contentRow = await db.query.contents.findFirst({
 
 if (!contentRow) return new Response('Not Found', { status: 404 });
 
-// If it's a page, redirect to page route using configured page pattern
-if (contentRow.type === 'page') {
-  const pagePattern = (options.pagePattern as string) || '/{slug}.html';
-  const pageUrl = pagePattern
-    .replace(/\{cid\}/g, String(contentRow.cid))
-    .replace(/\{slug\}/g, contentRow.slug || String(contentRow.cid));
-  return Astro.redirect(pageUrl);
-}
-
-// Prepare data
 const suppliedPassword = Astro.url.searchParams.get('password');
-const result = await preparePostData(ctx, cidNum, Astro.request.url, suppliedPassword);
+let result;
+let Component;
 
-// If result is a Response, return it (404, etc.)
-if (result instanceof Response) return result;
+// If it's a page, redirect to its configured page route unless that route is this URL.
+if (contentRow.type === 'page') {
+  const pageUrl = buildPermalink(
+    { cid: contentRow.cid, slug: contentRow.slug, type: contentRow.type, created: contentRow.created },
+    ctx.urls.siteUrl,
+    undefined,
+    options.pagePattern as string | undefined,
+  );
+  const redirectPath = getRedirectPathIfDifferent(Astro.request.url, pageUrl);
+  if (redirectPath) return Astro.redirect(redirectPath);
 
-// Select theme component
-const activeTheme = options.theme || 'typecho-theme-minimal';
-const templates = themeTemplates[activeTheme] ?? {};
-const defaultTemplates = themeTemplates['typecho-theme-minimal']!;
-const PostComponent = templates.Post ?? defaultTemplates.Post!;
+  result = await preparePageData(ctx, contentRow.slug || String(contentRow.cid), Astro.request.url, suppliedPassword);
+  if (result instanceof Response) return result;
+
+  const activeTheme = options.theme || 'typecho-theme-minimal';
+  const templates = themeTemplates[activeTheme] ?? {};
+  const defaultTemplates = themeTemplates['typecho-theme-minimal']!;
+  Component = templates.Page ?? defaultTemplates.Page!;
+} else {
+  result = await preparePostData(ctx, cidNum, Astro.request.url, suppliedPassword);
+  if (result instanceof Response) return result;
+
+  const activeTheme = options.theme || 'typecho-theme-minimal';
+  const templates = themeTemplates[activeTheme] ?? {};
+  const defaultTemplates = themeTemplates['typecho-theme-minimal']!;
+  Component = templates.Post ?? defaultTemplates.Post!;
+}
 ---
-<PostComponent {...result} />
+<Component {...result} />

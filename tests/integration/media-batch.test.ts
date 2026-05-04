@@ -13,7 +13,7 @@ import { hashPassword, generateAuthToken } from '@/lib/auth';
 
 // ---- shared DB ref -----------------------------------------------------------
 
-let testDb: ReturnType<typeof drizzle<typeof schema>>;
+let testDb: ReturnType<typeof createTestDb>;
 
 // R2 BUCKET mock — must be hoisted so the vi.mock factory can reference it
 const { mockBucketDelete } = vi.hoisted(() => ({

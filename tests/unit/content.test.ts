@@ -11,6 +11,7 @@ import {
   buildCategoryLink,
   buildTagLink,
   buildAuthorLink,
+  getRedirectPathIfDifferent,
   formatDate,
 } from '@/lib/content';
 
@@ -107,6 +108,43 @@ describe('buildPermalink()', () => {
       'https://example.com/',
     );
     expect(url).toBe('https://example.com/archives/1/');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getRedirectPathIfDifferent
+// ---------------------------------------------------------------------------
+describe('getRedirectPathIfDifferent()', () => {
+  it('returns null for a redirect to the same path', () => {
+    const target = getRedirectPathIfDifferent(
+      'https://example.com/archives/2/',
+      'https://example.com/archives/2/',
+    );
+    expect(target).toBeNull();
+  });
+
+  it('treats trailing slash differences as the same path', () => {
+    const target = getRedirectPathIfDifferent(
+      'https://example.com/archives/2',
+      'https://example.com/archives/2/',
+    );
+    expect(target).toBeNull();
+  });
+
+  it('returns a relative redirect path when the target differs', () => {
+    const target = getRedirectPathIfDifferent(
+      'https://example.com/',
+      'https://example.com/about.html',
+    );
+    expect(target).toBe('/about.html');
+  });
+
+  it('preserves query strings on real redirects', () => {
+    const target = getRedirectPathIfDifferent(
+      'https://example.com/',
+      'https://example.com/search/?q=astro',
+    );
+    expect(target).toBe('/search/?q=astro');
   });
 });
 

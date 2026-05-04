@@ -482,10 +482,43 @@ describe('POST /api/comment', () => {
   it('accepts comment when commentsAntiSpam is enabled and token is correct', async () => {
     await seedOptions(testDb, { commentsAntiSpam: '1' });
     const content = await seedContent(testDb);
-    const requestUrl = 'https://example.com/api/comment';
+    const requestUrl = 'https://example.com/';
     const token = await generateCommentToken('test-secret', requestUrl);
     const req = makeCommentRequest({ cid: String(content.cid), text: 'Legit comment', author: 'Alice', _: token });
     const res = await POST({ request: req, locals: {} } as any);
     expect(res.status).toBe(302);
+  });
+
+  it('rejects anti-spam token generated for API URL instead of referer page', async () => {
+    await seedOptions(testDb, { commentsAntiSpam: '1' });
+    const content = await seedContent(testDb);
+    const token = await generateCommentToken('test-secret', 'https://example.com/api/comment');
+    const req = makeCommentRequest({ cid: String(content.cid), text: 'Wrong URL token', author: 'Alice', _: token });
+    const res = await POST({ request: req, locals: {} } as any);
+    expect(res.status).toBe(403);
+  });
+
+  it('rejects comments on private content', async () => {
+    await seedOptions(testDb);
+    const content = await seedContent(testDb, { status: 'private' });
+    const req = makeCommentRequest({ cid: String(content.cid), text: 'Nope', author: 'Alice' });
+    const res = await POST({ request: req, locals: {} } as any);
+    expect(res.status).toBe(403);
+  });
+
+  it('rejects comments on draft content', async () => {
+    await seedOptions(testDb);
+    const content = await seedContent(testDb, { type: 'post_draft', status: 'draft' });
+    const req = makeCommentRequest({ cid: String(content.cid), text: 'Nope', author: 'Alice' });
+    const res = await POST({ request: req, locals: {} } as any);
+    expect(res.status).toBe(403);
+  });
+
+  it('rejects comments on attachments', async () => {
+    await seedOptions(testDb);
+    const content = await seedContent(testDb, { type: 'attachment', status: 'publish' });
+    const req = makeCommentRequest({ cid: String(content.cid), text: 'Nope', author: 'Alice' });
+    const res = await POST({ request: req, locals: {} } as any);
+    expect(res.status).toBe(403);
   });
 });

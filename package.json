@@ -5,7 +5,7 @@
   "description": "Typecho blog rewrite with Astro + Cloudflare Workers + D1",
   "scripts": {
     "dev": "astro dev",
-    "build": "pnpm install && astro build",
+    "build": "astro build",
     "deploy": "pnpm build && wrangler deploy",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -20,10 +20,10 @@
     "reset-password:cloudflare": "tsx scripts/reset-password.ts --target cloudflare"
   },
   "dependencies": {
-    "@astrojs/cloudflare": "^13.2.2",
-    "astro": "^6.1.10",
+    "@astrojs/cloudflare": "^13.3.1",
+    "astro": "^6.2.2",
     "drizzle-orm": "^0.45.2",
-    "marked": "^18.0.2",
+    "marked": "^18.0.3",
     "sanitize-html": "^2.17.3",
     "typecho-plugin-captcha": "file:src/plugins/typecho-plugin-captcha",
     "typecho-plugin-turnstile": "file:src/plugins/typecho-plugin-turnstile",
@@ -38,7 +38,7 @@
     "tsx": "^4.21.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.5",
-    "wrangler": "^4.86.0"
+    "wrangler": "^4.87.0"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

@@ -5,6 +5,7 @@ import { getAuthCookies, validateAuthToken, validateCommentToken } from '@/lib/a
 import { setActivatedPlugins, parseActivatedPlugins, applyFilter, doHook } from '@/lib/plugin';
 import { purgeContentCache } from '@/lib/cache';
 import { getClientIp } from '@/lib/context';
+import { buildPermalink } from '@/lib/content';
 import { eq, and, sql } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 
@@ -40,6 +41,13 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
   if (!content) {
     return new Response('文章不存在', { status: 404 });
+  }
+
+  const isPublicContent =
+    (content.type === 'post' || content.type === 'page') &&
+    (content.status === 'publish' || content.status === 'hidden');
+  if (!isPublicContent) {
+    return new Response('评论目标不可用', { status: 403 });
   }
 
   if (content.allowComment !== '1') {
@@ -179,7 +187,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
   // Token = SHA256(secret + '&' + requestUrl), embedded in comment form as <input name="_">
   if (options.commentsAntiSpam && !userId) {
     const submittedToken = formData.get('_')?.toString() || '';
-    const valid = await validateCommentToken(submittedToken, options.secret as string, request.url);
+    const refererUrl = (request.headers.get('referer') || '').split('#')[0];
+    const valid = refererUrl
+      ? await validateCommentToken(submittedToken, options.secret as string, refererUrl)
+      : false;
     if (!valid) {
       return new Response('评论来源验证失败', { status: 403 });
     }
@@ -212,7 +223,13 @@ export const POST: APIRoute = async ({ request, locals }) => {
   // Trigger feedback:finishComment hook — plugins can act after comment saved
   await doHook('feedback:finishComment', commentData);
 
-  await purgeContentCache(options.siteUrl || '', cid);
+  const contentUrl = buildPermalink(
+    { cid: content.cid, slug: content.slug, type: content.type, created: content.created },
+    options.siteUrl || '',
+    options.permalinkPattern as string | undefined,
+    options.pagePattern as string | undefined,
+  );
+  await purgeContentCache(options.siteUrl || '', cid, { contentUrl });
 
   // Redirect back to the post
   // Prevent open redirect: only use referer if it's a relative path or same-origin

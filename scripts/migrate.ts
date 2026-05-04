@@ -155,37 +155,37 @@ class SourceReader {
 
   getUsers(): SourceRow[] {
     if (!this.tableExists('users')) return [];
-    return this.db.prepare(`SELECT * FROM ${this.table('users')}`).all();
+    return this.db.prepare(`SELECT * FROM ${this.table('users')}`).all() as SourceRow[];
   }
 
   getContents(): SourceRow[] {
     if (!this.tableExists('contents')) return [];
-    return this.db.prepare(`SELECT * FROM ${this.table('contents')}`).all();
+    return this.db.prepare(`SELECT * FROM ${this.table('contents')}`).all() as SourceRow[];
   }
 
   getComments(): SourceRow[] {
     if (!this.tableExists('comments')) return [];
-    return this.db.prepare(`SELECT * FROM ${this.table('comments')}`).all();
+    return this.db.prepare(`SELECT * FROM ${this.table('comments')}`).all() as SourceRow[];
   }
 
   getMetas(): SourceRow[] {
     if (!this.tableExists('metas')) return [];
-    return this.db.prepare(`SELECT * FROM ${this.table('metas')}`).all();
+    return this.db.prepare(`SELECT * FROM ${this.table('metas')}`).all() as SourceRow[];
   }
 
   getRelationships(): SourceRow[] {
     if (!this.tableExists('relationships')) return [];
-    return this.db.prepare(`SELECT * FROM ${this.table('relationships')}`).all();
+    return this.db.prepare(`SELECT * FROM ${this.table('relationships')}`).all() as SourceRow[];
   }
 
   getOptions(): SourceRow[] {
     if (!this.tableExists('options')) return [];
-    return this.db.prepare(`SELECT * FROM ${this.table('options')}`).all();
+    return this.db.prepare(`SELECT * FROM ${this.table('options')}`).all() as SourceRow[];
   }
 
   getFields(): SourceRow[] {
     if (!this.tableExists('fields')) return [];
-    return this.db.prepare(`SELECT * FROM ${this.table('fields')}`).all();
+    return this.db.prepare(`SELECT * FROM ${this.table('fields')}`).all() as SourceRow[];
   }
 
   close() {

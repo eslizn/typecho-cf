@@ -14,6 +14,9 @@ export const GET: APIRoute = async ({ params, locals }) => {
 
     const headers = new Headers();
     headers.set('Content-Type', object.httpMetadata?.contentType || 'application/octet-stream');
+    if (object.httpMetadata?.contentDisposition) {
+      headers.set('Content-Disposition', object.httpMetadata.contentDisposition);
+    }
     headers.set('Cache-Control', 'public, max-age=31536000, immutable');
     headers.set('ETag', object.httpEtag);
 

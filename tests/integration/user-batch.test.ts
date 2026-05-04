@@ -12,7 +12,7 @@ import { hashPassword, generateAuthToken } from '@/lib/auth';
 
 // ---- shared DB ref -----------------------------------------------------------
 
-let testDb: ReturnType<typeof drizzle<typeof schema>>;
+let testDb: ReturnType<typeof createTestDb>;
 
 vi.mock('@/db', async () => {
   const actual = await vi.importActual<typeof import('@/db')>('@/db');

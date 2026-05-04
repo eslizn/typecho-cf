@@ -2,9 +2,12 @@
 import { themeTemplates } from 'virtual:theme-templates';
 import { createContext } from '@/lib/context';
 import { prepareIndexData } from '@/lib/page-data';
+import { buildPermalink, getRedirectPathIfDifferent } from '@/lib/content';
+import { schema } from '@/db';
+import { and, eq } from 'drizzle-orm';
 
 const ctx = await createContext(Astro.locals, Astro.request);
-const { options } = ctx;
+const { db, options, urls } = ctx;
 
 // Handle search redirect (GET or POST)
 let searchQuery = Astro.url.searchParams.get('s');
@@ -21,7 +24,26 @@ if (searchQuery) {
 // Custom front page
 if (options.frontPage && options.frontPage !== 'recent') {
   if (options.frontPage.startsWith('page:')) {
-    return Astro.redirect(`/archives/${options.frontPage.split(':')[1]}/`);
+    const pageCid = parseInt(options.frontPage.split(':')[1] || '0', 10);
+    if (pageCid > 0) {
+      const frontPage = await db.query.contents.findFirst({
+        where: and(
+          eq(schema.contents.cid, pageCid),
+          eq(schema.contents.type, 'page'),
+        ),
+      });
+
+      if (frontPage && (frontPage.status === 'publish' || frontPage.status === 'hidden')) {
+        const targetUrl = buildPermalink(
+          { cid: frontPage.cid, slug: frontPage.slug, type: frontPage.type, created: frontPage.created },
+          urls.siteUrl,
+          undefined,
+          options.pagePattern as string | undefined,
+        );
+        const redirectPath = getRedirectPathIfDifferent(Astro.request.url, targetUrl);
+        if (redirectPath) return Astro.redirect(redirectPath);
+      }
+    }
   }
 }
 

@@ -1,8 +1,8 @@
 import type { APIRoute } from 'astro';
 import { getDb, schema } from '@/db';
-import { loadOptions } from '@/lib/options';
+import { loadOptions, type SiteOptions } from '@/lib/options';
 import { getAuthCookies, validateAuthToken, hasPermission, requireAdminCSRF } from '@/lib/auth';
-import { generateSlug } from '@/lib/content';
+import { buildAuthorLink, buildCategoryLink, buildPermalink, buildTagLink, generateSlug } from '@/lib/content';
 import { setActivatedPlugins, parseActivatedPlugins, applyFilter, doHook } from '@/lib/plugin';
 import { purgeContentCache } from '@/lib/cache';
 import { eq, and, sql } from 'drizzle-orm';
@@ -46,6 +46,87 @@ async function saveCustomFields(db: any, cid: number, formData: FormData) {
       set: { type: fieldData.type, str_value: fieldData.str_value, int_value: fieldData.int_value, float_value: fieldData.float_value },
     });
   }
+}
+
+function parseTagNames(tags: string): string[] {
+  return [...new Set(tags.split(',').map((t) => t.trim()).filter(Boolean))];
+}
+
+async function attachTags(db: any, cid: number, tags: string) {
+  for (const tagName of parseTagNames(tags)) {
+    const tagSlug = generateSlug(tagName) || tagName.toLowerCase().replace(/\s+/g, '-');
+    let tagRow = await db.query.metas.findFirst({
+      where: and(eq(schema.metas.slug, tagSlug), eq(schema.metas.type, 'tag')),
+    });
+
+    if (!tagRow) {
+      const inserted = await db.insert(schema.metas).values({
+        name: tagName,
+        slug: tagSlug,
+        type: 'tag',
+        count: 0,
+      }).returning({ mid: schema.metas.mid });
+      tagRow = { mid: inserted[0].mid } as any;
+    }
+
+    if (!tagRow) continue;
+
+    const existingRel = await db.query.relationships.findFirst({
+      where: and(
+        eq(schema.relationships.cid, cid),
+        eq(schema.relationships.mid, tagRow.mid),
+      ),
+    });
+    if (existingRel) continue;
+
+    await db.insert(schema.relationships).values({ cid, mid: tagRow.mid });
+    await db.update(schema.metas)
+      .set({ count: sql`${schema.metas.count} + 1` })
+      .where(eq(schema.metas.mid, tagRow.mid));
+  }
+}
+
+async function purgeContentAndRelatedCache(
+  db: any,
+  options: SiteOptions,
+  cid: number,
+  fallbackContent?: typeof schema.contents.$inferSelect,
+) {
+  const content = fallbackContent || await db.query.contents.findFirst({
+    where: eq(schema.contents.cid, cid),
+  });
+  if (!content) {
+    await purgeContentCache(options.siteUrl || '', cid);
+    return;
+  }
+
+  const relatedMetas = await db
+    .select({ type: schema.metas.type, slug: schema.metas.slug })
+    .from(schema.relationships)
+    .innerJoin(schema.metas, eq(schema.relationships.mid, schema.metas.mid))
+    .where(eq(schema.relationships.cid, cid));
+
+  const categories = relatedMetas.filter((m: any) => m.type === 'category' && m.slug);
+  const tags = relatedMetas.filter((m: any) => m.type === 'tag' && m.slug);
+  const contentUrl = buildPermalink(
+    {
+      cid: content.cid,
+      slug: content.slug,
+      type: content.type,
+      created: content.created,
+      category: categories[0]?.slug || null,
+    },
+    options.siteUrl || '',
+    options.permalinkPattern as string | undefined,
+    options.pagePattern as string | undefined,
+  );
+
+  await purgeContentCache(options.siteUrl || '', cid, {
+    contentUrl,
+    categoryUrls: categories.map((m: any) => buildCategoryLink(m.slug, options.siteUrl || '', options.categoryPattern as string | undefined)),
+    tagUrls: tags.map((m: any) => buildTagLink(m.slug, options.siteUrl || '')),
+    authorUrl: content.authorId ? buildAuthorLink(content.authorId, options.siteUrl || '') : null,
+  });
 }
 
 export const POST: APIRoute = async ({ request, locals }) => {
@@ -94,7 +175,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const allowPing = formData.get('allowPing') ? '1' : '0';
   const allowFeed = formData.get('allowFeed') ? '1' : '0';
   const tags = formData.get('tags')?.toString()?.trim() || '';
-  const categoryIds = formData.getAll('category[]').map((v) => parseInt(v.toString(), 10)).filter(Boolean);
+  const categoryIds = [...new Set(formData.getAll('category[]').map((v) => parseInt(v.toString(), 10)).filter(Boolean))];
   const template = formData.get('template')?.toString()?.trim() || null;
   const order = parseInt(formData.get('order')?.toString() || '0', 10) || 0;
 
@@ -162,31 +243,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     // Add tags
     if (tags) {
-      const tagNames = tags.split(',').map((t) => t.trim()).filter(Boolean);
-      for (const tagName of tagNames) {
-        let tagSlug = generateSlug(tagName) || tagName.toLowerCase().replace(/\s+/g, '-');
-        let tagRow = await db.query.metas.findFirst({
-          where: and(eq(schema.metas.slug, tagSlug), eq(schema.metas.type, 'tag')),
-        });
-
-        if (!tagRow) {
-          const inserted = await db.insert(schema.metas).values({
-            name: tagName,
-            slug: tagSlug,
-            type: 'tag',
-            count: 0,
-          }).returning({ mid: schema.metas.mid });
-          tagRow = { mid: inserted[0].mid } as any;
-        }
-
-        if (tagRow) {
-          await db.insert(schema.relationships).values({ cid: newCid, mid: tagRow.mid })
-            .onConflictDoNothing();
-          await db.update(schema.metas)
-            .set({ count: sql`${schema.metas.count} + 1` })
-            .where(eq(schema.metas.mid, tagRow.mid));
-        }
-      }
+      await attachTags(db, newCid, tags);
     }
 
     // Trigger post/page finish hooks
@@ -196,7 +253,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     }
     await doHook(type === 'page' ? 'page:finishSave' : 'post:finishSave', finishData);
 
-    await purgeContentCache(options.siteUrl || '', newCid);
+    await purgeContentAndRelatedCache(db, options, newCid);
 
     const editUrl = type === 'page' ? `/admin/write-page?cid=${newCid}` : `/admin/write-post?cid=${newCid}`;
     return new Response(null, {
@@ -268,30 +325,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     // Add tags
     if (tags) {
-      const tagNames = tags.split(',').map((t) => t.trim()).filter(Boolean);
-      for (const tagName of tagNames) {
-        let tagSlug = generateSlug(tagName) || tagName.toLowerCase().replace(/\s+/g, '-');
-        let tagRow = await db.query.metas.findFirst({
-          where: and(eq(schema.metas.slug, tagSlug), eq(schema.metas.type, 'tag')),
-        });
-
-        if (!tagRow) {
-          const inserted = await db.insert(schema.metas).values({
-            name: tagName, slug: tagSlug, type: 'tag', count: 0,
-          }).returning({ mid: schema.metas.mid });
-          tagRow = { mid: inserted[0].mid } as any;
-        }
-
-        if (tagRow) {
-          await db.insert(schema.relationships).values({ cid, mid: tagRow.mid }).onConflictDoNothing();
-          await db.update(schema.metas)
-            .set({ count: sql`${schema.metas.count} + 1` })
-            .where(eq(schema.metas.mid, tagRow.mid));
-        }
-      }
+      await attachTags(db, cid, tags);
     }
 
-    await purgeContentCache(options.siteUrl || '', cid);
+    await purgeContentAndRelatedCache(db, options, cid);
 
     const editUrl = type === 'page' ? `/admin/write-page?cid=${cid}` : `/admin/write-post?cid=${cid}`;
     return new Response(null, {
@@ -314,6 +351,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     // Trigger pre-delete hook
     const isPage = existing.type?.startsWith('page');
     await doHook(isPage ? 'page:delete' : 'post:delete', existing);
+    await purgeContentAndRelatedCache(db, options, cid, existing);
 
     // Decrement meta counts before deleting relationships
     const rels = await db.select({ mid: schema.relationships.mid })
@@ -332,8 +370,6 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     // Trigger post-delete hook
     await doHook(isPage ? 'page:finishDelete' : 'post:finishDelete', existing);
-
-    await purgeContentCache(options.siteUrl || '', cid);
 
     const redirectTo = isPage ? '/admin/manage-pages' : '/admin/manage-posts';
     return new Response(null, {

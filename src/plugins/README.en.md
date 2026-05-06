@@ -76,8 +76,30 @@ typecho-plugin-example/
 | `select` | Dropdown | `options: { value: label }` |
 | `radio` | Radio buttons | `options: { value: label }` |
 | `checkbox` | Checkboxes (multi-select) | `options: { value: label }`, default is array |
+| `repeatable` | Repeatable config group | `itemFields: { fieldName: fieldDef }`, default is an object array |
 
 When `config` is declared, the admin plugin list automatically shows a "Settings" link that navigates to `/admin/plugin-config?id=<pluginId>`.
+
+Use `repeatable` for multiple same-shaped config items, such as storage mounts:
+
+```json
+{
+  "type": "repeatable",
+  "label": "Storage mounts",
+  "default": [{ "mount": "media", "provider": "r2" }],
+  "itemFields": {
+    "mount": { "type": "text", "label": "Mount path", "default": "media" },
+    "provider": {
+      "type": "select",
+      "label": "Provider",
+      "default": "r2",
+      "options": { "r2": "Cloudflare R2", "s3": "Amazon S3 compatible" }
+    }
+  }
+}
+```
+
+Fields may use `showWhen` for conditional display. Select fields may use `optionsSource: "r2Bindings"` to populate options from R2 bucket bindings in the current Worker environment.
 
 ---
 
@@ -253,7 +275,7 @@ pnpm run build
 ## Reference Example
 
 `typecho-plugin-captcha/` demonstrates:
-- `plugin.json` config declaration (6 field types in use)
+- `plugin.json` config declaration (7 field types in use)
 - `feedback:comment` filter hook (token validation + comment rejection)
 - Reading plugin config (with DEFAULTS fallback)
 - Named export `getClientSnippet()` for theme integration

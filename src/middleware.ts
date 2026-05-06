@@ -2,8 +2,10 @@ import { defineMiddleware } from 'astro:middleware';
 import { getDb } from '@/db';
 import { schema } from '@/db';
 import { loadOptions } from '@/lib/options';
+import { addHook, applyFilter, HookPoints, parseActivatedPlugins, setActivatedPlugins } from '@/lib/plugin';
 import { eq, and } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
+import initWebDavPlugin from 'typecho-plugin-webdav/index.ts';
 
 const redirectToInstall = () =>
   new Response(null, { status: 302, headers: { Location: '/install' } });
@@ -14,6 +16,13 @@ const regexCache = new Map<string, RegExp | null>();
 // Once we confirm the DB tables exist, skip the sqlite_master check on subsequent requests.
 // Negative results are NOT cached — each request retries until installation succeeds.
 let tableCheckPassed = false;
+let webDavRouteHookReady = false;
+
+function ensureMiddlewareRouteHooks(): void {
+  if (webDavRouteHookReady) return;
+  webDavRouteHookReady = true;
+  initWebDavPlugin({ addHook, HookPoints, pluginId: 'typecho-plugin-webdav' });
+}
 
 /**
  * Build a regex from a permalink pattern to match incoming URLs.
@@ -105,6 +114,22 @@ export const onRequest = defineMiddleware(async (context, next) => {
     }
   } catch {
     return redirectToInstall();
+  }
+
+  const activatedIds = parseActivatedPlugins(options.activatedPlugins as string | undefined);
+  setActivatedPlugins(activatedIds);
+  ensureMiddlewareRouteHooks();
+
+  const pluginRoute = await applyFilter('route:request', { handled: false }, {
+    request: context.request,
+    url,
+    path,
+    db,
+    options,
+    env,
+  });
+  if (pluginRoute?.handled && pluginRoute.response instanceof Response) {
+    return pluginRoute.response;
   }
 
   // ── Edge Cache Layer ──────────────────────────────────────────────────────

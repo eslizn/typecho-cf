@@ -28,6 +28,7 @@
     "typecho-plugin-ai-writer": "file:src/plugins/typecho-plugin-ai-writer",
     "typecho-plugin-captcha": "file:src/plugins/typecho-plugin-captcha",
     "typecho-plugin-turnstile": "file:src/plugins/typecho-plugin-turnstile",
+    "typecho-plugin-webdav": "file:src/plugins/typecho-plugin-webdav",
     "typecho-theme-minimal": "file:src/themes/typecho-theme-minimal"
   },
   "devDependencies": {

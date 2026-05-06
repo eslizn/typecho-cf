@@ -32,6 +32,9 @@ importers:
       typecho-plugin-turnstile:
         specifier: file:src/plugins/typecho-plugin-turnstile
         version: file:src/plugins/typecho-plugin-turnstile
+      typecho-plugin-webdav:
+        specifier: file:src/plugins/typecho-plugin-webdav
+        version: file:src/plugins/typecho-plugin-webdav
       typecho-theme-minimal:
         specifier: file:src/themes/typecho-theme-minimal
         version: file:src/themes/typecho-theme-minimal
@@ -2325,6 +2328,9 @@ packages:
 
   typecho-plugin-turnstile@file:src/plugins/typecho-plugin-turnstile:
     resolution: {directory: src/plugins/typecho-plugin-turnstile, type: directory}
+
+  typecho-plugin-webdav@file:src/plugins/typecho-plugin-webdav:
+    resolution: {directory: src/plugins/typecho-plugin-webdav, type: directory}
 
   typecho-theme-minimal@file:src/themes/typecho-theme-minimal:
     resolution: {directory: src/themes/typecho-theme-minimal, type: directory}
@@ -4901,6 +4907,8 @@ snapshots:
   typecho-plugin-captcha@file:src/plugins/typecho-plugin-captcha: {}
 
   typecho-plugin-turnstile@file:src/plugins/typecho-plugin-turnstile: {}
+
+  typecho-plugin-webdav@file:src/plugins/typecho-plugin-webdav: {}
 
   typecho-theme-minimal@file:src/themes/typecho-theme-minimal: {}
 

@@ -24,18 +24,45 @@ interface R2HTTPMetadata {
 }
 
 interface R2ObjectBody {
+  key?: string;
+  size?: number;
+  etag?: string;
   body: ReadableStream;
   httpEtag: string;
+  uploaded?: Date;
   httpMetadata?: R2HTTPMetadata;
+}
+
+interface R2Object {
+  key: string;
+  size: number;
+  etag: string;
+  httpEtag: string;
+  uploaded: Date;
+  httpMetadata?: R2HTTPMetadata;
+}
+
+interface R2Objects {
+  objects: R2Object[];
+  delimitedPrefixes: string[];
+  truncated: boolean;
+  cursor?: string;
 }
 
 interface R2Bucket {
   put(
     key: string,
-    value: ArrayBuffer,
+    value: ArrayBuffer | ReadableStream | string | Blob,
     options?: { httpMetadata?: R2HTTPMetadata },
   ): Promise<unknown>;
   get(key: string): Promise<R2ObjectBody | null>;
+  head(key: string): Promise<R2Object | null>;
+  list(options?: {
+    prefix?: string;
+    delimiter?: string;
+    limit?: number;
+    cursor?: string;
+  }): Promise<R2Objects>;
   delete(key: string): Promise<void>;
 }
 
@@ -51,6 +78,7 @@ interface CacheStorage {
 interface CloudflareEnv {
   DB: D1Database;
   BUCKET: R2Bucket;
+  [key: string]: unknown;
 }
 
 // Module declaration for cloudflare:workers env typing

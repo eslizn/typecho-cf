@@ -1,0 +1,10 @@
+{
+  "name": "typecho-plugin-webdav",
+  "version": "1.0.0",
+  "description": "Expose configured S3 and R2 object storage mounts through WebDAV.",
+  "keywords": ["typecho", "plugin", "webdav", "s3", "r2"],
+  "author": "eslizn",
+  "license": "MIT",
+  "type": "module",
+  "main": "index.ts"
+}

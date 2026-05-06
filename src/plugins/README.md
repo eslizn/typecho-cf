@@ -76,8 +76,30 @@ typecho-plugin-example/
 | `select` | 下拉选择 | `options: { value: label }` |
 | `radio` | 单选按钮 | `options: { value: label }` |
 | `checkbox` | 多选框 | `options: { value: label }`，default 为数组 |
+| `repeatable` | 可重复配置组 | `itemFields: { fieldName: fieldDef }`，default 为对象数组 |
 
 声明了 `config` 后，管理插件列表中自动显示「设置」链接，跳转到 `/admin/plugin-config?id=<pluginId>`。
+
+`repeatable` 用于多个同结构配置项，例如多个后端存储挂载：
+
+```json
+{
+  "type": "repeatable",
+  "label": "后端存储挂载",
+  "default": [{ "mount": "media", "provider": "r2" }],
+  "itemFields": {
+    "mount": { "type": "text", "label": "挂载目录", "default": "media" },
+    "provider": {
+      "type": "select",
+      "label": "存储类型",
+      "default": "r2",
+      "options": { "r2": "Cloudflare R2", "s3": "Amazon S3 兼容" }
+    }
+  }
+}
+```
+
+字段可选 `showWhen` 做条件显示，可选 `optionsSource: "r2Bindings"` 将下拉选项填充为当前 Worker 环境中的 R2 bucket binding。
 
 ---
 
@@ -253,7 +275,7 @@ pnpm run build
 ## 参考示例
 
 `typecho-plugin-captcha/` 目录演示了：
-- `plugin.json` 配置声明（6 种字段类型）
+- `plugin.json` 配置声明（7 种字段类型）
 - `feedback:comment` filter 钩子（token 验证 + 评论拒绝）
 - 读取插件配置（含 DEFAULTS fallback）
 - 具名导出 `getClientSnippet()` 供主题集成

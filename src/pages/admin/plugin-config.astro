@@ -9,12 +9,14 @@
 import Admin from '@/layouts/Admin.astro';
 import { createContext, requireAuth } from '@/lib/context';
 import { hasPermission, requireAdminCSRF } from '@/lib/auth';
+import { env } from 'cloudflare:workers';
 import {
   getPlugin,
   pluginHasConfig,
   isPluginActive,
   loadPluginConfig,
   applyFilter,
+  parsePluginConfigFormData,
   type PluginConfigField,
 } from '@/lib/plugin';
 import { withTimeout } from '@/lib/timeout';
@@ -59,15 +61,7 @@ if (Astro.request.method === 'POST') {
     const formData = await Astro.request.formData();
     const { setOption } = await import('@/lib/options');
 
-    const settings: Record<string, any> = {};
-    for (const [key, field] of Object.entries(configDef)) {
-      if (field.type === 'checkbox') {
-        // Checkbox may have multiple values
-        settings[key] = formData.getAll(key).map(v => v.toString());
-      } else {
-        settings[key] = formData.get(key)?.toString() ?? '';
-      }
-    }
+    const settings = parsePluginConfigFormData(configDef, formData);
 
     const validation = await withTimeout(
       applyFilter('plugin:config:beforeSave', {
@@ -111,6 +105,54 @@ if (Astro.request.method === 'POST') {
 }
 
 const pageTitle = `设置插件 ${manifest.name || pluginId}`;
+
+function isR2BucketBinding(value: unknown): boolean {
+  return !!value
+    && typeof value === 'object'
+    && typeof (value as any).get === 'function'
+    && typeof (value as any).put === 'function'
+    && typeof (value as any).delete === 'function';
+}
+
+function r2BindingOptions(): Record<string, string> {
+  const bindings: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env as Record<string, unknown>)) {
+    if (isR2BucketBinding(value)) {
+      bindings[key] = key;
+    }
+  }
+  if (Object.keys(bindings).length === 0) {
+    bindings.BUCKET = 'BUCKET';
+  }
+  return bindings;
+}
+
+function fieldOptions(field: PluginConfigField): Record<string, string> | undefined {
+  if (field.optionsSource === 'r2Bindings') return r2BindingOptions();
+  return field.options;
+}
+
+function repeatableRows(value: unknown, field: PluginConfigField): Record<string, any>[] {
+  let rows: unknown = value;
+  if (typeof rows === 'string') {
+    try {
+      rows = JSON.parse(rows);
+    } catch {
+      rows = [];
+    }
+  }
+  if (!Array.isArray(rows) || rows.length === 0) {
+    rows = Array.isArray(field.default) && field.default.length > 0 ? field.default : [{}];
+  }
+  return rows.map(row => row && typeof row === 'object' ? row as Record<string, any> : {});
+}
+
+function isFieldVisible(field: PluginConfigField, row: Record<string, any>): boolean {
+  if (!field.showWhen) return true;
+  const current = String(row[field.showWhen.field] ?? '');
+  const expected = Array.isArray(field.showWhen.value) ? field.showWhen.value : [field.showWhen.value];
+  return expected.map(String).includes(current);
+}
 ---
 <Admin title={pageTitle} options={options} urls={urls} user={user} activeMenu="plugins">
   <div class="col-mb-12 col-tb-8 col-tb-offset-2" role="form">
@@ -149,10 +191,10 @@ const pageTitle = `设置插件 ${manifest.name || pluginId}`;
                 <p><textarea id={`cfg-${key}`} name={key} class="text w-100" rows="4">{String(value)}</textarea></p>
               )}
 
-              {field.type === 'select' && field.options && (
+              {field.type === 'select' && fieldOptions(field) && (
                 <p>
                   <select id={`cfg-${key}`} name={key}>
-                    {Object.entries(field.options).map(([optVal, optLabel]) => (
+                    {Object.entries(fieldOptions(field)!).map(([optVal, optLabel]) => (
                       <option value={optVal} selected={String(value) === optVal}>{optLabel}</option>
                     ))}
                   </select>
@@ -198,6 +240,115 @@ const pageTitle = `设置插件 ${manifest.name || pluginId}`;
                 </p>
               )}
 
+              {field.type === 'repeatable' && field.itemFields && (
+                <div class="typecho-repeatable" data-repeatable={key} data-next-index={String(repeatableRows(value, field).length)}>
+                  <div class="typecho-repeatable-items">
+                    {repeatableRows(value, field).map((row, rowIndex) => (
+                      <fieldset class="typecho-repeatable-item">
+                        <legend>{field.label} #{rowIndex + 1}</legend>
+                        {Object.entries(field.itemFields || {}).map(([itemKey, itemField]: [string, PluginConfigField]) => {
+                          const itemValue = row[itemKey] ?? itemField.default ?? '';
+                          const inputName = `${key}[${rowIndex}][${itemKey}]`;
+                          const inputId = `cfg-${key}-${rowIndex}-${itemKey}`;
+                          const visible = isFieldVisible(itemField, row);
+                          const showWhenValue = Array.isArray(itemField.showWhen?.value)
+                            ? itemField.showWhen?.value.join(',')
+                            : itemField.showWhen?.value;
+                          return (
+                            <div
+                              class:list={['typecho-repeatable-field', { hidden: !visible }]}
+                              data-show-when-field={itemField.showWhen?.field}
+                              data-show-when-value={showWhenValue}
+                            >
+                              <label for={inputId} class="typecho-label">{itemField.label}</label>
+
+                              {itemField.type === 'text' && (
+                                <p><input type="text" id={inputId} name={inputName} class="text w-100" value={String(itemValue)} disabled={!visible} /></p>
+                              )}
+
+                              {itemField.type === 'password' && (
+                                <p><input type="password" id={inputId} name={inputName} class="text w-100" value={String(itemValue)} disabled={!visible} /></p>
+                              )}
+
+                              {itemField.type === 'textarea' && (
+                                <p><textarea id={inputId} name={inputName} class="text w-100" rows="3" disabled={!visible}>{String(itemValue)}</textarea></p>
+                              )}
+
+                              {itemField.type === 'select' && fieldOptions(itemField) && (
+                                <p>
+                                  <select id={inputId} name={inputName} disabled={!visible}>
+                                    {Object.entries(fieldOptions(itemField)!).map(([optVal, optLabel]) => (
+                                      <option value={optVal} selected={String(itemValue) === String(optVal)}>{optLabel}</option>
+                                    ))}
+                                  </select>
+                                </p>
+                              )}
+
+                              {itemField.description && (
+                                <p class="description" set:html={itemField.description}></p>
+                              )}
+                            </div>
+                          );
+                        })}
+                        <p>
+                          <button type="button" class="btn btn-xs typecho-repeatable-remove">删除该项</button>
+                        </p>
+                      </fieldset>
+                    ))}
+                  </div>
+                  <button type="button" class="btn typecho-repeatable-add">添加一项</button>
+                  <template class="typecho-repeatable-template">
+                    <fieldset class="typecho-repeatable-item">
+                      <legend>{field.label} #__NUMBER__</legend>
+                      {Object.entries(field.itemFields || {}).map(([itemKey, itemField]: [string, PluginConfigField]) => {
+                        const inputName = `${key}[__INDEX__][${itemKey}]`;
+                        const inputId = `cfg-${key}-__INDEX__-${itemKey}`;
+                        const itemValue = itemField.default ?? '';
+                        const visible = !itemField.showWhen || isFieldVisible(itemField, Object.fromEntries(
+                          Object.entries(field.itemFields || {}).map(([k, f]) => [k, f.default ?? ''])
+                        ));
+                        const showWhenValue = Array.isArray(itemField.showWhen?.value)
+                          ? itemField.showWhen?.value.join(',')
+                          : itemField.showWhen?.value;
+                        return (
+                          <div
+                            class:list={['typecho-repeatable-field', { hidden: !visible }]}
+                            data-show-when-field={itemField.showWhen?.field}
+                            data-show-when-value={showWhenValue}
+                          >
+                            <label for={inputId} class="typecho-label">{itemField.label}</label>
+                            {itemField.type === 'text' && (
+                              <p><input type="text" id={inputId} name={inputName} class="text w-100" value={String(itemValue)} disabled={!visible} /></p>
+                            )}
+                            {itemField.type === 'password' && (
+                              <p><input type="password" id={inputId} name={inputName} class="text w-100" value={String(itemValue)} disabled={!visible} /></p>
+                            )}
+                            {itemField.type === 'textarea' && (
+                              <p><textarea id={inputId} name={inputName} class="text w-100" rows="3" disabled={!visible}>{String(itemValue)}</textarea></p>
+                            )}
+                            {itemField.type === 'select' && fieldOptions(itemField) && (
+                              <p>
+                                <select id={inputId} name={inputName} disabled={!visible}>
+                                  {Object.entries(fieldOptions(itemField)!).map(([optVal, optLabel]) => (
+                                    <option value={optVal} selected={String(itemValue) === String(optVal)}>{optLabel}</option>
+                                  ))}
+                                </select>
+                              </p>
+                            )}
+                            {itemField.description && (
+                              <p class="description" set:html={itemField.description}></p>
+                            )}
+                          </div>
+                        );
+                      })}
+                      <p>
+                        <button type="button" class="btn btn-xs typecho-repeatable-remove">删除该项</button>
+                      </p>
+                    </fieldset>
+                  </template>
+                </div>
+              )}
+
               {field.description && (
                 <p class="description" set:html={field.description}></p>
               )}
@@ -214,4 +365,89 @@ const pageTitle = `设置插件 ${manifest.name || pluginId}`;
       </ul>
     </form>
   </div>
+  <style is:inline>
+    .typecho-repeatable-item {
+      border: 1px solid #e9e9e9;
+      margin: 0 0 16px;
+      padding: 12px 14px 4px;
+    }
+    .typecho-repeatable-item legend {
+      color: #666;
+      font-weight: 700;
+      padding: 0 6px;
+    }
+    .typecho-repeatable-field {
+      margin-bottom: 10px;
+    }
+  </style>
+  <script is:inline>
+    document.addEventListener('click', function(event) {
+      var target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+
+      var addButton = target.closest('.typecho-repeatable-add');
+      if (addButton) {
+        var root = addButton.closest('.typecho-repeatable');
+        if (!root) return;
+        var items = root.querySelector('.typecho-repeatable-items');
+        var template = root.querySelector('.typecho-repeatable-template');
+        if (!items || !(template instanceof HTMLTemplateElement)) return;
+
+        var index = Number(root.getAttribute('data-next-index') || items.querySelectorAll('.typecho-repeatable-item').length);
+        root.setAttribute('data-next-index', String(index + 1));
+        var wrapper = document.createElement('div');
+        wrapper.appendChild(template.content.cloneNode(true));
+        wrapper.innerHTML = wrapper.innerHTML
+          .replace(/__INDEX__/g, String(index))
+          .replace(/__NUMBER__/g, String(index + 1));
+        while (wrapper.firstElementChild) {
+          var element = wrapper.firstElementChild;
+          items.appendChild(element);
+          if (element instanceof HTMLElement) toggleConditionalFields(element);
+        }
+        return;
+      }
+
+      var removeButton = target.closest('.typecho-repeatable-remove');
+      if (removeButton) {
+        var item = removeButton.closest('.typecho-repeatable-item');
+        var root = removeButton.closest('.typecho-repeatable');
+        if (!item || !root) return;
+        item.remove();
+      }
+    });
+
+    function toggleConditionalFields(item) {
+      var fields = item.querySelectorAll('[data-show-when-field]');
+      fields.forEach(function(field) {
+        var controllerName = field.getAttribute('data-show-when-field');
+        var expected = String(field.getAttribute('data-show-when-value') || '').split(',');
+        var controller = controllerName
+          ? item.querySelector('[name$="[' + controllerName + ']"]')
+          : null;
+        var visible = !controller || expected.indexOf(String(controller.value || '')) >= 0;
+        field.classList.toggle('hidden', !visible);
+        field.querySelectorAll('input, textarea, select').forEach(function(input) {
+          input.disabled = !visible;
+        });
+      });
+    }
+
+    document.querySelectorAll('.typecho-repeatable-item').forEach(function(item) {
+      toggleConditionalFields(item);
+      item.addEventListener('change', function(event) {
+        var target = event.target;
+        if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement || target instanceof HTMLTextAreaElement) {
+          toggleConditionalFields(item);
+        }
+      });
+    });
+
+    document.addEventListener('change', function(event) {
+      var target = event.target;
+      if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement || target instanceof HTMLTextAreaElement)) return;
+      var item = target.closest('.typecho-repeatable-item');
+      if (item) toggleConditionalFields(item);
+    });
+  </script>
 </Admin>

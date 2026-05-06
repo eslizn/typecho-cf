@@ -1,32 +1,19 @@
 import type { APIRoute } from 'astro';
-import { getDb, schema } from '@/db';
-import { loadOptions } from '@/lib/options';
-import { getAuthCookies, validateAuthToken, hasPermission, requireAdminCSRF } from '@/lib/auth';
+import { schema } from '@/db';
+import { hasPermission } from '@/lib/auth';
+import { isAdminActionResponse, requireAdminAction } from '@/lib/admin-auth';
 import { setActivatedPlugins, parseActivatedPlugins, doHook } from '@/lib/plugin';
-import { purgeContentCache } from '@/lib/cache';
+import { bumpCacheVersion, purgeContentCache } from '@/lib/cache';
 import { eq, sql } from 'drizzle-orm';
-import { env } from 'cloudflare:workers';
 
 export const POST: APIRoute = handler;
 
 async function handler({ request, locals, url }: { request: Request; locals: App.Locals; url: URL }) {
-  const db = getDb(env.DB);
-  const options = await loadOptions(db);
+  const auth = await requireAdminAction(request, 'contributor');
+  if (isAdminActionResponse(auth)) return auth;
 
-  const activatedIds = parseActivatedPlugins(options.activatedPlugins as string | undefined);
+  const activatedIds = parseActivatedPlugins(auth.options.activatedPlugins as string | undefined);
   setActivatedPlugins(activatedIds);
-
-  const cookieHeader = request.headers.get('cookie');
-  const { token } = getAuthCookies(cookieHeader);
-  if (!token || !options.secret) return new Response('Unauthorized', { status: 401 });
-
-  const auth = await validateAuthToken(token, options.secret, db);
-  if (!auth || !hasPermission(auth.user.group || 'visitor', 'contributor')) {
-    return new Response('Forbidden', { status: 403 });
-  }
-
-  const csrfError = await requireAdminCSRF(request, options.secret as string, auth.user.authCode!, auth.uid);
-  if (csrfError) return csrfError;
 
   const isAdmin = hasPermission(auth.user.group || 'visitor', 'administrator');
   const isEditor = hasPermission(auth.user.group || 'visitor', 'editor');
@@ -37,6 +24,9 @@ async function handler({ request, locals, url }: { request: Request; locals: App
   const VALID_STATUSES = ['publish', 'draft', 'hidden', 'private', 'waiting'];
   const markStatus = VALID_STATUSES.includes(markStatusInput) ? markStatusInput : '';
   const type = url.searchParams.get('type') || 'post';
+  if (action !== 'delete' && !(action === 'mark' && markStatus)) {
+    return new Response('Invalid action', { status: 400 });
+  }
 
   // Get selected cids from form body or referer page's form
   let cids: number[] = [];
@@ -54,7 +44,7 @@ async function handler({ request, locals, url }: { request: Request; locals: App
 
   if (action === 'delete') {
     for (const cid of cids) {
-      const content = await db.query.contents.findFirst({
+      const content = await auth.db.query.contents.findFirst({
         where: eq(schema.contents.cid, cid),
       });
       if (!content) continue;
@@ -66,19 +56,19 @@ async function handler({ request, locals, url }: { request: Request; locals: App
       await doHook(isPage ? 'page:delete' : 'post:delete', content);
 
       // Decrement meta counts
-      const rels = await db.select({ mid: schema.relationships.mid })
+      const rels = await auth.db.select({ mid: schema.relationships.mid })
         .from(schema.relationships)
         .where(eq(schema.relationships.cid, cid));
       for (const rel of rels) {
-        await db.update(schema.metas)
+        await auth.db.update(schema.metas)
           .set({ count: sql`MAX(0, ${schema.metas.count} - 1)` })
           .where(eq(schema.metas.mid, rel.mid));
       }
       // Delete relationships, comments, fields, content
-      await db.delete(schema.relationships).where(eq(schema.relationships.cid, cid));
-      await db.delete(schema.comments).where(eq(schema.comments.cid, cid));
-      await db.delete(schema.fields).where(eq(schema.fields.cid, cid));
-      await db.delete(schema.contents).where(eq(schema.contents.cid, cid));
+      await auth.db.delete(schema.relationships).where(eq(schema.relationships.cid, cid));
+      await auth.db.delete(schema.comments).where(eq(schema.comments.cid, cid));
+      await auth.db.delete(schema.fields).where(eq(schema.fields.cid, cid));
+      await auth.db.delete(schema.contents).where(eq(schema.contents.cid, cid));
 
       await doHook(isPage ? 'page:finishDelete' : 'post:finishDelete', content);
     }
@@ -88,19 +78,20 @@ async function handler({ request, locals, url }: { request: Request; locals: App
     }
 
     for (const cid of cids) {
-      const content = await db.query.contents.findFirst({
+      const content = await auth.db.query.contents.findFirst({
         where: eq(schema.contents.cid, cid),
       });
       if (!content) continue;
       if (!isAdmin && content.authorId !== auth.uid) continue;
 
-      await db.update(schema.contents).set({
+      await auth.db.update(schema.contents).set({
         status: markStatus,
       }).where(eq(schema.contents.cid, cid));
     }
   }
 
-  await purgeContentCache(options.siteUrl || '');
+  await bumpCacheVersion(auth.db);
+  await purgeContentCache(auth.options.siteUrl || '');
 
   const referer = request.headers.get('referer') || (type === 'page' ? '/admin/manage-pages' : '/admin/manage-posts');
   return new Response(null, { status: 302, headers: { Location: referer } });

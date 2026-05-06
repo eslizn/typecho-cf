@@ -1,30 +1,19 @@
 import type { APIRoute } from 'astro';
-import { getDb, schema } from '@/db';
-import { loadOptions } from '@/lib/options';
-import { getAuthCookies, validateAuthToken, hasPermission, requireAdminCSRF } from '@/lib/auth';
+import { schema } from '@/db';
+import { hasPermission } from '@/lib/auth';
+import { isAdminActionResponse, requireAdminAction } from '@/lib/admin-auth';
 import { eq } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 
 export const POST: APIRoute = handler;
 
 async function handler({ request, locals, url }: { request: Request; locals: App.Locals; url: URL }) {
-  const db = getDb(env.DB);
-  const options = await loadOptions(db);
-
-  const cookieHeader = request.headers.get('cookie');
-  const { token } = getAuthCookies(cookieHeader);
-  if (!token || !options.secret) return new Response('Unauthorized', { status: 401 });
-
-  const auth = await validateAuthToken(token, options.secret, db);
-  if (!auth || !hasPermission(auth.user.group || 'visitor', 'editor')) {
-    return new Response('Forbidden', { status: 403 });
-  }
-
-  const csrfError = await requireAdminCSRF(request, options.secret as string, auth.user.authCode!, auth.uid);
-  if (csrfError) return csrfError;
+  const auth = await requireAdminAction(request, 'editor');
+  if (isAdminActionResponse(auth)) return auth;
 
   const isAdmin = hasPermission(auth.user.group || 'visitor', 'administrator');
   const action = url.searchParams.get('do') || '';
+  if (action !== 'delete') return new Response('Invalid action', { status: 400 });
 
   // Get selected cids from form body
   let cids: number[] = [];
@@ -40,7 +29,7 @@ async function handler({ request, locals, url }: { request: Request; locals: App
 
   if (action === 'delete') {
     for (const cid of cids) {
-      const attachment = await db.query.contents.findFirst({
+      const attachment = await auth.db.query.contents.findFirst({
         where: eq(schema.contents.cid, cid),
       });
       if (!attachment) continue;
@@ -57,7 +46,7 @@ async function handler({ request, locals, url }: { request: Request; locals: App
         // Ignore R2 deletion errors
       }
 
-      await db.delete(schema.contents).where(eq(schema.contents.cid, cid));
+      await auth.db.delete(schema.contents).where(eq(schema.contents.cid, cid));
     }
   }
 

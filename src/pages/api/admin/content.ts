@@ -1,12 +1,13 @@
 import type { APIRoute } from 'astro';
-import { getDb, schema } from '@/db';
-import { loadOptions, type SiteOptions } from '@/lib/options';
-import { getAuthCookies, validateAuthToken, hasPermission, requireAdminCSRF } from '@/lib/auth';
+import { schema } from '@/db';
+import { type SiteOptions } from '@/lib/options';
+import { hasPermission } from '@/lib/auth';
+import { isAdminActionResponse, requireAdminAction } from '@/lib/admin-auth';
 import { buildAuthorLink, buildCategoryLink, buildPermalink, buildTagLink, generateSlug } from '@/lib/content';
 import { setActivatedPlugins, parseActivatedPlugins, applyFilter, doHook } from '@/lib/plugin';
-import { purgeContentCache } from '@/lib/cache';
+import { bumpCacheVersion, purgeContentCache } from '@/lib/cache';
+import { withWriteTransaction } from '@/lib/db-transaction';
 import { eq, and, sql } from 'drizzle-orm';
-import { env } from 'cloudflare:workers';
 
 // Typecho convention: visibility dropdown maps to db status column.
 // 'password' visibility stores the password in a separate column, status falls back to 'publish'.
@@ -92,6 +93,7 @@ async function purgeContentAndRelatedCache(
   cid: number,
   fallbackContent?: typeof schema.contents.$inferSelect,
 ) {
+  await bumpCacheVersion(db);
   const content = fallbackContent || await db.query.contents.findFirst({
     where: eq(schema.contents.cid, cid),
   });
@@ -130,27 +132,15 @@ async function purgeContentAndRelatedCache(
 }
 
 export const POST: APIRoute = async ({ request, locals }) => {
-  const db = getDb(env.DB);
-  const options = await loadOptions(db);
+  const admin = await requireAdminAction(request, 'contributor');
+  if (isAdminActionResponse(admin)) return admin;
+  const db = admin.db;
+  const options = admin.options;
+  const auth = { uid: admin.uid, user: admin.user };
 
   // Load activated plugins
   const activatedIds = parseActivatedPlugins(options.activatedPlugins as string | undefined);
   setActivatedPlugins(activatedIds);
-
-  // Auth check
-  const cookieHeader = request.headers.get('cookie');
-  const { token } = getAuthCookies(cookieHeader);
-  if (!token || !options.secret) return new Response('Unauthorized', { status: 401 });
-
-  const auth = await validateAuthToken(token, options.secret, db);
-  if (!auth) return new Response('Unauthorized', { status: 401 });
-  if (!hasPermission(auth.user.group || 'visitor', 'contributor')) {
-    return new Response('Forbidden', { status: 403 });
-  }
-
-  // CSRF check for all state-changing operations
-  const csrfError = await requireAdminCSRF(request, options.secret as string, auth.user.authCode!, auth.uid);
-  if (csrfError) return csrfError;
 
   const formData = await request.formData();
   const action = formData.get('do')?.toString() || 'create';
@@ -183,6 +173,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const contentType = isDraft ? `${type}_draft` : type;
 
   if (action === 'create') {
+    return await withWriteTransaction(db, async (db) => {
     // Build content data — slug will be backfilled with cid if empty
     let contentData: Record<string, unknown> = {
       title,
@@ -260,9 +251,11 @@ export const POST: APIRoute = async ({ request, locals }) => {
       status: 302,
       headers: { Location: editUrl },
     });
+    });
   }
 
   if (action === 'update' && cid) {
+    return await withWriteTransaction(db, async (db) => {
     // Check ownership
     const existing = await db.query.contents.findFirst({
       where: eq(schema.contents.cid, cid),
@@ -335,9 +328,11 @@ export const POST: APIRoute = async ({ request, locals }) => {
       status: 302,
       headers: { Location: editUrl },
     });
+    });
   }
 
   if (action === 'delete' && cid) {
+    return await withWriteTransaction(db, async (db) => {
     const existing = await db.query.contents.findFirst({
       where: eq(schema.contents.cid, cid),
     });
@@ -375,6 +370,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     return new Response(null, {
       status: 302,
       headers: { Location: redirectTo },
+    });
     });
   }
 

@@ -59,6 +59,7 @@ export interface SiteOptions {
   autoSave: number;
   xmlrpcMarkdown: number;
   cacheEnabled: number;
+  cacheVersion: number;
   activatedPlugins: string;
   permalinkPattern: string;
   pagePattern: string;
@@ -114,6 +115,7 @@ const defaultOptions: Partial<SiteOptions> = {
   commentsHTMLTagAllowed: null,
   attachmentTypes: '@image@',
   cacheEnabled: 1,
+  cacheVersion: 0,
   installed: 0,
   allowXmlRpc: 2,
   editorSize: 350,
@@ -153,7 +155,7 @@ export async function loadOptions(db: Database): Promise<SiteOptions> {
     'commentsCheckReferer', 'commentsAutoClose', 'commentsPostIntervalEnable',
     'commentsPostInterval', 'commentsShowCommentOnly', 'commentsAvatar',
     'commentsAntiSpam', 'installed', 'allowXmlRpc', 'editorSize', 'autoSave',
-    'xmlrpcMarkdown', 'gzip', 'cacheEnabled',
+    'xmlrpcMarkdown', 'gzip', 'cacheEnabled', 'cacheVersion',
   ];
 
   for (const key of numericKeys) {

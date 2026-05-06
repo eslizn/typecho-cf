@@ -38,6 +38,22 @@ const SANITIZE_OPTIONS: sanitizeHtml.IOptions = {
   allowedIframeHostnames: ['www.youtube.com', 'player.bilibili.com', 'player.vimeo.com'],
 };
 
+const COMMENT_MARKDOWN_OPTIONS: sanitizeHtml.IOptions = {
+  allowedTags: sanitizeHtml.defaults.allowedTags.concat(['img', 'pre', 'code']),
+  allowedAttributes: {
+    ...sanitizeHtml.defaults.allowedAttributes,
+    a: ['href', 'title', 'target', 'rel'],
+    img: ['src', 'alt', 'title'],
+    code: ['class'],
+    pre: ['class'],
+  },
+};
+
+export interface CommentRenderOptions {
+  markdown?: boolean;
+  htmlTagAllowed?: string | null;
+}
+
 /**
  * Unique placeholder used to survive markdown rendering + sanitization.
  * Marked wraps a standalone line of plain text in <p>…</p>, so after
@@ -63,6 +79,19 @@ export function renderMarkdown(text: string): string {
   const content = stripMarkdownPrefix(text).replace(/<!--more-->/g, '');
   const html = marked.parse(content, { async: false }) as string;
   return sanitizeHtml(html, SANITIZE_OPTIONS);
+}
+
+export function renderCommentText(text: string, options: CommentRenderOptions = {}): string {
+  if (!text) return '';
+
+  const sanitizeOptions = buildCommentSanitizeOptions(options.htmlTagAllowed, !!options.markdown);
+  if (options.markdown) {
+    const html = marked.parse(stripMarkdownPrefix(text), { async: false }) as string;
+    return sanitizeHtml(html, sanitizeOptions);
+  }
+
+  const sanitized = sanitizeHtml(text, sanitizeOptions);
+  return autop(sanitized);
 }
 
 /**
@@ -149,4 +178,68 @@ export function autop(text: string): string {
     .filter(Boolean)
     .map((p) => `<p>${p.replace(/\n/g, '<br />')}</p>`)
     .join('\n');
+}
+
+function buildCommentSanitizeOptions(htmlTagAllowed?: string | null, markdown = false): sanitizeHtml.IOptions {
+  const parsed = parseAllowedHtmlTags(htmlTagAllowed);
+  if (!parsed) {
+    return markdown ? COMMENT_MARKDOWN_OPTIONS : {
+      allowedTags: [],
+      allowedAttributes: {},
+    };
+  }
+
+  if (!markdown) {
+    return {
+      allowedTags: parsed.allowedTags,
+      allowedAttributes: parsed.allowedAttributes,
+    };
+  }
+
+  return {
+    ...COMMENT_MARKDOWN_OPTIONS,
+    allowedTags: [...new Set([...COMMENT_MARKDOWN_OPTIONS.allowedTags as string[], ...parsed.allowedTags])],
+    allowedAttributes: mergeAllowedAttributes(COMMENT_MARKDOWN_OPTIONS.allowedAttributes || {}, parsed.allowedAttributes),
+  };
+}
+
+function parseAllowedHtmlTags(htmlTagAllowed?: string | null): {
+  allowedTags: string[];
+  allowedAttributes: Record<string, string[]>;
+} | null {
+  if (!htmlTagAllowed?.trim()) return null;
+
+  const allowedTags: string[] = [];
+  const allowedAttributes: Record<string, string[]> = {};
+  const tagRe = /<\s*([a-zA-Z0-9]+)([^>]*)>/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = tagRe.exec(htmlTagAllowed)) !== null) {
+    const tag = match[1].toLowerCase();
+    allowedTags.push(tag);
+
+    const attrs = [...match[2].matchAll(/([a-zA-Z0-9:-]+)\s*=/g)].map(attr => attr[1].toLowerCase());
+    if (attrs.length > 0) {
+      allowedAttributes[tag] = [...new Set([...(allowedAttributes[tag] || []), ...attrs])];
+    }
+  }
+
+  return {
+    allowedTags: [...new Set(allowedTags)],
+    allowedAttributes,
+  };
+}
+
+function mergeAllowedAttributes(
+  base: sanitizeHtml.IOptions['allowedAttributes'],
+  extra: Record<string, string[]>,
+): sanitizeHtml.IOptions['allowedAttributes'] {
+  const merged: Record<string, string[]> = {};
+  for (const [tag, attrs] of Object.entries(base || {})) {
+    merged[tag] = Array.isArray(attrs) ? attrs.map(String) : [];
+  }
+  for (const [tag, attrs] of Object.entries(extra)) {
+    merged[tag] = [...new Set([...(merged[tag] || []), ...attrs])];
+  }
+  return merged;
 }

@@ -1,25 +1,21 @@
 import type { APIRoute } from 'astro';
 import { getDb, schema } from '@/db';
-import { loadOptions } from '@/lib/options';
-import { getAuthCookies, validateAuthToken, hasPermission, hashPassword, generateRandomString, requireAdminCSRF } from '@/lib/auth';
-import { eq } from 'drizzle-orm';
-import { env } from 'cloudflare:workers';
+import { hashPassword, generateRandomString } from '@/lib/auth';
+import { isAdminActionResponse, requireAdminAction } from '@/lib/admin-auth';
+import { normalizeHttpUrl } from '@/lib/url';
+import { and, eq, ne, sql } from 'drizzle-orm';
+
+async function countAdministrators(db: ReturnType<typeof getDb>): Promise<number> {
+  const rows = await db.select({ count: sql<number>`count(*)` })
+    .from(schema.users)
+    .where(eq(schema.users.group, 'administrator'));
+  return rows[0]?.count || 0;
+}
 
 export const POST: APIRoute = async ({ request, locals }) => {
-  const db = getDb(env.DB);
-  const options = await loadOptions(db);
-
-  const cookieHeader = request.headers.get('cookie');
-  const { token } = getAuthCookies(cookieHeader);
-  if (!token || !options.secret) return new Response('Unauthorized', { status: 401 });
-
-  const auth = await validateAuthToken(token, options.secret, db);
-  if (!auth || !hasPermission(auth.user.group || 'visitor', 'administrator')) {
-    return new Response('Forbidden', { status: 403 });
-  }
-
-  const csrfError = await requireAdminCSRF(request, options.secret as string, auth.user.authCode!, auth.uid);
-  if (csrfError) return csrfError;
+  const auth = await requireAdminAction(request, 'administrator');
+  if (isAdminActionResponse(auth)) return auth;
+  const db = auth.db;
 
   const formData = await request.formData();
   const action = formData.get('do')?.toString() || 'create';
@@ -61,6 +57,17 @@ export const POST: APIRoute = async ({ request, locals }) => {
       return new Response('邮箱已被使用', { status: 409 });
     }
 
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)) {
+      return new Response('邮箱格式不正确', { status: 400 });
+    }
+
+    let normalizedUrl: string | null = null;
+    if (url) {
+      const parsed = normalizeHttpUrl(url);
+      if (parsed === null) return new Response('个人主页地址格式不正确', { status: 400 });
+      normalizedUrl = parsed;
+    }
+
     const hashedPassword = await hashPassword(password);
     const authCode = generateRandomString(32);
     const now = Math.floor(Date.now() / 1000);
@@ -69,7 +76,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       name,
       password: hashedPassword,
       mail,
-      url: url || null,
+      url: normalizedUrl,
       screenName: screenName || name,
       created: now,
       activated: now,
@@ -95,11 +102,32 @@ export const POST: APIRoute = async ({ request, locals }) => {
     if (!mail) {
       return new Response('邮箱不能为空', { status: 400 });
     }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)) {
+      return new Response('邮箱格式不正确', { status: 400 });
+    }
+
+    const existingMail = await db.query.users.findFirst({
+      where: and(eq(schema.users.mail, mail), ne(schema.users.uid, uid)),
+    });
+    if (existingMail) {
+      return new Response('邮箱已被使用', { status: 409 });
+    }
+
+    if (existing.group === 'administrator' && group !== 'administrator' && await countAdministrators(db) <= 1) {
+      return new Response('不能降级最后一个管理员', { status: 400 });
+    }
+
+    let normalizedUrl: string | null = null;
+    if (url) {
+      const parsed = normalizeHttpUrl(url);
+      if (parsed === null) return new Response('个人主页地址格式不正确', { status: 400 });
+      normalizedUrl = parsed;
+    }
 
     const updateData: Record<string, unknown> = {
       mail,
       screenName: screenName || existing.name,
-      url: url || null,
+      url: normalizedUrl,
       group,
     };
 

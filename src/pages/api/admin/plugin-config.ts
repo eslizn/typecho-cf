@@ -4,33 +4,16 @@
  * POST: Save plugin config  → /api/admin/plugin-config  { plugin: id, settings: {...} }
  */
 import type { APIRoute } from 'astro';
-import { getDb } from '@/db';
-import { loadOptions, setOption } from '@/lib/options';
-import { getAuthCookies, validateAuthToken, hasPermission, requireAdminCSRF } from '@/lib/auth';
+import { setOption } from '@/lib/options';
+import { isAdminActionResponse, requireAdminAction } from '@/lib/admin-auth';
 import { getPlugin, pluginHasConfig, isPluginActive, loadPluginConfig, getPluginConfigDefaults } from '@/lib/plugin';
-import { purgeSiteCache } from '@/lib/cache';
-import { env } from 'cloudflare:workers';
-
-async function authenticate(request: Request) {
-  const db = getDb(env.DB);
-  const options = await loadOptions(db);
-  const cookieHeader = request.headers.get('cookie');
-  const { token } = getAuthCookies(cookieHeader);
-
-  if (!token || !options.secret) return null;
-
-  const result = await validateAuthToken(token, options.secret, db);
-  if (!result) return null;
-  if (!hasPermission(result.user.group || 'visitor', 'administrator')) return null;
-
-  return { db, user: result.user, options };
-}
+import { bumpCacheVersion, purgeSiteCache } from '@/lib/cache';
 
 export const GET: APIRoute = async ({ request, url }) => {
-  const auth = await authenticate(request);
-  if (!auth) {
+  const auth = await requireAdminAction(request, 'administrator', { csrf: false });
+  if (isAdminActionResponse(auth)) {
     return new Response(JSON.stringify({ error: '权限不足' }), {
-      status: 403,
+      status: auth.status === 401 ? 401 : 403,
       headers: { 'Content-Type': 'application/json' },
     });
   }
@@ -59,16 +42,13 @@ export const GET: APIRoute = async ({ request, url }) => {
 };
 
 export const POST: APIRoute = async ({ request }) => {
-  const auth = await authenticate(request);
-  if (!auth) {
+  const auth = await requireAdminAction(request, 'administrator');
+  if (isAdminActionResponse(auth)) {
     return new Response(JSON.stringify({ error: '权限不足' }), {
-      status: 403,
+      status: auth.status === 401 ? 401 : 403,
       headers: { 'Content-Type': 'application/json' },
     });
   }
-
-  const csrfError = await requireAdminCSRF(request, auth.options.secret as string, auth.user.authCode!, auth.user.uid);
-  if (csrfError) return csrfError;
 
   try {
     const body = await request.json() as { plugin?: string; settings?: Record<string, unknown> };
@@ -120,6 +100,7 @@ export const POST: APIRoute = async ({ request }) => {
     await setOption(auth.db, `plugin:${pluginId}`, JSON.stringify(sanitized));
 
     // Purge cached options so subsequent requests read the updated config
+    await bumpCacheVersion(auth.db);
     await purgeSiteCache(auth.options.siteUrl || '');
 
     return new Response(JSON.stringify({

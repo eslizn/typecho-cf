@@ -1,26 +1,14 @@
 import type { APIRoute } from 'astro';
-import { getDb, schema } from '@/db';
-import { loadOptions } from '@/lib/options';
-import { getAuthCookies, validateAuthToken, hasPermission, requireAdminCSRF } from '@/lib/auth';
+import { schema } from '@/db';
+import { hasPermission } from '@/lib/auth';
+import { isAdminActionResponse, requireAdminAction } from '@/lib/admin-auth';
 import { deleteFromR2 } from '@/lib/upload';
 import { eq } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 
 export const POST: APIRoute = async ({ request, locals }) => {
-  const db = getDb(env.DB);
-  const options = await loadOptions(db);
-
-  const cookieHeader = request.headers.get('cookie');
-  const { token } = getAuthCookies(cookieHeader);
-  if (!token || !options.secret) return new Response('Unauthorized', { status: 401 });
-
-  const auth = await validateAuthToken(token, options.secret, db);
-  if (!auth || !hasPermission(auth.user.group || 'visitor', 'editor')) {
-    return new Response('Forbidden', { status: 403 });
-  }
-
-  const csrfError = await requireAdminCSRF(request, options.secret as string, auth.user.authCode!, auth.uid);
-  if (csrfError) return csrfError;
+  const auth = await requireAdminAction(request, 'editor');
+  if (isAdminActionResponse(auth)) return auth;
 
   const formData = await request.formData();
   const action = formData.get('do')?.toString() || 'update';
@@ -28,12 +16,17 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
   if (!cid) return new Response('Bad Request', { status: 400 });
 
-  const attachment = await db.query.contents.findFirst({
+  const attachment = await auth.db.query.contents.findFirst({
     where: eq(schema.contents.cid, cid),
   });
 
   if (!attachment || attachment.type !== 'attachment') {
     return new Response('Not Found', { status: 404 });
+  }
+
+  const isAdmin = hasPermission(auth.user.group || 'visitor', 'administrator');
+  if (!isAdmin && attachment.authorId !== auth.uid) {
+    return new Response('Forbidden', { status: 403 });
   }
 
   if (action === 'delete') {
@@ -49,7 +42,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     }
 
     // Delete DB record
-    await db.delete(schema.contents).where(eq(schema.contents.cid, cid));
+    await auth.db.delete(schema.contents).where(eq(schema.contents.cid, cid));
 
     return new Response(null, {
       status: 302,
@@ -61,7 +54,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const name = formData.get('name')?.toString()?.trim() || attachment.title;
   const slug = formData.get('slug')?.toString()?.trim() || attachment.slug;
 
-  await db.update(schema.contents).set({
+  if (action !== 'update') return new Response('Invalid action', { status: 400 });
+
+  await auth.db.update(schema.contents).set({
     title: name,
     slug,
     modified: Math.floor(Date.now() / 1000),

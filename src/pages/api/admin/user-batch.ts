@@ -1,29 +1,16 @@
 import type { APIRoute } from 'astro';
-import { getDb, schema } from '@/db';
-import { loadOptions } from '@/lib/options';
-import { getAuthCookies, validateAuthToken, hasPermission, requireAdminCSRF } from '@/lib/auth';
+import { schema } from '@/db';
+import { isAdminActionResponse, requireAdminAction } from '@/lib/admin-auth';
 import { eq, sql } from 'drizzle-orm';
-import { env } from 'cloudflare:workers';
 
 export const POST: APIRoute = handler;
 
 async function handler({ request, locals, url }: { request: Request; locals: App.Locals; url: URL }) {
-  const db = getDb(env.DB);
-  const options = await loadOptions(db);
-
-  const cookieHeader = request.headers.get('cookie');
-  const { token } = getAuthCookies(cookieHeader);
-  if (!token || !options.secret) return new Response('Unauthorized', { status: 401 });
-
-  const auth = await validateAuthToken(token, options.secret, db);
-  if (!auth || !hasPermission(auth.user.group || 'visitor', 'administrator')) {
-    return new Response('Forbidden', { status: 403 });
-  }
-
-  const csrfError = await requireAdminCSRF(request, options.secret as string, auth.user.authCode!, auth.uid);
-  if (csrfError) return csrfError;
+  const auth = await requireAdminAction(request, 'administrator');
+  if (isAdminActionResponse(auth)) return auth;
 
   const action = url.searchParams.get('do') || '';
+  if (action !== 'delete') return new Response('Invalid action', { status: 400 });
 
   // Get selected uids from form body
   let uids: number[] = [];
@@ -42,21 +29,27 @@ async function handler({ request, locals, url }: { request: Request; locals: App
       // Never allow deleting self
       if (uid === auth.uid) continue;
 
-      const targetUser = await db.query.users.findFirst({
+      const targetUser = await auth.db.query.users.findFirst({
         where: eq(schema.users.uid, uid),
       });
       if (!targetUser) continue;
+      if (targetUser.group === 'administrator') {
+        const adminCount = await auth.db.select({ count: sql<number>`count(*)` })
+          .from(schema.users)
+          .where(eq(schema.users.group, 'administrator'));
+        if ((adminCount[0]?.count || 0) <= 1) continue;
+      }
 
       // Re-assign content and comments to current admin user
-      await db.update(schema.contents)
+      await auth.db.update(schema.contents)
         .set({ authorId: auth.uid })
         .where(eq(schema.contents.authorId, uid));
-      await db.update(schema.comments)
+      await auth.db.update(schema.comments)
         .set({ authorId: auth.uid })
         .where(eq(schema.comments.authorId, uid));
 
       // Delete user
-      await db.delete(schema.users).where(eq(schema.users.uid, uid));
+      await auth.db.delete(schema.users).where(eq(schema.users.uid, uid));
     }
   }
 

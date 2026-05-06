@@ -1,7 +1,7 @@
 /**
  * Integration tests for /api/admin/comment-batch
  *
- * Covers: approve, waiting, spam, delete (batch POST), and delete-spam (GET/POST).
+ * Covers: approve, waiting, spam, delete (batch POST), and delete-spam (POST).
  * Verifies auth guards, commentsNum adjustments, and redirect behaviour.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -30,7 +30,6 @@ vi.mock('@/lib/auth', async () => {
   };
 });
 
-// Import both GET and POST exports (GET was the fix for delete-spam)
 import { GET, POST } from '@/pages/api/admin/comment-batch';
 
 const TEST_SECRET = 'test-secret-batch';
@@ -296,26 +295,55 @@ describe('POST /api/admin/comment-batch', () => {
     const updatedPost = await testDb.query.contents.findFirst();
     expect(updatedPost?.commentsNum).toBe(3);
   });
+
+  it('returns 403 when contributor tries to moderate another author owner comment', async () => {
+    const contributor = await seedAdmin(testDb, 'contributor');
+    const cookie = await makeAuthCookie(testDb, contributor.uid);
+    const post = await seedPost(testDb, 1);
+    await testDb.insert(schema.comments).values({
+      cid: post.cid!,
+      author: 'Other',
+      text: 'No access',
+      status: 'approved',
+      type: 'comment',
+      created: 1,
+      ownerId: contributor.uid + 1,
+    });
+    const comment = await testDb.query.comments.findFirst();
+
+    const req = makeBatchRequest('POST', 'spam', [comment!.coid], cookie);
+    const res = await POST({ request: req, locals: {}, url: new URL(req.url) } as any);
+    expect(res.status).toBe(403);
+
+    const unchanged = await testDb.query.comments.findFirst();
+    expect(unchanged?.status).toBe('approved');
+  });
+
+  it('returns 400 for invalid action', async () => {
+    const admin = await seedAdmin(testDb);
+    const cookie = await makeAuthCookie(testDb, admin.uid);
+    const post = await seedPost(testDb, 0);
+    const comment = await seedComment(testDb, post.cid!, 'waiting');
+
+    const req = makeBatchRequest('POST', 'bogus', [comment.coid], cookie);
+    const res = await POST({ request: req, locals: {}, url: new URL(req.url) } as any);
+    expect(res.status).toBe(400);
+  });
 });
 
-describe('GET /api/admin/comment-batch (delete-spam)', () => {
+describe('POST /api/admin/comment-batch (delete-spam)', () => {
   beforeEach(() => {
     testDb = createTestDb();
   });
 
-  it('GET export exists (fix: delete-spam triggered via location.href)', () => {
-    expect(GET).toBeDefined();
-    expect(typeof GET).toBe('function');
-  });
-
-  it('returns 401 when no cookie on GET', async () => {
+  it('rejects GET state changes', async () => {
     await seedAdmin(testDb);
     const req = makeBatchRequest('GET', 'delete-spam');
     const res = await GET({ request: req, locals: {}, url: new URL(req.url) } as any);
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(405);
   });
 
-  it('deletes all spam comments via GET delete-spam', async () => {
+  it('deletes all spam comments via POST delete-spam', async () => {
     const admin = await seedAdmin(testDb);
     const cookie = await makeAuthCookie(testDb, admin.uid);
     const post = await seedPost(testDb, 0);
@@ -327,8 +355,8 @@ describe('GET /api/admin/comment-batch (delete-spam)', () => {
       { cid: post.cid!, author: 'Good', text: 'legit', status: 'approved', type: 'comment', created: 3 },
     ]);
 
-    const req = makeBatchRequest('GET', 'delete-spam', [], cookie);
-    const res = await GET({ request: req, locals: {}, url: new URL(req.url) } as any);
+    const req = makeBatchRequest('POST', 'delete-spam', [], cookie);
+    const res = await POST({ request: req, locals: {}, url: new URL(req.url) } as any);
     expect(res.status).toBe(302);
 
     const remaining = await testDb.select().from(schema.comments);
@@ -358,8 +386,8 @@ describe('GET /api/admin/comment-batch (delete-spam)', () => {
     const cookie = await makeAuthCookie(testDb, admin.uid);
     await seedPost(testDb);
 
-    const req = makeBatchRequest('GET', 'delete-spam', [], cookie);
-    const res = await GET({ request: req, locals: {}, url: new URL(req.url) } as any);
+    const req = makeBatchRequest('POST', 'delete-spam', [], cookie);
+    const res = await POST({ request: req, locals: {}, url: new URL(req.url) } as any);
     expect(res.status).toBe(302);
     expect(res.headers.get('location')).toContain('manage-comments');
   });

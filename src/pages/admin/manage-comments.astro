@@ -2,6 +2,7 @@
 import Admin from '@/layouts/Admin.astro';
 import { createContext, requireAuth } from '@/lib/context';
 import { hasPermission } from '@/lib/auth';
+import { buildGravatarUrl } from '@/lib/gravatar';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { schema } from '@/db';
 import { formatDate } from '@/lib/content';
@@ -13,13 +14,6 @@ if (authCheck) return authCheck;
 const { db, options, urls, user, csrfToken } = ctx;
 const isAdmin = hasPermission(user!.group || 'visitor', 'administrator');
 const isEditor = hasPermission(user!.group || 'visitor', 'editor');
-
-// Helper: generate SHA-256 hash for Gravatar
-async function sha256hex(str: string): Promise<string> {
-  const data = new TextEncoder().encode(str.trim().toLowerCase());
-  const buf = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
-}
 
 const avatarRating = options.commentsAvatarRating || 'G';
 
@@ -64,8 +58,11 @@ const titleMap = new Map(contentTitles.map(c => [c.cid, c.title]));
 // Pre-compute Gravatar URLs for all comments
 const avatarMap = new Map<number, string>();
 for (const c of commentsList) {
-  const hash = c.mail ? await sha256hex(c.mail) : '';
-  avatarMap.set(c.coid, `https://gravatar.com/avatar/${hash}?d=identicon&s=40&r=${avatarRating}`);
+  avatarMap.set(c.coid, await buildGravatarUrl(c.mail, {
+    defaultImage: 'identicon',
+    size: 40,
+    rating: avatarRating,
+  }));
 }
 
 // Tab counts
@@ -109,8 +106,10 @@ const spamCount = await db.select({ count: sql<number>`count(*)` }).from(schema.
               <li><a href="/api/admin/comment-batch?do=delete">删除</a></li>
             </ul>
             {status === 'spam' && (
-              <button class="btn btn-s btn-warn btn-operate" type="button"
-                onclick={`if(confirm('你确认要删除所有垃圾评论吗?'))location.href='/api/admin/comment-batch?do=delete-spam&_=${csrfToken}'`}>删除所有垃圾评论</button>
+              <button class="btn btn-s btn-warn btn-operate" type="submit"
+                formaction="/api/admin/comment-batch?do=delete-spam" formmethod="post"
+                name="_" value={csrfToken}
+                onclick="return confirm('你确认要删除所有垃圾评论吗?')">删除所有垃圾评论</button>
             )}
           </div>
         </div>
@@ -183,22 +182,22 @@ const spamCount = await db.select({ count: sql<number>`count(*)` }).from(schema.
                     <div class="comment-action hidden-by-mouse">
                       {status === 'approved'
                         ? <span class="weak">通过</span>
-                        : <a href={`/api/admin/comment-action?action=approve&coid=${comment.coid}&_=${csrfToken}`} class="operate-approved">通过</a>
+                        : <button type="submit" formaction={`/api/admin/comment-action?action=approve&coid=${comment.coid}`} formmethod="post" class="operate-approved">通过</button>
                       }
 
                       {status === 'waiting'
                         ? <span class="weak">待审核</span>
-                        : <a href={`/api/admin/comment-action?action=waiting&coid=${comment.coid}&_=${csrfToken}`} class="operate-waiting">待审核</a>
+                        : <button type="submit" formaction={`/api/admin/comment-action?action=waiting&coid=${comment.coid}`} formmethod="post" class="operate-waiting">待审核</button>
                       }
 
                       {status === 'spam'
                         ? <span class="weak">垃圾</span>
-                        : <a href={`/api/admin/comment-action?action=spam&coid=${comment.coid}&_=${csrfToken}`} class="operate-spam">垃圾</a>
+                        : <button type="submit" formaction={`/api/admin/comment-action?action=spam&coid=${comment.coid}`} formmethod="post" class="operate-spam">垃圾</button>
                       }
 
-                      <a href={`/api/admin/comment-action?action=delete&coid=${comment.coid}&_=${csrfToken}`}
+                      <button type="submit" formaction={`/api/admin/comment-action?action=delete&coid=${comment.coid}`} formmethod="post"
                         class="operate-delete"
-                        onclick={`return confirm('你确认要删除${(comment.author || '匿名').replace(/'/g, "\\'")}的评论吗?')`}>删除</a>
+                        onclick={`return confirm('你确认要删除${(comment.author || '匿名').replace(/'/g, "\\'")}的评论吗?')`}>删除</button>
                     </div>
                   </td>
                 </tr>

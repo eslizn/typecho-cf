@@ -6,6 +6,8 @@
  * - Logged-in users bypass cache entirely (ensured in middleware).
  */
 
+import { schema, type Database } from '@/db';
+
 /** Internal namespace used for Cache API keys that are not real URLs */
 const INTERNAL_ORIGIN = 'https://typecho-cf-internal';
 
@@ -35,6 +37,16 @@ export async function purgeCache(urls: string[]): Promise<void> {
 export async function purgeOptionsCache(): Promise<void> {
   const cache = caches.default;
   await cache.delete(new Request(`${INTERNAL_ORIGIN}/__options`));
+}
+
+export async function bumpCacheVersion(db: Database): Promise<void> {
+  await db.insert(schema.options)
+    .values({ name: 'cacheVersion', user: 0, value: String(Date.now()) })
+    .onConflictDoUpdate({
+      target: [schema.options.name, schema.options.user],
+      set: { value: String(Date.now()) },
+    });
+  await purgeOptionsCache();
 }
 
 /**

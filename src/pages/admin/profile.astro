@@ -1,7 +1,7 @@
 ---
 import Admin from '@/layouts/Admin.astro';
 import { createContext, requireAuth } from '@/lib/context';
-import { hasPermission } from '@/lib/auth';
+import { buildGravatarUrl } from '@/lib/gravatar';
 import { eq, and, sql } from 'drizzle-orm';
 import { schema } from '@/db';
 
@@ -21,9 +21,7 @@ const commentCount = await db.select({ count: sql<number>`count(*)` }).from(sche
 const catCount = await db.select({ count: sql<number>`count(*)` }).from(schema.metas)
   .where(eq(schema.metas.type, 'category'));
 
-// Gravatar URL
-const mailHash = user!.mail ? user!.mail.trim().toLowerCase() : '';
-const gravatarUrl = `https://www.gravatar.com/avatar/?s=220&d=mm`;
+const gravatarUrl = await buildGravatarUrl(user!.mail, { size: 220, defaultImage: 'mp' });
 ---
 <Admin title="个人设置" options={options} urls={urls} user={user} activeMenu="profile">
   <div class="col-mb-12 col-tb-3">

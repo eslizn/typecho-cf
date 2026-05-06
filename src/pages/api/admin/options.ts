@@ -1,26 +1,11 @@
 import type { APIRoute } from 'astro';
-import { getDb } from '@/db';
-import { loadOptions, setOption } from '@/lib/options';
-import { getAuthCookies, validateAuthToken, hasPermission, requireAdminCSRF } from '@/lib/auth';
-import { purgeSiteCache } from '@/lib/cache';
-
-import { env } from 'cloudflare:workers';
+import { setOption } from '@/lib/options';
+import { isAdminActionResponse, requireAdminAction } from '@/lib/admin-auth';
+import { bumpCacheVersion, purgeSiteCache } from '@/lib/cache';
 
 export const POST: APIRoute = async ({ request, locals }) => {
-  const db = getDb(env.DB);
-  const options = await loadOptions(db);
-
-  const cookieHeader = request.headers.get('cookie');
-  const { token } = getAuthCookies(cookieHeader);
-  if (!token || !options.secret) return new Response('Unauthorized', { status: 401 });
-
-  const auth = await validateAuthToken(token, options.secret, db);
-  if (!auth || !hasPermission(auth.user.group || 'visitor', 'administrator')) {
-    return new Response('Forbidden', { status: 403 });
-  }
-
-  const csrfError = await requireAdminCSRF(request, options.secret as string, auth.user.authCode!, auth.uid);
-  if (csrfError) return csrfError;
+  const auth = await requireAdminAction(request, 'administrator');
+  if (isAdminActionResponse(auth)) return auth;
 
   const formData = await request.formData();
 
@@ -50,27 +35,27 @@ export const POST: APIRoute = async ({ request, locals }) => {
       const customPattern = formData.get('customPattern');
       pattern = customPattern?.toString().trim() || '/archives/{cid}/';
     }
-    await setOption(db, 'permalinkPattern', pattern);
+    await setOption(auth.db, 'permalinkPattern', pattern);
   }
 
   // Handle pagePattern — direct text input, save as-is
   const pagePatternValue = formData.get('pagePattern');
   if (pagePatternValue !== null) {
     const pattern = pagePatternValue.toString().trim() || '/{slug}.html';
-    await setOption(db, 'pagePattern', pattern);
+    await setOption(auth.db, 'pagePattern', pattern);
   }
 
   // Handle categoryPattern — direct text input, save as-is
   const categoryPatternValue = formData.get('categoryPattern');
   if (categoryPatternValue !== null) {
     const pattern = categoryPatternValue.toString().trim() || '/category/{slug}/';
-    await setOption(db, 'categoryPattern', pattern);
+    await setOption(auth.db, 'categoryPattern', pattern);
   }
 
   for (const key of optionKeys) {
     const value = formData.get(key);
     if (value !== null) {
-      await setOption(db, key, value.toString());
+      await setOption(auth.db, key, value.toString());
     }
   }
 
@@ -78,14 +63,14 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const postTimeoutDays = formData.get('commentsPostTimeout');
   if (postTimeoutDays !== null) {
     const days = parseInt(postTimeoutDays.toString(), 10) || 14;
-    await setOption(db, 'commentsPostTimeout', String(days * 24 * 3600));
+    await setOption(auth.db, 'commentsPostTimeout', String(days * 24 * 3600));
   }
 
   // Handle commentsPostInterval: form sends minutes, store as seconds (Typecho convention)
   const postIntervalMinutes = formData.get('commentsPostInterval');
   if (postIntervalMinutes !== null) {
     const minutes = parseInt(postIntervalMinutes.toString(), 10) || 1;
-    await setOption(db, 'commentsPostInterval', String(minutes * 60));
+    await setOption(auth.db, 'commentsPostInterval', String(minutes * 60));
   }
 
   const referer = request.headers.get('referer') || '/admin/options-general';
@@ -118,12 +103,13 @@ export const POST: APIRoute = async ({ request, locals }) => {
   if (pageCheckboxes) {
     for (const key of pageCheckboxes[1]) {
       if (!formData.has(key)) {
-        await setOption(db, key, '0');
+        await setOption(auth.db, key, '0');
       }
     }
   }
 
-  await purgeSiteCache(options.siteUrl || '');
+  await bumpCacheVersion(auth.db);
+  await purgeSiteCache(auth.options.siteUrl || '');
 
   return new Response(null, {
     status: 302,

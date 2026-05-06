@@ -119,7 +119,9 @@ export const onRequest = defineMiddleware(async (context, next) => {
     !path.startsWith('/usr/');
 
   // Reuse a single Request for both cache.match and cache.put
-  const cacheKey = isCacheable ? new Request(context.request.url, { method: 'GET' }) : null;
+  const cacheKey = isCacheable
+    ? new Request(withCacheVersion(context.request.url, options.cacheVersion), { method: 'GET' })
+    : null;
 
   if (cacheKey) {
     const cached = await caches.default.match(cacheKey);
@@ -277,3 +279,9 @@ export const onRequest = defineMiddleware(async (context, next) => {
 
   return response;
 });
+
+function withCacheVersion(requestUrl: string, cacheVersion?: number): string {
+  const url = new URL(requestUrl);
+  url.searchParams.set('__typecho_cache', String(cacheVersion || 0));
+  return url.toString();
+}

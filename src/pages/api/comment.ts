@@ -3,9 +3,10 @@ import { getDb, schema } from '@/db';
 import { loadOptions } from '@/lib/options';
 import { getAuthCookies, validateAuthToken, validateCommentToken } from '@/lib/auth';
 import { setActivatedPlugins, parseActivatedPlugins, applyFilter, doHook } from '@/lib/plugin';
-import { purgeContentCache } from '@/lib/cache';
+import { bumpCacheVersion, purgeContentCache } from '@/lib/cache';
 import { getClientIp } from '@/lib/context';
 import { buildPermalink } from '@/lib/content';
+import { normalizeHttpUrl } from '@/lib/url';
 import { eq, and, sql } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 
@@ -98,6 +99,14 @@ export const POST: APIRoute = async ({ request, locals }) => {
     if (mail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)) {
       return new Response('邮箱格式不正确', { status: 400 });
     }
+  }
+
+  if (url) {
+    const normalizedUrl = normalizeHttpUrl(url);
+    if (normalizedUrl === null) {
+      return new Response('网站地址格式不正确', { status: 400 });
+    }
+    url = normalizedUrl;
   }
 
   // Check referer URL matches the content's URL (anti-spam: ensure comment came from a real page view)
@@ -229,6 +238,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     options.permalinkPattern as string | undefined,
     options.pagePattern as string | undefined,
   );
+  await bumpCacheVersion(db);
   await purgeContentCache(options.siteUrl || '', cid, { contentUrl });
 
   // Redirect back to the post

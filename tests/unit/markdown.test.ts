@@ -7,7 +7,7 @@
  * constructs that span the boundary are resolved correctly.
  */
 import { describe, it, expect } from 'vitest';
-import { renderMarkdown, renderContentExcerpt, generateExcerpt } from '@/lib/markdown';
+import { renderMarkdown, renderContentExcerpt, generateExcerpt, renderCommentText } from '@/lib/markdown';
 
 // ---------------------------------------------------------------------------
 // renderMarkdown
@@ -194,5 +194,28 @@ describe('renderMarkdown iframe filtering', () => {
     const md = '<iframe src="javascript:alert(1)"></iframe>';
     const html = renderMarkdown(md);
     expect(html).not.toContain('javascript:');
+  });
+});
+
+describe('renderCommentText', () => {
+  it('escapes HTML when no comment tags are allowed', () => {
+    const html = renderCommentText('<strong>bold</strong><script>alert(1)</script>');
+    expect(html).not.toContain('<strong>');
+    expect(html).not.toContain('<script>');
+    expect(html).toContain('bold');
+  });
+
+  it('allows configured comment tags and attributes', () => {
+    const html = renderCommentText('<a href="https://example.com">site</a>', {
+      htmlTagAllowed: '<a href="">',
+    });
+    expect(html).toContain('<a href="https://example.com">site</a>');
+  });
+
+  it('honors comment markdown setting', () => {
+    const plain = renderCommentText('**bold**', { markdown: false });
+    const markdown = renderCommentText('**bold**', { markdown: true });
+    expect(plain).not.toContain('<strong>');
+    expect(markdown).toContain('<strong>bold</strong>');
   });
 });

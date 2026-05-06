@@ -368,6 +368,35 @@ describe('POST /api/comment', () => {
     expect(res.status).toBe(302);
   });
 
+  it('rejects unsafe comment author URL protocols', async () => {
+    await seedOptions(testDb);
+    const content = await seedContent(testDb);
+    const req = makeCommentRequest({
+      cid: String(content.cid),
+      text: 'Hello',
+      author: 'Alice',
+      url: 'javascript:alert(1)',
+    });
+    const res = await POST({ request: req, locals: {} } as any);
+    expect(res.status).toBe(400);
+  });
+
+  it('normalizes safe comment author URLs before storing', async () => {
+    await seedOptions(testDb);
+    const content = await seedContent(testDb);
+    const req = makeCommentRequest({
+      cid: String(content.cid),
+      text: 'Hello',
+      author: 'Alice',
+      url: 'https://example.org/about',
+    });
+    const res = await POST({ request: req, locals: {} } as any);
+    expect(res.status).toBe(302);
+
+    const comment = await testDb.query.comments.findFirst();
+    expect(comment?.url).toBe('https://example.org/about');
+  });
+
   it('prevents open redirect in comment response', async () => {
     await seedOptions(testDb, { siteUrl: 'https://example.com' });
     const content = await seedContent(testDb);

@@ -1,9 +1,8 @@
 import type { APIRoute } from 'astro';
-import { getDb, schema } from '@/db';
-import { loadOptions } from '@/lib/options';
-import { getAuthCookies, validateAuthToken, hasPermission, requireAdminCSRF } from '@/lib/auth';
+import { schema } from '@/db';
+import { hasPermission } from '@/lib/auth';
+import { isAdminActionResponse, requireAdminAction } from '@/lib/admin-auth';
 import { uploadToR2, deleteFromR2 } from '@/lib/upload';
-import { setActivatedPlugins, parseActivatedPlugins, doHook } from '@/lib/plugin';
 import { eq } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 
@@ -17,32 +16,19 @@ function isImageType(mime: string): boolean {
   return mime.startsWith('image/');
 }
 
-async function authenticate(request: Request, locals: any) {
-  const db = getDb(env.DB);
-  const options = await loadOptions(db);
-  const cookieHeader = request.headers.get('cookie');
-  const { token } = getAuthCookies(cookieHeader);
-
-  if (!token || !options.secret) return null;
-
-  const auth = await validateAuthToken(token, options.secret, db);
-  if (!auth || !hasPermission(auth.user.group || 'visitor', 'contributor')) return null;
-
-  return { db, options, auth };
-}
-
 const jsonHeaders = { 'Content-Type': 'application/json' };
 
+function jsonAuthError(response: Response): Response {
+  return new Response(JSON.stringify({ error: response.status === 401 ? 'Unauthorized' : 'Forbidden' }), {
+    status: response.status,
+    headers: jsonHeaders,
+  });
+}
+
 export const POST: APIRoute = async ({ request, locals }) => {
-  const ctx = await authenticate(request, locals);
-  if (!ctx) {
-    return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: jsonHeaders });
-  }
-
-  const { db, options, auth } = ctx;
-
-  const csrfError = await requireAdminCSRF(request, options.secret as string, auth.user.authCode!, auth.uid);
-  if (csrfError) return csrfError;
+  const ctx = await requireAdminAction(request, 'contributor');
+  if (isAdminActionResponse(ctx)) return jsonAuthError(ctx);
+  const { db, options } = ctx;
 
   try {
     const formData = await request.formData();
@@ -69,7 +55,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
         type: result.type,
         url: result.url,
       }),
-      authorId: auth.uid,
+      authorId: ctx.uid,
       type: 'attachment',
       status: 'publish',
       parent: parseInt(formData.get('cid')?.toString() || '0', 10),
@@ -99,15 +85,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
  * DELETE /api/admin/upload?cid=xxx - Delete an attachment
  */
 export const DELETE: APIRoute = async ({ request, locals, url }) => {
-  const ctx = await authenticate(request, locals);
-  if (!ctx) {
-    return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: jsonHeaders });
-  }
-
-  const { db, options, auth } = ctx;
-
-  const csrfError = await requireAdminCSRF(request, options.secret as string, auth.user.authCode!, auth.uid);
-  if (csrfError) return csrfError;
+  const ctx = await requireAdminAction(request, 'contributor');
+  if (isAdminActionResponse(ctx)) return jsonAuthError(ctx);
+  const { db } = ctx;
 
   const cid = parseInt(url.searchParams.get('cid') || '0', 10);
   if (!cid) {
@@ -124,8 +104,8 @@ export const DELETE: APIRoute = async ({ request, locals, url }) => {
     }
 
     // Check ownership: non-admins can only delete their own attachments
-    const isAdmin = hasPermission(ctx.auth.user.group || 'visitor', 'administrator');
-    if (!isAdmin && attachment.authorId !== ctx.auth.uid) {
+    const isAdmin = hasPermission(ctx.user.group || 'visitor', 'administrator');
+    if (!isAdmin && attachment.authorId !== ctx.uid) {
       return new Response(JSON.stringify({ error: '无权删除此附件' }), { status: 403, headers: jsonHeaders });
     }
 

@@ -13,9 +13,10 @@ import {
   buildPermalink, buildAuthorLink,
   buildCategoryLink, buildTagLink, buildSearchLink,
 } from '@/lib/content';
-import { renderContentExcerpt, renderMarkdown, renderMarkdownFiltered } from '@/lib/markdown';
+import { renderCommentText, renderContentExcerpt, renderMarkdownFiltered } from '@/lib/markdown';
 import { paginate } from '@/lib/pagination';
 import { generateCommentToken } from '@/lib/auth';
+import { buildGravatarUrl } from '@/lib/gravatar';
 import type { RequestContext } from '@/lib/context';
 import type {
   ThemeIndexProps, ThemePostProps, ThemePageProps, ThemeArchiveProps, ThemeNotFoundProps,
@@ -49,13 +50,7 @@ function getPage(locals: Record<string, unknown>, url: URL): number {
   return pageParam ? (typeof pageParam === 'number' ? pageParam : parseInt(pageParam, 10) || 1) : 1;
 }
 
-async function sha256hex(str: string): Promise<string> {
-  const data = new TextEncoder().encode(str.trim().toLowerCase());
-  const buf = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
-function buildCommentTree(allComments: CommentRow[]): CommentNode[] {
+function buildCommentTree(allComments: CommentRow[], options: SiteOptions): CommentNode[] {
   const map = new Map<number, CommentNode>();
   const roots: CommentNode[] = [];
 
@@ -65,7 +60,10 @@ function buildCommentTree(allComments: CommentRow[]): CommentNode[] {
       author: c.author || '匿名',
       mail: c.mail || '',
       url: c.url || '',
-      text: renderMarkdown(c.text || ''),
+      text: renderCommentText(c.text || '', {
+        markdown: !!options.commentsMarkdown,
+        htmlTagAllowed: options.commentsHTMLTagAllowed,
+      }),
       created: c.created || 0,
       children: [],
     });
@@ -86,8 +84,11 @@ function buildCommentTree(allComments: CommentRow[]): CommentNode[] {
 async function buildGravatarMap(allComments: CommentRow[], avatarRating: string): Promise<Record<number, string>> {
   const entries = await Promise.all(
     allComments.map(async (c) => {
-      const hash = c.mail ? await sha256hex(c.mail) : '';
-      return [c.coid, `https://gravatar.com/avatar/${hash}?d=identicon&s=40&r=${avatarRating}`] as const;
+      return [c.coid, await buildGravatarUrl(c.mail, {
+        defaultImage: 'identicon',
+        size: 40,
+        rating: avatarRating,
+      })] as const;
     })
   );
   return Object.fromEntries(entries);
@@ -358,7 +359,7 @@ export async function preparePostData(
     .where(and(eq(schema.comments.cid, cidNum), eq(schema.comments.status, 'approved')))
     .orderBy(commentsOrder);
 
-  const commentTree = buildCommentTree(allComments);
+  const commentTree = buildCommentTree(allComments, options);
   const gravatarMap = await buildGravatarMap(allComments, options.commentsAvatarRating || 'G');
 
   const permalink = buildPermalink(
@@ -451,7 +452,7 @@ export async function preparePageData(
     .where(and(eq(schema.comments.cid, pageRow.cid), eq(schema.comments.status, 'approved')))
     .orderBy(commentsOrder);
 
-  const commentTree = buildCommentTree(allComments);
+  const commentTree = buildCommentTree(allComments, options);
   const gravatarMap = await buildGravatarMap(allComments, options.commentsAvatarRating || 'G');
   const allowComment = pageRow.allowComment === '1';
 

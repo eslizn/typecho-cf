@@ -1,23 +1,13 @@
 import type { APIRoute } from 'astro';
-import { getDb, schema } from '@/db';
-import { loadOptions } from '@/lib/options';
-import { getAuthCookies, validateAuthToken, hashPassword, requireAdminCSRF } from '@/lib/auth';
+import { schema } from '@/db';
+import { hashPassword } from '@/lib/auth';
+import { isAdminActionResponse, requireAdminAction } from '@/lib/admin-auth';
+import { normalizeHttpUrl } from '@/lib/url';
 import { eq, and, ne } from 'drizzle-orm';
-import { env } from 'cloudflare:workers';
 
 export const POST: APIRoute = async ({ request, locals }) => {
-  const db = getDb(env.DB);
-  const options = await loadOptions(db);
-
-  const cookieHeader = request.headers.get('cookie');
-  const { token } = getAuthCookies(cookieHeader);
-  if (!token || !options.secret) return new Response('Unauthorized', { status: 401 });
-
-  const auth = await validateAuthToken(token, options.secret, db);
-  if (!auth) return new Response('Unauthorized', { status: 401 });
-
-  const csrfError = await requireAdminCSRF(request, options.secret as string, auth.user.authCode!, auth.uid);
-  if (csrfError) return csrfError;
+  const auth = await requireAdminAction(request, 'visitor');
+  if (isAdminActionResponse(auth)) return auth;
 
   const formData = await request.formData();
   const screenName = formData.get('screenName')?.toString()?.trim() || auth.user.name;
@@ -34,7 +24,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
   }
 
   // Check email uniqueness (exclude current user)
-  const existingMail = await db.query.users.findFirst({
+  const existingMail = await auth.db.query.users.findFirst({
     where: and(eq(schema.users.mail, mail), ne(schema.users.uid, auth.uid)),
   });
   if (existingMail) {
@@ -44,8 +34,16 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const updateData: Record<string, unknown> = {
     screenName,
     mail,
-    url: url || null,
+    url: null,
   };
+
+  if (url) {
+    const normalizedUrl = normalizeHttpUrl(url);
+    if (normalizedUrl === null) {
+      return new Response('个人主页地址格式不正确', { status: 400 });
+    }
+    updateData.url = normalizedUrl;
+  }
 
   if (password) {
     if (password !== passwordConfirm) {
@@ -57,7 +55,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     updateData.password = await hashPassword(password);
   }
 
-  await db.update(schema.users).set(updateData).where(eq(schema.users.uid, auth.uid));
+  await auth.db.update(schema.users).set(updateData).where(eq(schema.users.uid, auth.uid));
 
   return new Response(null, {
     status: 302,

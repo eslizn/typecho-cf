@@ -1,32 +1,21 @@
 import type { APIRoute } from 'astro';
-import { getDb, schema } from '@/db';
-import { loadOptions } from '@/lib/options';
-import { getAuthCookies, validateAuthToken, hasPermission, requireAdminCSRF } from '@/lib/auth';
+import { schema } from '@/db';
+import { isAdminActionResponse, requireAdminAction } from '@/lib/admin-auth';
 import { generateSlug } from '@/lib/content';
-import { purgeSiteCache } from '@/lib/cache';
+import { bumpCacheVersion, purgeSiteCache } from '@/lib/cache';
 import { eq, and, sql } from 'drizzle-orm';
-import { env } from 'cloudflare:workers';
 
 export const POST: APIRoute = handler;
 
 // GET only for reading (JSON list for autocomplete), never for state changes
 export const GET: APIRoute = async ({ request, locals, url }) => {
-  const db = getDb(env.DB);
-  const options = await loadOptions(db);
-
-  const cookieHeader = request.headers.get('cookie');
-  const { token } = getAuthCookies(cookieHeader);
-  if (!token || !options.secret) return new Response('Unauthorized', { status: 401 });
-
-  const auth = await validateAuthToken(token, options.secret, db);
-  if (!auth || !hasPermission(auth.user.group || 'visitor', 'editor')) {
-    return new Response('Forbidden', { status: 403 });
-  }
+  const auth = await requireAdminAction(request, 'editor', { csrf: false });
+  if (isAdminActionResponse(auth)) return auth;
 
   const type = url.searchParams.get('type') || 'category';
 
   // Return JSON list of metas (used for tag autocomplete)
-  const metas = await db.select({ mid: schema.metas.mid, name: schema.metas.name, slug: schema.metas.slug, count: schema.metas.count })
+  const metas = await auth.db.select({ mid: schema.metas.mid, name: schema.metas.name, slug: schema.metas.slug, count: schema.metas.count })
     .from(schema.metas)
     .where(eq(schema.metas.type, type))
     .orderBy(schema.metas.name);
@@ -37,20 +26,10 @@ export const GET: APIRoute = async ({ request, locals, url }) => {
 };
 
 async function handler({ request, locals, url }: { request: Request; locals: App.Locals; url: URL }) {
-  const db = getDb(env.DB);
-  const options = await loadOptions(db);
-
-  const cookieHeader = request.headers.get('cookie');
-  const { token } = getAuthCookies(cookieHeader);
-  if (!token || !options.secret) return new Response('Unauthorized', { status: 401 });
-
-  const auth = await validateAuthToken(token, options.secret, db);
-  if (!auth || !hasPermission(auth.user.group || 'visitor', 'editor')) {
-    return new Response('Forbidden', { status: 403 });
-  }
-
-  const csrfError = await requireAdminCSRF(request, options.secret as string, auth.user.authCode!, auth.uid);
-  if (csrfError) return csrfError;
+  const auth = await requireAdminAction(request, 'editor');
+  if (isAdminActionResponse(auth)) return auth;
+  const db = auth.db;
+  const options = auth.options;
 
   const formData = await request.formData();
   const action = formData.get('action')?.toString() || url.searchParams.get('action') || '';
@@ -76,6 +55,7 @@ async function handler({ request, locals, url }: { request: Request; locals: App
       order: 0,
     });
 
+    await bumpCacheVersion(db);
     await purgeSiteCache(options.siteUrl || '');
     return new Response(null, { status: 302, headers: { Location: redirectTo } });
   }
@@ -90,6 +70,7 @@ async function handler({ request, locals, url }: { request: Request; locals: App
       description: description || null,
     }).where(eq(schema.metas.mid, mid));
 
+    await bumpCacheVersion(db);
     await purgeSiteCache(options.siteUrl || '');
     return new Response(null, { status: 302, headers: { Location: redirectTo } });
   }
@@ -106,6 +87,7 @@ async function handler({ request, locals, url }: { request: Request; locals: App
       await db.delete(schema.metas).where(eq(schema.metas.mid, id));
     }
 
+    await bumpCacheVersion(db);
     await purgeSiteCache(options.siteUrl || '');
     return new Response(null, { status: 302, headers: { Location: redirectTo } });
   }
@@ -114,6 +96,7 @@ async function handler({ request, locals, url }: { request: Request; locals: App
     // Set as default category (save to options)
     const { setOption } = await import('@/lib/options');
     await setOption(db, 'defaultCategory', String(mid));
+    await bumpCacheVersion(db);
     return new Response(null, { status: 302, headers: { Location: redirectTo } });
   }
 
@@ -142,6 +125,7 @@ async function handler({ request, locals, url }: { request: Request; locals: App
         .where(eq(schema.metas.mid, meta.mid));
     }
 
+    await bumpCacheVersion(db);
     return new Response(null, { status: 302, headers: { Location: redirectTo } });
   }
 

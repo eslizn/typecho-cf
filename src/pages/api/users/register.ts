@@ -30,6 +30,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
     return new Response('密码长度至少6个字符', { status: 400 });
   }
 
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)) {
+    return new Response('邮箱格式不正确', { status: 400 });
+  }
+
   // Check if name exists
   const existingName = await db.query.users.findFirst({
     where: eq(schema.users.name, name),

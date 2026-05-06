@@ -1,0 +1,62 @@
+{
+  "id": "typecho-plugin-ai-writer",
+  "name": "妙笔生花",
+  "description": "在文章和页面编辑器中接入 OpenAI 兼容 LLM，用于生成、补全和润色正文。",
+  "author": "eslizn",
+  "authorUrl": "https://eslizn.com",
+  "version": "1.0.0",
+  "homepage": "https://github.com/eslizn/typecho-cf",
+  "license": "MIT",
+  "tags": ["ai", "writer", "llm", "content"],
+  "config": {
+    "endpoint": {
+      "type": "text",
+      "label": "接口地址",
+      "default": "https://open.bigmodel.cn/api/paas/v4/",
+      "description": "OpenAI 兼容 Base URL，生成时自动追加 /chat/completions，保存时通过 /models 校验"
+    },
+    "apiKey": {
+      "type": "password",
+      "label": "API Key",
+      "default": ""
+    },
+    "model": {
+      "type": "text",
+      "label": "模型名称",
+      "default": "glm-4.7-flash",
+      "description": "填写你的 LLM 服务商提供的模型 ID"
+    },
+    "temperature": {
+      "type": "text",
+      "label": "Temperature",
+      "default": "0.7"
+    },
+    "maxTokens": {
+      "type": "text",
+      "label": "最大输出 Token",
+      "default": "32000"
+    },
+    "stylePostCount": {
+      "type": "text",
+      "label": "风格参考文章数",
+      "default": "5",
+      "description": "生成、补全和润色时读取最近 N 篇已发布文章作为作者风格样本，填写 0 可关闭"
+    },
+    "userPrompt": {
+      "type": "textarea",
+      "label": "User Prompt",
+      "default": "",
+      "description": "可选的额外写作要求，会随标题、正文和风格样本一起发送给 LLM"
+    },
+    "includeBodyAssets": {
+      "type": "select",
+      "label": "发送正文图片和附件",
+      "default": "0",
+      "options": {
+        "0": "关闭",
+        "1": "开启"
+      },
+      "description": "开启后会提取正文中的图片、链接和当前内容附件；图片会尽量按 OpenAI image_url 发送，其他附件以链接和元数据发送"
+    }
+  }
+}

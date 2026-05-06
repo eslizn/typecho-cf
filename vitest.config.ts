@@ -10,7 +10,7 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'lcov'],
-      include: ['src/lib/**/*.ts', 'src/pages/api/**/*.ts'],
+      include: ['src/lib/**/*.ts', 'src/pages/api/**/*.ts', 'src/plugins/**/*.ts'],
     },
     // Clear cache between tests to avoid cross-test pollution
     env: {

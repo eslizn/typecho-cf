@@ -1,0 +1,143 @@
+{
+  "id": "typecho-plugin-webdav",
+  "name": "WebDAV",
+  "description": "基于当前站点用户系统，通过 WebDAV 协议访问多个 S3/R2 后端存储挂载。",
+  "author": "eslizn",
+  "authorUrl": "https://eslizn.com",
+  "version": "1.0.0",
+  "homepage": "https://github.com/eslizn/typecho-cf",
+  "license": "MIT",
+  "tags": ["webdav", "storage", "s3", "r2"],
+  "config": {
+    "routePath": {
+      "type": "text",
+      "label": "入口路由路径",
+      "default": "/dav",
+      "description": "WebDAV 入口路径，例如 /dav。保存后通过该路径访问挂载的存储。"
+    },
+    "requiredGroup": {
+      "type": "select",
+      "label": "访问权限",
+      "default": "contributor",
+      "options": {
+        "administrator": "管理员及以上",
+        "editor": "编辑及以上",
+        "contributor": "贡献者及以上",
+        "subscriber": "关注者及以上"
+      },
+      "description": "WebDAV 使用 Basic Auth，用户名和密码与当前站点用户一致。"
+    },
+    "mounts": {
+      "type": "repeatable",
+      "label": "后端存储挂载",
+      "default": [
+        {
+          "mount": "media",
+          "provider": "r2",
+          "bindingName": "BUCKET",
+          "prefix": "",
+          "endpoint": "",
+          "bucket": "",
+          "region": "us-east-1",
+          "accessKeyId": "",
+          "secretAccessKey": "",
+          "pathStyle": "true"
+        }
+      ],
+      "description": "每个挂载会作为入口根目录下的一级目录；provider 支持 s3 或 r2。prefix 可用于限制到桶内子目录。",
+      "itemFields": {
+        "mount": {
+          "type": "text",
+          "label": "挂载目录",
+          "default": "media",
+          "description": "入口根目录下的一级目录名，例如 /dav/media。"
+        },
+        "provider": {
+          "type": "select",
+          "label": "存储类型",
+          "default": "r2",
+          "options": {
+            "r2": "Cloudflare R2",
+            "s3": "Amazon S3 兼容"
+          }
+        },
+        "bindingName": {
+          "type": "select",
+          "label": "R2 绑定",
+          "default": "BUCKET",
+          "optionsSource": "r2Bindings",
+          "description": "选择 wrangler.toml 中 [[r2_buckets]] 声明的 binding。",
+          "showWhen": {
+            "field": "provider",
+            "value": "r2"
+          }
+        },
+        "endpoint": {
+          "type": "text",
+          "label": "Endpoint",
+          "default": "",
+          "showWhen": {
+            "field": "provider",
+            "value": "s3"
+          }
+        },
+        "bucket": {
+          "type": "text",
+          "label": "Bucket",
+          "default": "",
+          "showWhen": {
+            "field": "provider",
+            "value": "s3"
+          }
+        },
+        "region": {
+          "type": "text",
+          "label": "Region",
+          "default": "us-east-1",
+          "description": "S3 区域，例如 us-east-1。",
+          "showWhen": {
+            "field": "provider",
+            "value": "s3"
+          }
+        },
+        "accessKeyId": {
+          "type": "text",
+          "label": "Access Key ID",
+          "default": "",
+          "showWhen": {
+            "field": "provider",
+            "value": "s3"
+          }
+        },
+        "secretAccessKey": {
+          "type": "password",
+          "label": "Secret Access Key",
+          "default": "",
+          "showWhen": {
+            "field": "provider",
+            "value": "s3"
+          }
+        },
+        "prefix": {
+          "type": "text",
+          "label": "桶内前缀",
+          "default": "",
+          "description": "可选。填写后 WebDAV 只能访问该前缀下的对象。"
+        },
+        "pathStyle": {
+          "type": "select",
+          "label": "路径风格",
+          "default": "true",
+          "options": {
+            "true": "Path-style（推荐 R2）",
+            "false": "Virtual-hosted-style"
+          },
+          "showWhen": {
+            "field": "provider",
+            "value": "s3"
+          }
+        }
+      }
+    }
+  }
+}

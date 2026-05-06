@@ -1,0 +1,10 @@
+{
+  "name": "typecho-plugin-ai-writer",
+  "version": "1.0.0",
+  "description": "AI writing assistant for Typecho-CF posts and pages",
+  "keywords": ["typecho", "plugin", "ai", "writer"],
+  "author": "eslizn",
+  "license": "MIT",
+  "type": "module",
+  "main": "index.ts"
+}

@@ -7,7 +7,7 @@ import { eq, desc, and, sql } from 'drizzle-orm';
 import type { Database } from '@/db';
 import { schema } from '@/db';
 import { buildPermalink, buildCategoryLink, buildDateLink } from '@/lib/content';
-import { applyFilter } from '@/lib/plugin';
+import { applyFilterSafely } from '@/lib/plugin';
 
 export interface SidebarData {
   recentPosts: Array<{ title: string; permalink: string }>;
@@ -113,7 +113,7 @@ export async function loadSidebarData(db: Database, siteUrl: string, permalinkPa
   const sidebarData = { recentPosts, recentComments, categories, archives };
 
   // Apply widget:sidebar filter — plugins can add/modify sidebar widgets
-  return await applyFilter('widget:sidebar', sidebarData, db, siteUrl);
+  return await applyFilterSafely('widget:sidebar', sidebarData, db, siteUrl);
 }
 
 /**

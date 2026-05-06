@@ -1,6 +1,6 @@
 ---
 import { createContext } from '@/lib/context';
-import { applyFilter } from '@/lib/plugin';
+import { applyFilterSafely } from '@/lib/plugin';
 
 let options: any = { title: 'Blog', charset: 'UTF-8', lang: 'zh_CN', description: '' };
 let urls: any = { siteUrl: '' };
@@ -22,8 +22,8 @@ try {
 const error = Astro.url.searchParams.get('error') || '';
 
 const [loginHeadHtml, loginFormHtml] = await Promise.all([
-  applyFilter('admin:loginHead', '', { options }),
-  applyFilter('admin:loginForm', '', { options }),
+  applyFilterSafely('admin:loginHead', '', { options }),
+  applyFilterSafely('admin:loginForm', '', { options }),
 ]);
 ---
 <!DOCTYPE html>

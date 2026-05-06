@@ -945,6 +945,34 @@ div.token-input-dropdown ul li em { font-style: normal; }
 
 div.token-input-dropdown ul li.token-input-selected-dropdown-item { background-color: #467B96; color: #FFF; }
 
+.typecho-ai-writer { margin: -8px 0 14px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+
+.typecho-ai-writer-status { margin-left: 4px; }
+
+.typecho-ai-writer-mounted .typecho-ai-writer-fallback-actions { display: none; }
+
+.wmd-button-row li.typecho-ai-writer-toolbar-button span { background: none !important; color: #467B96; font-size: 10px; font-weight: bold; line-height: 20px; text-align: center; letter-spacing: 0; }
+
+.wmd-button-row.typecho-ai-writer-busy li.wmd-button:not(.typecho-ai-writer-toolbar-button) { pointer-events: none; opacity: .45; }
+
+#text.typecho-ai-writer-locked { background-color: #F6F6F3; cursor: wait; }
+
+.typecho-ai-writer-editing { position: relative; }
+
+.typecho-ai-writer-overlay { position: absolute; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; background: rgba(255, 255, 255, .68); pointer-events: auto; }
+
+.typecho-ai-writer-overlay[hidden] { display: none; }
+
+.typecho-ai-writer-loader { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border: 1px solid #D9D9D6; background: #FFF; color: #444; box-shadow: 0 2px 8px rgba(0, 0, 0, .08); border-radius: 3px; }
+
+.typecho-ai-writer-loader-spinner { width: 28px; height: 28px; border: 3px solid #D9D9D6; border-top-color: #467B96; border-radius: 50%; animation: typecho-ai-writer-spin .8s linear infinite; box-sizing: border-box; }
+
+.typecho-ai-writer-loader-text { line-height: 28px; white-space: nowrap; }
+
+.typecho-ai-writer-scroll-locked { overflow: hidden !important; }
+
+@keyframes typecho-ai-writer-spin { to { transform: rotate(360deg); } }
+
 /* Hide from both screenreaders and browsers: h5bp.com/u */
 .hidden { display: none; }
 

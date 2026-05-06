@@ -12,10 +12,10 @@
 typecho-plugin-example/
 ├── package.json     # npm package manifest (keywords must include typecho + plugin)
 ├── plugin.json      # Plugin metadata (with optional config declaration)
-└── index.js         # Entry point (ESM, export default init function)
+└── index.ts         # Entry point (ESM, export default init function)
 ```
 
-> When using TypeScript, the entry can be `index.ts` — compile to `.js` before publishing. Keeping `.js` for local development avoids an extra build step.
+> The plugin loader discovers `index.ts` first, then falls back to `index.js` / `index.mjs` / `plugin.ts` / `plugin.js`. Built-in plugins in this repository use TypeScript. For standalone npm publishing, compile TS to JS and point `plugin.json.entry` at the compiled output.
 
 ---
 
@@ -30,14 +30,14 @@ typecho-plugin-example/
   "author": "Your Name",
   "license": "MIT",
   "type": "module",
-  "main": "index.js"
+  "main": "index.ts"
 }
 ```
 
 **Key constraints**:
 - `keywords` must include both `"typecho"` and `"plugin"` — otherwise the build-time scanner won't discover it
 - `"type": "module"` — use ESM (`export default`, not `module.exports`)
-- `main` points to the compiled entry file
+- `main` points to the entry file; local plugins in this repository use `index.ts`
 
 ---
 
@@ -81,21 +81,23 @@ When `config` is declared, the admin plugin list automatically shows a "Settings
 
 ---
 
-## index.js Entry Point
+## index.ts Entry Point
 
-```javascript
+```ts
 /**
  * Plugin entry function, called by the system at build time.
  * Register all hooks via addHook. Do NOT perform I/O here.
  */
-export default function init({ addHook, pluginId }) {
+import type { PluginInitContext } from '@/lib/plugin';
+
+export default function init({ addHook, pluginId }: PluginInitContext): void {
   // filter hook: transform data and return it
-  addHook('content:content', pluginId, (html) => {
+  addHook('content:content', pluginId, (html: string) => {
     return html + '<!-- powered by example plugin -->';
   });
 
   // call hook: side effects, no return value needed
-  addHook('feedback:finishComment', pluginId, (comment) => {
+  addHook('feedback:finishComment', pluginId, (comment: { coid?: number }) => {
     console.log('New comment:', comment.coid);
   });
 }
@@ -114,16 +116,16 @@ export default function init({ addHook, pluginId }) {
 
 Inside a filter/call handler, read config from the `extra.options` object passed in:
 
-```javascript
+```ts
 // Plugins in the main project can import loadPluginConfig from '@/lib/plugin'
 // Standalone npm plugins should implement their own config parsing (see captcha example)
 
-addHook('feedback:comment', pluginId, async (commentData, extra) => {
+addHook('feedback:comment', pluginId, async (commentData: { _rejected?: string }, extra?: { options?: Record<string, unknown> }) => {
   if (!extra?.options) return commentData;
 
   // Read this plugin's config (auto-merged with plugin.json defaults)
   const raw = extra.options[`plugin:${pluginId}`];
-  const config = raw ? JSON.parse(raw) : {};
+  const config = typeof raw === 'string' ? JSON.parse(raw) : {};
 
   if (!config.apiKey) return commentData;  // Not configured, skip
 
@@ -180,6 +182,9 @@ Config storage: `typecho_options` table, `name = "plugin:<pluginId>"`, value is 
 | `feedback:comment` | Before comment save | `(commentData, extra)` | Validate/modify comment; set `_rejected` to reject |
 | `feed:item` | RSS/Atom generation | `(item, post)` | Filter feed item |
 | `widget:sidebar` | Sidebar render | `(sidebarData, context)` | Filter sidebar data |
+| `plugin:config:beforeSave` | Before plugin config save | `(result, extra)` | Validate or normalize plugin config; return `{ success, settings?, error? }` |
+
+`applyFilter` propagates plugin exceptions by default. Business flows such as content saving, comments, login, and plugin configuration will stop and surface the error. Presentation-only injection points can be wrapped by `applyFilterSafely`; when one plugin fails, that plugin output is skipped and rendering continues.
 
 ---
 
@@ -187,7 +192,7 @@ Config storage: `typecho_options` table, `name = "plugin:<pluginId>"`, value is 
 
 In a `feedback:comment` filter, set `commentData._rejected` to reject the comment:
 
-```javascript
+```ts
 addHook('feedback:comment', pluginId, async (commentData, extra) => {
   if (spamDetected) {
     commentData._rejected = 'Spam detected';  // Non-empty string = rejected with 403
@@ -202,18 +207,20 @@ addHook('feedback:comment', pluginId, async (commentData, extra) => {
 
 Plugins can automatically inject HTML/JS into frontend pages via `archive:header` and `archive:footer` filters — no theme modification required:
 
-```javascript
-// index.js
-export default function init({ addHook, pluginId }) {
+```ts
+// index.ts
+import type { PluginInitContext } from '@/lib/plugin';
+
+export default function init({ addHook, pluginId }: PluginInitContext): void {
   // Inject <head> content (e.g., SDK scripts)
-  addHook('archive:header', pluginId, (headHtml, extra) => {
+  addHook('archive:header', pluginId, (headHtml: string, extra?: { options?: Record<string, unknown> }) => {
     const config = getPluginConfig(extra?.options);
     if (!config.sitekey) return headHtml;
     return headHtml + '<script src="..."></script>';
   });
 
   // Inject content before </body> (e.g., interaction scripts)
-  addHook('archive:footer', pluginId, (bodyHtml, extra) => {
+  addHook('archive:footer', pluginId, (bodyHtml: string, extra?: { options?: Record<string, unknown> }) => {
     const config = getPluginConfig(extra?.options);
     if (!config.sitekey) return bodyHtml;
     return bodyHtml + '<script>/* ... */</script>';
@@ -230,7 +237,7 @@ The `Base.astro` layout automatically calls `getClientSnippets(options)` to coll
 ### Local development (workspace package)
 
 1. Place the plugin directory under `src/plugins/`
-2. Ensure `src/plugins/*` is listed in the root `package.json` `workspaces`
+2. Add `"<packageName>": "file:src/plugins/<packageName>"` to the root `package.json` `dependencies`
 3. Run `pnpm install`
 4. Rebuild with `pnpm run build`
 

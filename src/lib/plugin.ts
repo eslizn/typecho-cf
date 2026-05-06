@@ -83,6 +83,12 @@ export interface PluginInfo {
 export type CallHandler = (...args: any[]) => void | Promise<void>;
 export type FilterHandler = (value: any, ...args: any[]) => any | Promise<any>;
 
+export interface PluginInitContext {
+  addHook: typeof addHook;
+  HookPoints: typeof HookPoints;
+  pluginId: string;
+}
+
 interface HookRegistration {
   pluginId: string;
   handler: CallHandler | FilterHandler;
@@ -120,6 +126,7 @@ export const HookPoints = {
   'admin:writePage:advanceOption': 'admin:writePage:advanceOption', // Page editor advanced options
   'admin:writePage:bottom': 'admin:writePage:bottom',          // Page editor bottom area
   'admin:profile:bottom': 'admin:profile:bottom',              // Profile page bottom area
+  'plugin:config:beforeSave': 'plugin:config:beforeSave',      // Filter: validate or normalize plugin config before saving
 
   // --- Content Display (Frontend) ---
   'archive:select': 'archive:select',               // Filter: DB query for content listing
@@ -369,6 +376,28 @@ export async function applyFilter(hookPoint: string, value: any, ...args: any[])
       result = await (reg.handler as FilterHandler)(result, ...args);
     } catch (err) {
       console.error(`[plugin] Error in filter ${hookPoint} from plugin ${reg.pluginId}:`, err);
+      throw err;
+    }
+  }
+  return result;
+}
+
+/**
+ * Execute a filter hook while isolating plugin failures.
+ * Use only for non-critical presentation hooks where missing plugin output is
+ * preferable to failing the entire page.
+ */
+export async function applyFilterSafely(hookPoint: string, value: any, ...args: any[]): Promise<any> {
+  const handlers = hookRegistry.get(hookPoint);
+  if (!handlers || handlers.length === 0) return value;
+
+  let result = value;
+  for (const reg of handlers) {
+    if (!activatedPlugins.has(reg.pluginId)) continue;
+    try {
+      result = await (reg.handler as FilterHandler)(result, ...args);
+    } catch (err) {
+      console.error(`[plugin] Error in safe filter ${hookPoint} from plugin ${reg.pluginId}:`, err);
     }
   }
   return result;
@@ -437,8 +466,8 @@ export function parseActivatedPlugins(value: string | null | undefined): string[
 export async function getClientSnippets(
   options: Record<string, any>,
 ): Promise<{ headHtml: string; bodyHtml: string }> {
-  let headHtml = await applyFilter('archive:header', '', { options });
-  let bodyHtml = await applyFilter('archive:footer', '', { options });
+  let headHtml = await applyFilterSafely('archive:header', '', { options });
+  let bodyHtml = await applyFilterSafely('archive:footer', '', { options });
   return { headHtml, bodyHtml };
 }
 

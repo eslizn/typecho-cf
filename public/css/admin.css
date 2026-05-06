@@ -68,11 +68,11 @@ select { border: 1px solid #CCC; height: 28px; }
 
 .btn:disabled, #ui-datepicker-div .ui-datepicker-current:disabled, #ui-datepicker-div .ui-datepicker-close:disabled { color: #999; }
 
-.btn-xs, #ui-datepicker-div .ui-datepicker-current, #ui-datepicker-div .ui-datepicker-close { padding: 0 10px; height: 25px; font-size: 13px; }
+.btn-xs, #ui-datepicker-div .ui-datepicker-current, #ui-datepicker-div .ui-datepicker-close { padding: 0 10px; height: 25px; line-height: 25px; font-size: 13px; }
 
-.btn-s { height: 28px; }
+.btn-s { height: 28px; line-height: 28px; }
 
-.btn-l { height: 40px; font-size: 1.14286em; font-weight: bold; }
+.btn-l { height: 40px; line-height: 40px; font-size: 1.14286em; font-weight: bold; }
 
 .primary { border: none; background-color: #467B96; cursor: pointer; border-radius: 2px; color: #FFF; }
 

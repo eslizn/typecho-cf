@@ -111,7 +111,9 @@ function isR2BucketBinding(value: unknown): boolean {
     && typeof value === 'object'
     && typeof (value as any).get === 'function'
     && typeof (value as any).put === 'function'
-    && typeof (value as any).delete === 'function';
+    && typeof (value as any).delete === 'function'
+    && typeof (value as any).head === 'function'
+    && typeof (value as any).list === 'function';
 }
 
 function r2BindingOptions(): Record<string, string> {
@@ -241,7 +243,12 @@ function isFieldVisible(field: PluginConfigField, row: Record<string, any>): boo
               )}
 
               {field.type === 'repeatable' && field.itemFields && (
-                <div class="typecho-repeatable" data-repeatable={key} data-next-index={String(repeatableRows(value, field).length)}>
+                <div
+                  class="typecho-repeatable"
+                  data-repeatable={key}
+                  data-label={field.label}
+                  data-next-index={String(repeatableRows(value, field).length)}
+                >
                   <div class="typecho-repeatable-items">
                     {repeatableRows(value, field).map((row, rowIndex) => (
                       <fieldset class="typecho-repeatable-item">
@@ -405,6 +412,7 @@ function isFieldVisible(field: PluginConfigField, row: Record<string, any>): boo
           items.appendChild(element);
           if (element instanceof HTMLElement) toggleConditionalFields(element);
         }
+        renumberRepeatableItems(root);
         return;
       }
 
@@ -414,8 +422,17 @@ function isFieldVisible(field: PluginConfigField, row: Record<string, any>): boo
         var root = removeButton.closest('.typecho-repeatable');
         if (!item || !root) return;
         item.remove();
+        renumberRepeatableItems(root);
       }
     });
+
+    function renumberRepeatableItems(root) {
+      var label = root.getAttribute('data-label') || '';
+      root.querySelectorAll('.typecho-repeatable-item').forEach(function(item, index) {
+        var legend = item.querySelector('legend');
+        if (legend) legend.textContent = label + ' #' + String(index + 1);
+      });
+    }
 
     function toggleConditionalFields(item) {
       var fields = item.querySelectorAll('[data-show-when-field]');

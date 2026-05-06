@@ -6,13 +6,16 @@ import { eq } from 'drizzle-orm';
 
 type StorageProvider = 's3' | 'r2';
 
-interface WebDavConfig {
+export interface WebDavConfig {
   routePath: string;
-  requiredGroup: string;
   mounts: StorageMount[];
+  failBanEnabled: boolean;
+  failBanMaxFailures: number;
+  failBanWindowSeconds: number;
+  failBanSeconds: number;
 }
 
-interface StorageMount {
+export interface StorageMount {
   mount: string;
   provider: StorageProvider;
   bindingName: string;
@@ -52,15 +55,26 @@ interface S3ListResult {
   prefixes: string[];
 }
 
+interface AuthFailureState {
+  failures: number;
+  windowStartedAt: number;
+  bannedUntil: number;
+}
+
 const PLUGIN_ID = 'typecho-plugin-webdav';
-const DEFAULT_ROUTE = '/dav';
-const DEFAULT_GROUP = 'contributor';
+const DEFAULT_ROUTE = '/webdav';
+const LEGACY_DEFAULT_ROUTE = '/dav';
+const DEFAULT_FAIL_BAN_ENABLED = true;
+const DEFAULT_FAIL_BAN_MAX_FAILURES = 5;
+const DEFAULT_FAIL_BAN_WINDOW_SECONDS = 300;
+const DEFAULT_FAIL_BAN_SECONDS = 900;
 const ALLOWED_METHODS = 'OPTIONS, PROPFIND, GET, HEAD, PUT, DELETE, MKCOL, COPY, MOVE';
 const XML_HEADERS = { 'Content-Type': 'application/xml; charset=utf-8' };
+const authFailureStates = new Map<string, AuthFailureState>();
 
 const DEFAULT_MOUNTS = `[
   {
-    "mount": "media",
+    "mount": "",
     "provider": "r2",
     "bindingName": "BUCKET",
     "prefix": ""
@@ -90,11 +104,10 @@ export function normalizeRoutePath(value: unknown): string {
   return withSlash.replace(/\/+$/, '') || DEFAULT_ROUTE;
 }
 
-function normalizeGroup(value: unknown): string {
-  const group = String(value || DEFAULT_GROUP);
-  return ['administrator', 'editor', 'contributor', 'subscriber'].includes(group)
-    ? group
-    : DEFAULT_GROUP;
+function normalizeInteger(value: unknown, fallback: number, min: number, max: number): number {
+  const parsed = typeof value === 'number' ? value : Number.parseInt(String(value ?? ''), 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, Math.floor(parsed)));
 }
 
 function normalizePrefix(value: unknown): string {
@@ -114,7 +127,9 @@ function parseBoolean(value: unknown, fallback: boolean): boolean {
 }
 
 export function parseMounts(value: unknown): StorageMount[] {
-  const source = typeof value === 'string' && value.trim() ? value : DEFAULT_MOUNTS;
+  const source = value === undefined || value === null || (typeof value === 'string' && !value.trim())
+    ? DEFAULT_MOUNTS
+    : value;
   let parsed: unknown;
   if (typeof source === 'string') {
     parsed = JSON.parse(source);
@@ -136,7 +151,8 @@ export function parseMounts(value: unknown): StorageMount[] {
     }
 
     const record = item as Record<string, unknown>;
-    const mount = String(record.mount || '').trim().replace(/^\/+|\/+$/g, '');
+    const rawMount = String(record.mount ?? '').trim();
+    const mount = rawMount === '/' ? '' : rawMount.replace(/^\/+|\/+$/g, '');
     const provider = String(record.provider || 's3').toLowerCase() as StorageProvider;
     const bindingName = String(record.bindingName || record.binding || 'BUCKET').trim();
     const endpoint = String(record.endpoint || '').trim().replace(/\/+$/, '');
@@ -147,7 +163,10 @@ export function parseMounts(value: unknown): StorageMount[] {
     const prefix = normalizePrefix(record.prefix);
     const pathStyle = parseBoolean(record.pathStyle, provider === 'r2');
 
-    if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(mount)) {
+    if (mount === '' && parsed.length > 1) {
+      throw new Error('根目录挂载不能与其他挂载共存');
+    }
+    if (mount && !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(mount)) {
       throw new Error(`第 ${index + 1} 个挂载 mount 只能包含字母、数字、点、下划线和连字符`);
     }
     if (seen.has(mount)) {
@@ -192,12 +211,82 @@ export function parseMounts(value: unknown): StorageMount[] {
   });
 }
 
+export function resolveWebDavTarget(
+  config: WebDavConfig,
+  relativePath: string,
+): { mount: StorageMount; key: string; rootMount: boolean } | null {
+  const rootMount = config.mounts.find(item => item.mount === '');
+  if (rootMount) {
+    return {
+      mount: rootMount,
+      key: splitPath(relativePath).join('/'),
+      rootMount: true,
+    };
+  }
+
+  const parts = splitPath(relativePath);
+  const mountName = parts.shift() || '';
+  if (!mountName) return null;
+
+  const mount = config.mounts.find(item => item.mount === mountName);
+  if (!mount) return null;
+
+  return {
+    mount,
+    key: parts.join('/'),
+    rootMount: false,
+  };
+}
+
 export function normalizeConfig(settings?: Record<string, unknown>): WebDavConfig {
   return {
     routePath: normalizeRoutePath(settings?.routePath),
-    requiredGroup: normalizeGroup(settings?.requiredGroup),
     mounts: parseMounts(settings?.mounts),
+    failBanEnabled: parseBoolean(settings?.failBanEnabled, DEFAULT_FAIL_BAN_ENABLED),
+    failBanMaxFailures: normalizeInteger(settings?.failBanMaxFailures, DEFAULT_FAIL_BAN_MAX_FAILURES, 1, 100),
+    failBanWindowSeconds: normalizeInteger(settings?.failBanWindowSeconds, DEFAULT_FAIL_BAN_WINDOW_SECONDS, 10, 86_400),
+    failBanSeconds: normalizeInteger(settings?.failBanSeconds, DEFAULT_FAIL_BAN_SECONDS, 10, 86_400),
   };
+}
+
+export function getWebDavClientIp(request: Request): string {
+  const forwarded = request.headers.get('cf-connecting-ip')
+    || request.headers.get('x-real-ip')
+    || request.headers.get('x-forwarded-for')?.split(',')[0]
+    || '';
+  const ip = forwarded.trim();
+  return ip || 'unknown';
+}
+
+export function isWebDavClientBanned(config: WebDavConfig, ip: string, now = Date.now()): boolean {
+  if (!config.failBanEnabled) return false;
+  const state = authFailureStates.get(ip);
+  if (!state) return false;
+  if (state.bannedUntil > now) return true;
+  if (state.bannedUntil > 0) {
+    authFailureStates.delete(ip);
+  }
+  return false;
+}
+
+export function recordWebDavAuthFailure(config: WebDavConfig, ip: string, now = Date.now()): void {
+  if (!config.failBanEnabled) return;
+  const windowMs = config.failBanWindowSeconds * 1000;
+  const banMs = config.failBanSeconds * 1000;
+  const current = authFailureStates.get(ip);
+  const state = !current || now - current.windowStartedAt > windowMs
+    ? { failures: 0, windowStartedAt: now, bannedUntil: 0 }
+    : current;
+
+  state.failures += 1;
+  if (state.failures >= config.failBanMaxFailures) {
+    state.bannedUntil = now + banMs;
+  }
+  authFailureStates.set(ip, state);
+}
+
+export function clearWebDavAuthFailures(ip: string): void {
+  authFailureStates.delete(ip);
 }
 
 export function matchWebDavRoute(routePath: string, pathname: string): string | null {
@@ -206,6 +295,26 @@ export function matchWebDavRoute(routePath: string, pathname: string): string | 
   if (pathname.startsWith(`${normalized}/`)) {
     return pathname.slice(normalized.length + 1);
   }
+  return null;
+}
+
+function matchConfiguredWebDavRoute(
+  settings: Record<string, unknown>,
+  pathname: string,
+): { routePath: string; relativePath: string } | null {
+  const configuredRoutePath = normalizeRoutePath(settings.routePath);
+  const configuredRelative = matchWebDavRoute(configuredRoutePath, pathname);
+  if (configuredRelative !== null) {
+    return { routePath: configuredRoutePath, relativePath: configuredRelative };
+  }
+
+  if (configuredRoutePath === LEGACY_DEFAULT_ROUTE) {
+    const defaultRelative = matchWebDavRoute(DEFAULT_ROUTE, pathname);
+    if (defaultRelative !== null) {
+      return { routePath: DEFAULT_ROUTE, relativePath: defaultRelative };
+    }
+  }
+
   return null;
 }
 
@@ -241,8 +350,7 @@ function unauthorized(message = 'Unauthorized'): Response {
 async function authenticate(
   request: Request,
   db: Database,
-  requiredGroup: string,
-): Promise<Response | null> {
+): Promise<Response | true> {
   const credentials = parseBasicCredentials(request.headers.get('authorization'));
   if (!credentials?.username || !credentials.password) {
     return unauthorized();
@@ -262,11 +370,11 @@ async function authenticate(
   if (passwordResult !== true) {
     return unauthorized();
   }
-  if (!hasPermission(user.group || 'visitor', requiredGroup)) {
-    return new Response('Forbidden', { status: 403, headers: { 'Cache-Control': 'no-store' } });
+  if (!hasPermission(user.group || 'visitor', 'administrator')) {
+    return unauthorized('Administrator account required');
   }
 
-  return null;
+  return true;
 }
 
 function splitPath(path: string): string[] {
@@ -354,6 +462,47 @@ function multistatus(responses: string[]): Response {
     status: 207,
     headers: XML_HEADERS,
   });
+}
+
+function htmlResponse(body: string, status = 200): Response {
+  return new Response(body, {
+    status,
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
+    },
+  });
+}
+
+function htmlPage(title: string, items: string[]): string {
+  return [
+    '<!doctype html>',
+    '<html lang="en">',
+    '<head>',
+    '<meta charset="utf-8">',
+    '<meta name="viewport" content="width=device-width, initial-scale=1">',
+    `<title>${escapeXml(title)}</title>`,
+    '<style>',
+    'body{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:2rem;line-height:1.5;color:#1f2933;background:#fff}',
+    'main{max-width:860px}',
+    'h1{font-size:1.4rem;margin:0 0 1rem}',
+    'ul{list-style:none;padding:0;margin:0;border-top:1px solid #d8dee4}',
+    'li{border-bottom:1px solid #d8dee4}',
+    'a{display:block;padding:.55rem 0;color:#0b5cad;text-decoration:none}',
+    'a:hover{text-decoration:underline}',
+    'p{color:#536471}',
+    '</style>',
+    '</head>',
+    '<body>',
+    '<main>',
+    `<h1>${escapeXml(title)}</h1>`,
+    items.length > 0
+      ? `<ul>${items.join('')}</ul>`
+      : '<p>This WebDAV collection is empty.</p>',
+    '</main>',
+    '</body>',
+    '</html>',
+  ].join('');
 }
 
 function optionsResponse(): Response {
@@ -509,7 +658,9 @@ function isR2BucketBinding(value: unknown): value is R2Bucket {
     && typeof value === 'object'
     && typeof (value as R2Bucket).get === 'function'
     && typeof (value as R2Bucket).put === 'function'
-    && typeof (value as R2Bucket).delete === 'function';
+    && typeof (value as R2Bucket).delete === 'function'
+    && typeof (value as R2Bucket).head === 'function'
+    && typeof (value as R2Bucket).list === 'function';
 }
 
 function getR2Bucket(mount: StorageMount, workerEnv?: Record<string, unknown>): R2Bucket {
@@ -607,7 +758,7 @@ async function objectMeta(mount: StorageMount, key: string, workerEnv?: Record<s
 async function collectionExists(mount: StorageMount, prefix: string, workerEnv?: Record<string, unknown>): Promise<boolean> {
   const normalizedPrefix = prefix && !prefix.endsWith('/') ? `${prefix}/` : prefix;
   const listing = await listObjects(mount, normalizedPrefix, workerEnv);
-  return listing.prefixes.length > 0 || listing.objects.some(object => object.key !== normalizedPrefix);
+  return listing.prefixes.length > 0 || listing.objects.length > 0;
 }
 
 async function propfindRoot(config: WebDavConfig, depth: string): Promise<Response> {
@@ -624,6 +775,88 @@ async function propfindRoot(config: WebDavConfig, depth: string): Promise<Respon
   return multistatus(responses);
 }
 
+async function browserRootListing(config: WebDavConfig, method: string): Promise<Response> {
+  if (method === 'HEAD') {
+    return new Response(null, {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-store',
+      },
+    });
+  }
+
+  const items = config.mounts.map(mount => {
+    const label = mount.mount || 'Root storage';
+    return `<li><a href="${escapeXml(href(config.routePath, [mount.mount], true))}">${escapeXml(label)}/</a></li>`;
+  });
+  return htmlResponse(htmlPage('WebDAV', items));
+}
+
+async function browserMountListing(
+  config: WebDavConfig,
+  mount: StorageMount,
+  key: string,
+  method: string,
+  workerEnv?: Record<string, unknown>,
+): Promise<Response> {
+  if (method === 'HEAD') {
+    return new Response(null, {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-store',
+      },
+    });
+  }
+
+  const cleanKey = key.replace(/^\/+|\/+$/g, '');
+  const fullKey = withMountPrefix(mount, cleanKey);
+  const prefix = fullKey && !fullKey.endsWith('/') ? `${fullKey}/` : fullKey;
+  const listing = await listObjects(mount, prefix, workerEnv);
+  const baseParts = [
+    ...(mount.mount ? [mount.mount] : []),
+    ...cleanKey.split('/').filter(Boolean),
+  ];
+  const items: string[] = [];
+  const emittedCollections = new Set<string>();
+
+  for (const itemPrefix of listing.prefixes) {
+    const relative = stripMountPrefix(mount, itemPrefix).replace(/\/+$/, '');
+    emittedCollections.add(relative);
+    const display = relative.split('/').pop() || relative;
+    items.push(`<li><a href="${escapeXml(href(config.routePath, [
+      ...(mount.mount ? [mount.mount] : []),
+      ...relative.split('/').filter(Boolean),
+    ], true))}">${escapeXml(display)}/</a></li>`);
+  }
+
+  for (const object of listing.objects) {
+    if (object.key === prefix) continue;
+    const relative = stripMountPrefix(mount, object.key);
+    if (object.key.endsWith('/')) {
+      const collectionRelative = relative.replace(/\/+$/, '');
+      if (!collectionRelative || emittedCollections.has(collectionRelative)) continue;
+      emittedCollections.add(collectionRelative);
+      const display = collectionRelative.split('/').pop() || collectionRelative;
+      items.push(`<li><a href="${escapeXml(href(config.routePath, [
+        ...(mount.mount ? [mount.mount] : []),
+        ...collectionRelative.split('/').filter(Boolean),
+      ], true))}">${escapeXml(display)}/</a></li>`);
+      continue;
+    }
+    const normalizedCleanKey = cleanKey ? `${cleanKey}/` : '';
+    if (relative.includes('/') && !relative.startsWith(normalizedCleanKey)) continue;
+    const display = relative.split('/').pop() || relative;
+    items.push(`<li><a href="${escapeXml(href(config.routePath, [
+      ...(mount.mount ? [mount.mount] : []),
+      ...relative.split('/').filter(Boolean),
+    ], false))}">${escapeXml(display)}</a></li>`);
+  }
+
+  return htmlResponse(htmlPage(baseParts.length > 0 ? `WebDAV / ${baseParts.join('/')}` : 'WebDAV', items));
+}
+
 async function propfindMount(
   config: WebDavConfig,
   mount: StorageMount,
@@ -633,26 +866,48 @@ async function propfindMount(
 ): Promise<Response> {
   const cleanKey = key.replace(/^\/+/, '');
   const fullKey = withMountPrefix(mount, cleanKey);
-  const mountParts = [mount.mount, ...cleanKey.split('/').filter(Boolean)];
+  const mountParts = [
+    ...(mount.mount ? [mount.mount] : []),
+    ...cleanKey.split('/').filter(Boolean),
+  ];
   const responses: string[] = [];
 
   if (cleanKey === '' || isCollectionPath(key)) {
     const prefix = fullKey && !fullKey.endsWith('/') ? `${fullKey}/` : fullKey;
     const listing = await listObjects(mount, prefix, workerEnv);
-    responses.push(responseXml(href(config.routePath, mountParts, true), mountParts.at(-1) || mount.mount, true));
+    responses.push(responseXml(href(config.routePath, mountParts, true), mountParts.at(-1) || mount.mount || 'WebDAV', true));
 
     if (depth !== '0') {
+      const emittedCollections = new Set<string>();
       for (const itemPrefix of listing.prefixes) {
         const relative = stripMountPrefix(mount, itemPrefix).replace(/\/+$/, '');
+        emittedCollections.add(relative);
         const display = relative.split('/').pop() || relative;
-        responses.push(responseXml(href(config.routePath, [mount.mount, ...relative.split('/').filter(Boolean)], true), display, true));
+        responses.push(responseXml(href(config.routePath, [
+          ...(mount.mount ? [mount.mount] : []),
+          ...relative.split('/').filter(Boolean),
+        ], true), display, true));
       }
       for (const object of listing.objects) {
         if (object.key === prefix) continue;
         const relative = stripMountPrefix(mount, object.key);
+        if (object.key.endsWith('/')) {
+          const collectionRelative = relative.replace(/\/+$/, '');
+          if (!collectionRelative || emittedCollections.has(collectionRelative)) continue;
+          emittedCollections.add(collectionRelative);
+          const display = collectionRelative.split('/').pop() || collectionRelative;
+          responses.push(responseXml(href(config.routePath, [
+            ...(mount.mount ? [mount.mount] : []),
+            ...collectionRelative.split('/').filter(Boolean),
+          ], true), display, true));
+          continue;
+        }
         if (relative.includes('/') && !relative.startsWith(cleanKey ? `${cleanKey.replace(/\/+$/, '')}/` : '')) continue;
         const display = relative.split('/').pop() || relative;
-        responses.push(responseXml(href(config.routePath, [mount.mount, ...relative.split('/').filter(Boolean)], false), display, false, object));
+        responses.push(responseXml(href(config.routePath, [
+          ...(mount.mount ? [mount.mount] : []),
+          ...relative.split('/').filter(Boolean),
+        ], false), display, false, object));
       }
     }
     return multistatus(responses);
@@ -667,6 +922,9 @@ async function propfindMount(
 
   const existsAsCollection = await collectionExists(mount, fullKey, workerEnv);
   if (!existsAsCollection) return new Response('Not Found', { status: 404 });
+  if (depth !== '0') {
+    return propfindMount(config, mount, `${cleanKey}/`, depth, workerEnv);
+  }
   return multistatus([
     responseXml(href(config.routePath, mountParts, true), mountParts.at(-1) || cleanKey, true),
   ]);
@@ -767,9 +1025,9 @@ function resolveDestination(config: WebDavConfig, destinationHeader: string | nu
 
   const relative = matchWebDavRoute(config.routePath, pathname);
   if (relative === null) return null;
-  const parts = splitPath(relative);
-  const mountName = parts.shift() || '';
-  return { mountName, key: parts.join('/') };
+  const target = resolveWebDavTarget(config, relative);
+  if (!target) return null;
+  return { mountName: target.mount.mount, key: target.key };
 }
 
 async function handleCopyMove(
@@ -833,8 +1091,28 @@ async function handleWebDavRequest(config: WebDavConfig, relativePath: string, e
   if (request.method === 'OPTIONS') return optionsResponse();
 
   if (!extra.db) return new Response('Database unavailable', { status: 503 });
-  const authError = await authenticate(request, extra.db, config.requiredGroup);
-  if (authError) return authError;
+  const clientIp = getWebDavClientIp(request);
+  const hasBasicAuthAttempt = /^Basic\s+/i.test(request.headers.get('authorization') || '');
+  if (hasBasicAuthAttempt && isWebDavClientBanned(config, clientIp)) {
+    return new Response('Too many failed login attempts', {
+      status: 429,
+      headers: {
+        'Cache-Control': 'no-store',
+        'Retry-After': String(config.failBanSeconds),
+      },
+    });
+  }
+
+  const authResult = await authenticate(request, extra.db);
+  if (authResult instanceof Response) {
+    if (hasBasicAuthAttempt && authResult.status === 401) {
+      recordWebDavAuthFailure(config, clientIp);
+    }
+    return authResult;
+  }
+  if (hasBasicAuthAttempt) {
+    clearWebDavAuthFailures(clientIp);
+  }
 
   const depthHeader = (request.headers.get('depth') || '1').toLowerCase();
   const depth = depthHeader === 'infinity' ? '1' : depthHeader;
@@ -842,24 +1120,32 @@ async function handleWebDavRequest(config: WebDavConfig, relativePath: string, e
     return new Response('Unsupported Depth', { status: 400 });
   }
 
-  const parts = splitPath(relativePath);
-  const mountName = parts.shift() || '';
-  if (!mountName) {
+  const target = resolveWebDavTarget(config, relativePath);
+  if (!target) {
     if (request.method === 'PROPFIND') return propfindRoot(config, depth);
+    if (request.method === 'GET' || request.method === 'HEAD') return browserRootListing(config, request.method);
     return new Response('Method Not Allowed', { status: 405, headers: { Allow: 'OPTIONS, PROPFIND' } });
   }
 
-  const mount = config.mounts.find(item => item.mount === mountName);
-  if (!mount) return new Response('Not Found', { status: 404 });
-
-  const key = parts.join('/');
+  const { mount, key } = target;
   const workerEnv = extra.env;
+  const propfindKey = relativePath.endsWith('/') && key ? `${key}/` : key || (relativePath.endsWith('/') ? '/' : '');
   switch (request.method) {
     case 'PROPFIND':
-      return propfindMount(config, mount, key || (relativePath.endsWith('/') ? '/' : ''), depth, workerEnv);
+      return propfindMount(config, mount, propfindKey, depth, workerEnv);
     case 'GET':
     case 'HEAD':
-      return handleRead(request.method, mount, key, workerEnv);
+      if (!key || relativePath.endsWith('/')) {
+        return browserMountListing(config, mount, key, request.method, workerEnv);
+      }
+      {
+        const readResponse = await handleRead(request.method, mount, key, workerEnv);
+        if (readResponse.status !== 404) return readResponse;
+        if (await collectionExists(mount, withMountPrefix(mount, key), workerEnv)) {
+          return browserMountListing(config, mount, key, request.method, workerEnv);
+        }
+        return readResponse;
+      }
     case 'PUT':
       return handlePut(request, mount, key, workerEnv);
     case 'MKCOL':
@@ -888,8 +1174,11 @@ export default function init({ addHook, pluginId }: PluginInitContext): void {
           success: true,
           settings: {
             routePath: config.routePath,
-            requiredGroup: config.requiredGroup,
             mounts: config.mounts,
+            failBanEnabled: config.failBanEnabled,
+            failBanMaxFailures: config.failBanMaxFailures,
+            failBanWindowSeconds: config.failBanWindowSeconds,
+            failBanSeconds: config.failBanSeconds,
           },
         };
       } catch (error) {
@@ -908,13 +1197,13 @@ export default function init({ addHook, pluginId }: PluginInitContext): void {
       if (result?.handled || !extra?.request || !extra.path) return result;
 
       const settings = readPluginSettings(extra.options);
-      const routePath = normalizeRoutePath(settings.routePath);
-      const relative = matchWebDavRoute(routePath, extra.path);
-      if (relative === null) return result;
+      const routeMatch = matchConfiguredWebDavRoute(settings, extra.path);
+      if (!routeMatch) return result;
 
       let config: WebDavConfig;
       try {
         config = normalizeConfig(settings);
+        config.routePath = routeMatch.routePath;
       } catch (error) {
         console.error('[webdav] Invalid configuration:', error);
         return {
@@ -926,7 +1215,7 @@ export default function init({ addHook, pluginId }: PluginInitContext): void {
       try {
         return {
           handled: true,
-          response: await handleWebDavRequest(config, relative, extra),
+          response: await handleWebDavRequest(config, routeMatch.relativePath, extra),
         };
       } catch (error) {
         console.error('[webdav] Request failed:', error);

@@ -1,7 +1,7 @@
 ---
 import { themeTemplates } from 'virtual:theme-templates';
 import { createContext } from '@/lib/context';
-import { prepareCategoryData } from '@/lib/page-data';
+import { prepareCategoryData, prepareNotFoundData } from '@/lib/page-data';
 
 const { slug } = Astro.params;
 if (!slug) return Astro.redirect('/');
@@ -9,12 +9,17 @@ if (!slug) return Astro.redirect('/');
 const ctx = await createContext(Astro.locals, Astro.request);
 const { options } = ctx;
 
-const result = await prepareCategoryData(ctx, slug, Astro.request.url, Astro.locals, Astro.url);
-if (result instanceof Response) return result;
-
 const activeTheme = options.theme || 'typecho-theme-minimal';
 const templates = themeTemplates[activeTheme] ?? {};
 const defaultTemplates = themeTemplates['typecho-theme-minimal']!;
-const ArchiveComponent = templates.Archive ?? defaultTemplates.Archive!;
+let Component = templates.Archive ?? defaultTemplates.Archive!;
+
+let result = await prepareCategoryData(ctx, slug, Astro.request.url, Astro.locals, Astro.url);
+if (result instanceof Response) {
+  if (result.status !== 404) return result;
+  Astro.response.status = 404;
+  result = await prepareNotFoundData(ctx, Astro.request.url);
+  Component = templates.NotFound ?? defaultTemplates.NotFound!;
+}
 ---
-<ArchiveComponent {...result} />
+<Component {...result} />

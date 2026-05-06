@@ -12,27 +12,43 @@
     "routePath": {
       "type": "text",
       "label": "入口路由路径",
-      "default": "/dav",
-      "description": "WebDAV 入口路径，例如 /dav。保存后通过该路径访问挂载的存储。"
+      "default": "/webdav",
+      "description": "WebDAV 入口路径，例如 /webdav。保存后通过该路径访问挂载的存储。"
     },
-    "requiredGroup": {
+    "failBanEnabled": {
       "type": "select",
-      "label": "访问权限",
-      "default": "contributor",
+      "label": "登录失败封禁",
+      "default": "true",
       "options": {
-        "administrator": "管理员及以上",
-        "editor": "编辑及以上",
-        "contributor": "贡献者及以上",
-        "subscriber": "关注者及以上"
+        "true": "启用",
+        "false": "禁用"
       },
-      "description": "WebDAV 使用 Basic Auth，用户名和密码与当前站点用户一致。"
+      "description": "启用后按客户端 IP 统计 WebDAV Basic Auth 失败次数。"
+    },
+    "failBanMaxFailures": {
+      "type": "text",
+      "label": "失败次数阈值",
+      "default": "5",
+      "description": "在统计窗口内达到该失败次数后封禁 IP。"
+    },
+    "failBanWindowSeconds": {
+      "type": "text",
+      "label": "统计窗口秒数",
+      "default": "300",
+      "description": "只统计该时间窗口内的连续失败。"
+    },
+    "failBanSeconds": {
+      "type": "text",
+      "label": "封禁秒数",
+      "default": "900",
+      "description": "触发阈值后的封禁持续时间。"
     },
     "mounts": {
       "type": "repeatable",
       "label": "后端存储挂载",
       "default": [
         {
-          "mount": "media",
+          "mount": "",
           "provider": "r2",
           "bindingName": "BUCKET",
           "prefix": "",
@@ -44,13 +60,13 @@
           "pathStyle": "true"
         }
       ],
-      "description": "每个挂载会作为入口根目录下的一级目录；provider 支持 s3 或 r2。prefix 可用于限制到桶内子目录。",
+      "description": "每个挂载会作为入口根目录下的一级目录；挂载目录留空或填写 / 时会直接挂载入口根目录，且不能与其他挂载共存。prefix 可用于限制到桶内子目录。",
       "itemFields": {
         "mount": {
           "type": "text",
           "label": "挂载目录",
-          "default": "media",
-          "description": "入口根目录下的一级目录名，例如 /dav/media。"
+          "default": "",
+          "description": "入口根目录下的一级目录名，例如 /webdav/media；留空或填写 / 表示挂载到 /webdav 根目录。"
         },
         "provider": {
           "type": "select",

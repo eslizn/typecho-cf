@@ -1,7 +1,7 @@
 ---
 import { themeTemplates } from 'virtual:theme-templates';
 import { createContext } from '@/lib/context';
-import { preparePageData, preparePostData } from '@/lib/page-data';
+import { prepareNotFoundData, preparePageData, preparePostData } from '@/lib/page-data';
 import { buildPermalink, getRedirectPathIfDifferent } from '@/lib/content';
 
 const { cid } = Astro.params;
@@ -20,14 +20,19 @@ const contentRow = await db.query.contents.findFirst({
   where: eq(schema.contents.cid, cidNum),
 });
 
-if (!contentRow) return new Response('Not Found', { status: 404 });
-
 const suppliedPassword = Astro.url.searchParams.get('password');
 let result;
 let Component;
+const activeTheme = options.theme || 'typecho-theme-minimal';
+const templates = themeTemplates[activeTheme] ?? {};
+const defaultTemplates = themeTemplates['typecho-theme-minimal']!;
 
 // If it's a page, redirect to its configured page route unless that route is this URL.
-if (contentRow.type === 'page') {
+if (!contentRow) {
+  Astro.response.status = 404;
+  result = await prepareNotFoundData(ctx, Astro.request.url);
+  Component = templates.NotFound ?? defaultTemplates.NotFound!;
+} else if (contentRow.type === 'page') {
   const pageUrl = buildPermalink(
     { cid: contentRow.cid, slug: contentRow.slug, type: contentRow.type, created: contentRow.created },
     ctx.urls.siteUrl,
@@ -38,20 +43,24 @@ if (contentRow.type === 'page') {
   if (redirectPath) return Astro.redirect(redirectPath);
 
   result = await preparePageData(ctx, contentRow.slug || String(contentRow.cid), Astro.request.url, suppliedPassword);
-  if (result instanceof Response) return result;
-
-  const activeTheme = options.theme || 'typecho-theme-minimal';
-  const templates = themeTemplates[activeTheme] ?? {};
-  const defaultTemplates = themeTemplates['typecho-theme-minimal']!;
-  Component = templates.Page ?? defaultTemplates.Page!;
+  if (result instanceof Response) {
+    if (result.status !== 404) return result;
+    Astro.response.status = 404;
+    result = await prepareNotFoundData(ctx, Astro.request.url);
+    Component = templates.NotFound ?? defaultTemplates.NotFound!;
+  } else {
+    Component = templates.Page ?? defaultTemplates.Page!;
+  }
 } else {
   result = await preparePostData(ctx, cidNum, Astro.request.url, suppliedPassword);
-  if (result instanceof Response) return result;
-
-  const activeTheme = options.theme || 'typecho-theme-minimal';
-  const templates = themeTemplates[activeTheme] ?? {};
-  const defaultTemplates = themeTemplates['typecho-theme-minimal']!;
-  Component = templates.Post ?? defaultTemplates.Post!;
+  if (result instanceof Response) {
+    if (result.status !== 404) return result;
+    Astro.response.status = 404;
+    result = await prepareNotFoundData(ctx, Astro.request.url);
+    Component = templates.NotFound ?? defaultTemplates.NotFound!;
+  } else {
+    Component = templates.Post ?? defaultTemplates.Post!;
+  }
 }
 ---
 <Component {...result} />

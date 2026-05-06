@@ -12,10 +12,10 @@
 typecho-plugin-example/
 ├── package.json     # npm 包声明（keywords 必须包含 typecho + plugin）
 ├── plugin.json      # 插件元数据（含可选配置声明）
-└── index.js         # 入口文件（ESM，export default init 函数）
+└── index.ts         # 入口文件（ESM，export default init 函数）
 ```
 
-> 使用 TypeScript 时入口可为 `index.ts`，发布前编译成 `.js`。本地开发直接用 `.js` 可省去编译步骤。
+> 插件加载器优先发现 `index.ts`，然后才回退到 `index.js` / `index.mjs` / `plugin.ts` / `plugin.js`。本仓库内置插件统一使用 TypeScript；发布为独立 npm 包时，可将 TS 编译为 JS 并在 `plugin.json` 的 `entry` 中指向编译产物。
 
 ---
 
@@ -30,14 +30,14 @@ typecho-plugin-example/
   "author": "Your Name",
   "license": "MIT",
   "type": "module",
-  "main": "index.js"
+  "main": "index.ts"
 }
 ```
 
 **关键约束**：
 - `keywords` 必须同时包含 `"typecho"` 和 `"plugin"`，否则构建时不会被发现
 - `"type": "module"` — 使用 ESM（`export default`，不用 `module.exports`）
-- `main` 指向编译后的入口文件
+- `main` 指向入口文件；本仓库本地插件使用 `index.ts`
 
 ---
 
@@ -81,21 +81,23 @@ typecho-plugin-example/
 
 ---
 
-## index.js 入口
+## index.ts 入口
 
-```javascript
+```ts
 /**
  * 插件入口函数，由系统在构建时调用。
  * 所有 Hook 注册通过 addHook 完成，此处不要执行 I/O。
  */
-export default function init({ addHook, pluginId }) {
+import type { PluginInitContext } from '@/lib/plugin';
+
+export default function init({ addHook, pluginId }: PluginInitContext): void {
   // filter 钩子：修改数据并返回
-  addHook('content:content', pluginId, (html) => {
+  addHook('content:content', pluginId, (html: string) => {
     return html + '<!-- powered by example plugin -->';
   });
 
   // call 钩子：执行副作用，不需要返回值
-  addHook('feedback:finishComment', pluginId, (comment) => {
+  addHook('feedback:finishComment', pluginId, (comment: { coid?: number }) => {
     console.log('新评论：', comment.coid);
   });
 }
@@ -114,16 +116,16 @@ export default function init({ addHook, pluginId }) {
 
 在 filter/call 处理函数中，从传入的 `extra.options` 读取配置：
 
-```javascript
+```ts
 // 主项目内的插件可 import loadPluginConfig from '@/lib/plugin'
 // 独立 npm 插件自行解析（参考 captcha 示例）
 
-addHook('feedback:comment', pluginId, async (commentData, extra) => {
+addHook('feedback:comment', pluginId, async (commentData: { _rejected?: string }, extra?: { options?: Record<string, unknown> }) => {
   if (!extra?.options) return commentData;
 
   // 读取本插件配置（已与 plugin.json 默认值合并）
   const raw = extra.options[`plugin:${pluginId}`];
-  const config = raw ? JSON.parse(raw) : {};
+  const config = typeof raw === 'string' ? JSON.parse(raw) : {};
 
   if (!config.apiKey) return commentData;  // 未配置，跳过
 
@@ -180,6 +182,9 @@ addHook('feedback:comment', pluginId, async (commentData, extra) => {
 | `feedback:comment` | 评论保存前 | `(commentData, extra)` | 验证/修改评论，设置 `_rejected` 可拒绝 |
 | `feed:item` | RSS/Atom 生成 | `(item, post)` | 过滤 feed 条目 |
 | `widget:sidebar` | 侧边栏渲染 | `(sidebarData, context)` | 过滤侧边栏数据 |
+| `plugin:config:beforeSave` | 插件配置保存前 | `(result, extra)` | 校验或规范化插件配置，返回 `{ success, settings?, error? }` |
+
+`applyFilter` 默认会传播插件异常。业务链路（保存内容、评论、登录、插件配置等）会因此中止并暴露错误。纯展示注入点可由系统使用 `applyFilterSafely` 包裹，单个插件失败时跳过该插件输出并继续渲染。
 
 ---
 
@@ -187,7 +192,7 @@ addHook('feedback:comment', pluginId, async (commentData, extra) => {
 
 在 `feedback:comment` filter 中，设置 `commentData._rejected` 可拒绝评论：
 
-```javascript
+```ts
 addHook('feedback:comment', pluginId, async (commentData, extra) => {
   if (spamDetected) {
     commentData._rejected = '检测到垃圾评论';  // 非空字符串 = 拒绝，返回 403
@@ -202,18 +207,20 @@ addHook('feedback:comment', pluginId, async (commentData, extra) => {
 
 插件可通过 `archive:header` 和 `archive:footer` filter 自动向前端页面注入 HTML/JS，无需主题手动适配：
 
-```javascript
-// index.js
-export default function init({ addHook, pluginId }) {
+```ts
+// index.ts
+import type { PluginInitContext } from '@/lib/plugin';
+
+export default function init({ addHook, pluginId }: PluginInitContext): void {
   // 注入 <head> 内容（如 SDK 脚本）
-  addHook('archive:header', pluginId, (headHtml, extra) => {
+  addHook('archive:header', pluginId, (headHtml: string, extra?: { options?: Record<string, unknown> }) => {
     const config = getPluginConfig(extra?.options);
     if (!config.sitekey) return headHtml;
     return headHtml + '<script src="..."></script>';
   });
 
   // 注入 </body> 前内容（如交互脚本）
-  addHook('archive:footer', pluginId, (bodyHtml, extra) => {
+  addHook('archive:footer', pluginId, (bodyHtml: string, extra?: { options?: Record<string, unknown> }) => {
     const config = getPluginConfig(extra?.options);
     if (!config.sitekey) return bodyHtml;
     return bodyHtml + '<script>/* ... */</script>';
@@ -230,7 +237,7 @@ export default function init({ addHook, pluginId }) {
 ### 本地开发（工作区包）
 
 1. 将插件目录放在 `src/plugins/` 下
-2. 在根 `package.json` 的 `workspaces` 中添加路径（如已有 `src/plugins/*` 则自动包含）
+2. 在根 `package.json` 的 `dependencies` 中添加 `"<packageName>": "file:src/plugins/<packageName>"`
 3. 运行 `pnpm install`
 4. 重新执行 `pnpm run build`
 

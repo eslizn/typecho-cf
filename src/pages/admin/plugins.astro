@@ -238,14 +238,16 @@ const pluginCount = getPluginCount();
 {'}'}
 
 // index.ts 示例:
-export default function ({'{'} addHook, HookPoints, pluginId {'}'}) {'{'
+import type {'{'} PluginInitContext {'}'} from '@/lib/plugin';
+
+export default function init({'{'} addHook, pluginId {'}'}: PluginInitContext): void {'{'
 }  // 注册内容过滤 hook
-  addHook('content:content', pluginId, (html) =&gt; {'{'
+  addHook('content:content', pluginId, (html: string) =&gt; {'{'
 }    return html + '&lt;!-- powered by my plugin --&gt;';
   {'}'});
   
   // 注册评论提交 hook  
-  addHook('feedback:finishComment', pluginId, (comment) =&gt; {'{'
+  addHook('feedback:finishComment', pluginId, (comment: {'{'} author?: string {'}'}) =&gt; {'{'
 }    console.log('New comment from:', comment.author);
   {'}'});
 {'}'}</code></pre>
@@ -288,6 +290,7 @@ export default function ({'{'} addHook, HookPoints, pluginId {'}'}) {'{'
             <tr><td><code>upload:upload</code></td><td>call</td><td>文件上传后</td></tr>
             <tr><td><code>feed:item</code></td><td>filter</td><td>过滤 RSS/Atom 项</td></tr>
             <tr><td><code>widget:sidebar</code></td><td>filter</td><td>过滤侧边栏数据</td></tr>
+            <tr><td><code>plugin:config:beforeSave</code></td><td>filter</td><td>插件配置保存前校验或规范化</td></tr>
           </tbody>
         </table>
       </div>

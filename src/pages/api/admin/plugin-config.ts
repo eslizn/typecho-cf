@@ -6,8 +6,11 @@
 import type { APIRoute } from 'astro';
 import { setOption } from '@/lib/options';
 import { isAdminActionResponse, requireAdminAction } from '@/lib/admin-auth';
-import { getPlugin, pluginHasConfig, isPluginActive, loadPluginConfig, getPluginConfigDefaults } from '@/lib/plugin';
+import { applyFilter, getPlugin, pluginHasConfig, isPluginActive, loadPluginConfig, getPluginConfigDefaults } from '@/lib/plugin';
 import { bumpCacheVersion, purgeSiteCache } from '@/lib/cache';
+import { withTimeout } from '@/lib/timeout';
+
+const PLUGIN_CONFIG_TIMEOUT_MS = 5_000;
 
 export const GET: APIRoute = async ({ request, url }) => {
   const auth = await requireAdminAction(request, 'administrator', { csrf: false });
@@ -50,11 +53,19 @@ export const POST: APIRoute = async ({ request }) => {
     });
   }
 
+  let body: { plugin?: string; settings?: Record<string, unknown> };
   try {
-    const body = await request.json() as { plugin?: string; settings?: Record<string, unknown> };
+    body = await request.json() as { plugin?: string; settings?: Record<string, unknown> };
+  } catch {
+    return new Response(JSON.stringify({ error: '请求格式错误' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  try {
     const pluginId = body.plugin;
     const settings = body.settings;
-
     if (!pluginId || typeof pluginId !== 'string') {
       return new Response(JSON.stringify({ error: '请指定插件标识' }), {
         status: 400,
@@ -97,7 +108,31 @@ export const POST: APIRoute = async ({ request }) => {
       }
     }
 
-    await setOption(auth.db, `plugin:${pluginId}`, JSON.stringify(sanitized));
+    const validation = await withTimeout(
+      applyFilter('plugin:config:beforeSave', {
+        success: true,
+        settings: sanitized,
+      }, {
+        pluginId,
+        settings: sanitized,
+        db: auth.db,
+        options: auth.options,
+        user: auth.user,
+        request,
+      }),
+      PLUGIN_CONFIG_TIMEOUT_MS,
+      '插件配置校验超时，请稍后重试',
+    );
+
+    if (!validation?.success) {
+      return new Response(JSON.stringify({ error: validation?.error || '插件配置校验失败' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    const finalSettings = validation.settings || sanitized;
+    await setOption(auth.db, `plugin:${pluginId}`, JSON.stringify(finalSettings));
 
     // Purge cached options so subsequent requests read the updated config
     await bumpCacheVersion(auth.db);
@@ -107,13 +142,13 @@ export const POST: APIRoute = async ({ request }) => {
       success: true,
       message: '插件设置已经保存',
       plugin: pluginId,
-      settings: sanitized,
+      settings: finalSettings,
     }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });
   } catch (err) {
-    return new Response(JSON.stringify({ error: '请求格式错误' }), {
+    return new Response(JSON.stringify({ error: err instanceof Error ? err.message : '插件配置保存失败' }), {
       status: 400,
       headers: { 'Content-Type': 'application/json' },
     });

@@ -5,6 +5,7 @@ import { hasPermission } from '@/lib/auth';
 import { eq, and } from 'drizzle-orm';
 import { schema } from '@/db';
 import { buildPermalink } from '@/lib/content';
+import { applyFilterSafely } from '@/lib/plugin';
 
 const ctx = await createContext(Astro.locals, Astro.request);
 const authCheck = requireAuth(ctx);
@@ -60,6 +61,7 @@ const isMarkdown = !post || (post.text && post.text.indexOf('<!--markdown-->') >
 
 // Build preview URL using permalink pattern
 const previewUrl = isEdit && post ? buildPermalink(post, urls.siteUrl, options.permalinkPattern) : '';
+const writePostBottomHtml = await applyFilterSafely('admin:writePost:bottom', '', { options, post, user, isEdit });
 
 // Fetch existing attachments for this post
 let attachments: any[] = [];
@@ -114,6 +116,8 @@ if (isEdit && post) {
         <textarea style={`height: ${options.editorSize || 350}px`} autocomplete="off"
           id="text" name="text" class="w-100 mono">{post?.text ? post.text.replace(/^<!--markdown-->/, '') : ''}</textarea>
       </p>
+
+      {writePostBottomHtml && <Fragment set:html={writePostBottomHtml} />}
 
       <p class="submit clearfix">
         <span class="left">

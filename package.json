@@ -25,6 +25,7 @@
     "drizzle-orm": "^0.45.2",
     "marked": "^18.0.3",
     "sanitize-html": "^2.17.3",
+    "typecho-plugin-ai-writer": "file:src/plugins/typecho-plugin-ai-writer",
     "typecho-plugin-captcha": "file:src/plugins/typecho-plugin-captcha",
     "typecho-plugin-turnstile": "file:src/plugins/typecho-plugin-turnstile",
     "typecho-theme-minimal": "file:src/themes/typecho-theme-minimal"
@@ -38,7 +39,7 @@
     "tsx": "^4.21.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.5",
-    "wrangler": "^4.87.0"
+    "wrangler": "^4.88.0"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

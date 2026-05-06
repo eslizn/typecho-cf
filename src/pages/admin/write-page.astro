@@ -5,6 +5,7 @@ import { hasPermission } from '@/lib/auth';
 import { eq, and } from 'drizzle-orm';
 import { schema } from '@/db';
 import { buildPermalink } from '@/lib/content';
+import { applyFilterSafely } from '@/lib/plugin';
 
 const ctx = await createContext(Astro.locals, Astro.request);
 const authCheck = requireAuth(ctx);
@@ -41,6 +42,7 @@ const isMarkdown = !page || (page.text && page.text.indexOf('<!--markdown-->') >
 
 // Build preview URL
 const previewUrl = isEdit && page ? buildPermalink(page, urls.siteUrl, options.permalinkPattern, options.pagePattern) : '';
+const writePageBottomHtml = await applyFilterSafely('admin:writePage:bottom', '', { options, page, user, isEdit });
 
 // Fetch existing attachments for this page
 let attachments: any[] = [];
@@ -95,6 +97,8 @@ if (isEdit && page) {
         <textarea style={`height: ${options.editorSize || 350}px`} autocomplete="off"
           id="text" name="text" class="w-100 mono">{page?.text ? page.text.replace(/^<!--markdown-->/, '') : ''}</textarea>
       </p>
+
+      {writePageBottomHtml && <Fragment set:html={writePageBottomHtml} />}
 
       <p class="submit clearfix">
         <span class="left">

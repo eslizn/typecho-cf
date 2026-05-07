@@ -151,6 +151,10 @@ const focusGroupIdx = visibleGroups.findIndex(g => g.children.some(c => c.active
           }
         });
 
+        $('.main').on('click', '.typecho-notice-close', function () {
+          $(this).closest('.typecho-dismissible').remove();
+        });
+
         $('#typecho-nav-list ul.root').each(function () {
           const ul = $(this), nav = ul.parent();
           let focused = false;

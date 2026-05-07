@@ -1,5 +1,6 @@
 ---
 import { createContext } from '@/lib/context';
+import { LOGIN_ERROR_FLASH_COOKIE, clearFlashCookieHeader, getFlashCookieValue } from '@/lib/flash';
 import { applyFilterSafely } from '@/lib/plugin';
 
 let options: any = { title: 'Blog', charset: 'UTF-8', lang: 'zh_CN', description: '' };
@@ -19,7 +20,10 @@ try {
   return Astro.redirect('/install');
 }
 
-const error = Astro.url.searchParams.get('error') || '';
+const error = getFlashCookieValue(Astro.request.headers.get('cookie'), LOGIN_ERROR_FLASH_COOKIE);
+if (error) {
+  Astro.response.headers.append('Set-Cookie', clearFlashCookieHeader(LOGIN_ERROR_FLASH_COOKIE, { path: '/admin/login' }));
+}
 
 const [loginHeadHtml, loginFormHtml] = await Promise.all([
   applyFilterSafely('admin:loginHead', '', { options }),
@@ -43,7 +47,12 @@ const [loginHeadHtml, loginFormHtml] = await Promise.all([
   <div class="typecho-login-wrap">
     <div class="typecho-login">
       <h1>{options.title}</h1>
-      {error && <p class="message error">{error}</p>}
+      {error && (
+        <p class="message error typecho-dismissible">
+          {error}
+          <button type="button" class="typecho-notice-close" aria-label="关闭提示">&times;</button>
+        </p>
+      )}
       <form action="/api/users/login" method="post" name="login" id="login-form" role="form">
         <p>
           <label for="name" class="sr-only">用户名</label>
@@ -69,5 +78,15 @@ const [loginHeadHtml, loginFormHtml] = await Promise.all([
       </p>
     </div>
   </div>
+  <script is:inline>
+    document.addEventListener('click', function (event) {
+      var target = event.target;
+      if (!(target instanceof HTMLElement) || !target.classList.contains('typecho-notice-close')) return;
+      var notice = target.closest('.typecho-dismissible');
+      if (notice && notice.parentNode) {
+        notice.parentNode.removeChild(notice);
+      }
+    });
+  </script>
 </body>
 </html>

@@ -793,7 +793,7 @@ function editorHtml(contentType: ContentType): string {
 
     var notice = document.createElement('div');
     var isError = type === 'error';
-    notice.className = 'typecho-ai-writer-notice typecho-option-tabs notice ' + (isError ? 'notice-error' : 'notice-success');
+    notice.className = 'typecho-ai-writer-notice typecho-option-tabs notice typecho-dismissible ' + (isError ? 'notice-error' : 'notice-success');
     notice.style.padding = '10px 15px';
     notice.style.marginBottom = '20px';
     notice.style.borderRadius = '3px';
@@ -805,6 +805,13 @@ function editorHtml(contentType: ContentType): string {
     paragraph.textContent = message || 'AI 写作失败';
     paragraph.style.margin = '0';
     notice.appendChild(paragraph);
+
+    var closeButton = document.createElement('button');
+    closeButton.type = 'button';
+    closeButton.className = 'typecho-notice-close';
+    closeButton.setAttribute('aria-label', '关闭提示');
+    closeButton.innerHTML = '&times;';
+    notice.appendChild(closeButton);
 
     var main = document.querySelector('.typecho-page-main');
     if (main) {

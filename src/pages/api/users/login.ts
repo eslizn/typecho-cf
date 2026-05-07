@@ -2,9 +2,19 @@ import type { APIRoute } from 'astro';
 import { getDb, schema } from '@/db';
 import { loadOptions } from '@/lib/options';
 import { verifyPassword, generateAuthToken, setAuthCookieHeaders, generateRandomString } from '@/lib/auth';
+import { LOGIN_ERROR_FLASH_COOKIE, createFlashRedirectHeaders } from '@/lib/flash';
 import { applyFilter, setActivatedPlugins, parseActivatedPlugins } from '@/lib/plugin';
 import { eq } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
+
+const LOGIN_URL = '/admin/login';
+
+function redirectWithLoginError(message: string): Response {
+  return new Response(null, {
+    status: 302,
+    headers: createFlashRedirectHeaders(LOGIN_URL, LOGIN_ERROR_FLASH_COOKIE, message, LOGIN_URL),
+  });
+}
 
 export const POST: APIRoute = async ({ request, locals, redirect }) => {
   const db = getDb(env.DB);
@@ -23,25 +33,16 @@ export const POST: APIRoute = async ({ request, locals, redirect }) => {
   const remember = formData.get('remember')?.toString() === '1';
 
   if (!name) {
-    return new Response(null, {
-      status: 302,
-      headers: { Location: '/admin/login?error=' + encodeURIComponent('请输入用户名') },
-    });
+    return redirectWithLoginError('请输入用户名');
   }
 
   if (!password) {
-    return new Response(null, {
-      status: 302,
-      headers: { Location: '/admin/login?error=' + encodeURIComponent('请输入密码') },
-    });
+    return redirectWithLoginError('请输入密码');
   }
 
   const loginContext = await applyFilter('user:login', {}, { request, formData, options });
   if (loginContext._rejected) {
-    return new Response(null, {
-      status: 302,
-      headers: { Location: '/admin/login?error=' + encodeURIComponent(loginContext._rejected) },
-    });
+    return redirectWithLoginError(String(loginContext._rejected));
   }
 
   // Find user by name
@@ -50,25 +51,16 @@ export const POST: APIRoute = async ({ request, locals, redirect }) => {
   });
 
   if (!user) {
-    return new Response(null, {
-      status: 302,
-      headers: { Location: '/admin/login?error=' + encodeURIComponent('用户名或密码无效') },
-    });
+    return redirectWithLoginError('用户名或密码无效');
   }
 
   // Verify password
   const valid = await verifyPassword(password, user.password || '');
   if (valid === 'needs_reset') {
-    return new Response(null, {
-      status: 302,
-      headers: { Location: '/admin/login?error=' + encodeURIComponent('密码格式已升级，请使用忘记密码功能重置密码') },
-    });
+    return redirectWithLoginError('密码格式已升级，请使用忘记密码功能重置密码');
   }
   if (valid !== true) {
-    return new Response(null, {
-      status: 302,
-      headers: { Location: '/admin/login?error=' + encodeURIComponent('用户名或密码无效') },
-    });
+    return redirectWithLoginError('用户名或密码无效');
   }
 
   // Update authCode

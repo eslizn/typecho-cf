@@ -58,9 +58,10 @@ const themeCount = getThemeCount();
 <Admin title="外观" options={options} urls={urls} user={user} activeMenu="themes">
   <div class="col-mb-12" role="main">
     {message && (
-      <div class={`typecho-option-tabs notice ${messageType === 'error' ? 'notice-error' : 'notice-success'}`}
+      <div class={`typecho-option-tabs notice typecho-dismissible ${messageType === 'error' ? 'notice-error' : 'notice-success'}`}
         style={`padding: 10px 15px; margin-bottom: 20px; border-radius: 3px; ${messageType === 'error' ? 'background: #ffeaea; color: #c33;' : 'background: #e7f5e7; color: #3a3;'}`}>
         <p>{message}</p>
+        <button type="button" class="typecho-notice-close" aria-label="关闭提示">&times;</button>
       </div>
     )}
 

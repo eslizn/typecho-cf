@@ -112,6 +112,14 @@ select { border: 1px solid #CCC; height: 28px; }
 /** 提示信息框 */
 .message { padding: 8px 10px; border-radius: 2px; }
 
+.typecho-dismissible { position: relative; padding-right: 42px !important; }
+
+.typecho-dismissible p { margin: 0; }
+
+.typecho-notice-close { position: absolute; top: 50%; right: 10px; margin: 0; border: none; padding: 0; width: 24px; height: 24px; line-height: 24px; background: transparent; color: inherit; cursor: pointer; font-size: 18px; text-align: center; transform: translateY(-50%); opacity: .7; }
+
+.typecho-notice-close:hover, .typecho-notice-close:focus { opacity: 1; text-decoration: none; }
+
 .message a { font-weight: bold; text-decoration: underline; }
 
 .error { background: #FBE3E4; color: #8A1F11; }

@@ -38,9 +38,52 @@ describe('typecho-plugin-turnstile', () => {
     }));
 
     expect(snippet.headHtml).toContain('https://challenges.cloudflare.com/turnstile/v0/api.js');
-    expect(snippet.bodyHtml).toContain('cf-turnstile');
+    expect(snippet.headHtml).not.toContain('render=explicit');
+    expect(snippet.headHtml).toContain('__typechoTurnstileSubmit');
+    expect(snippet.headHtml).toContain('__typechoTurnstileSetStatus');
+    expect(snippet.headHtml).toContain('.typecho-turnstile-status:empty');
+    expect(snippet.headHtml).toContain('message ');
+    expect(snippet.bodyHtml).toContain('cf-turnstile typecho-turnstile-widget');
+    expect(snippet.bodyHtml).toContain('typecho-turnstile-status');
     expect(snippet.bodyHtml).toContain('site-key');
     expect(snippet.bodyHtml).toContain('interaction-only');
+    expect(snippet.bodyHtml).toContain('data-response-field="true"');
+    expect(snippet.bodyHtml).toContain('data-response-field-name="cf-token"');
+    expect(snippet.bodyHtml).toContain('cf-token');
+  });
+
+  it('executes interaction-only widgets on submit so login cannot post without a token', () => {
+    const snippet = getClientSnippet(options({
+      sitekey: 'site-key',
+      appearance: 'interaction-only',
+    }));
+
+    expect(snippet.bodyHtml).toContain('data-appearance="interaction-only"');
+    expect(snippet.bodyHtml).toContain('data-execution="execute"');
+    expect(snippet.bodyHtml).toContain('data-callback="__typechoTurnstileSubmit"');
+    expect(snippet.bodyHtml).toContain('data-error-callback="__typechoTurnstileResetPending"');
+    expect(snippet.bodyHtml).toContain('form.addEventListener("submit"');
+    expect(snippet.bodyHtml).toContain('正在加载人机验证，请稍候...');
+    expect(snippet.bodyHtml).toContain('请完成人机验证');
+    expect(snippet.bodyHtml).toContain('人机验证加载超时，请检查网络后重试');
+    expect(snippet.bodyHtml).toContain('turnstile.execute("#" + containerId)');
+    expect(snippet.bodyHtml).not.toContain('turnstile.reset');
+  });
+
+  it('uses managed rendering and only intercepts submit for execution mode', () => {
+    const snippet = getClientSnippet(options({
+      sitekey: 'site-key',
+      appearance: 'execute',
+    }));
+
+    expect(snippet.bodyHtml).toContain('data-appearance="execute"');
+    expect(snippet.bodyHtml).toContain('data-execution="execute"');
+    expect(snippet.bodyHtml).toContain('data-timeout-callback="__typechoTurnstileResetPending"');
+    expect(snippet.bodyHtml).toContain('form.addEventListener("submit"');
+    expect(snippet.bodyHtml).toContain('turnstile.execute("#" + containerId)');
+    expect(snippet.bodyHtml).toContain('typecho-turnstile-comment-form');
+    expect(snippet.bodyHtml).toContain('timer: setTimeout(resetPending, 15000)');
+    expect(snippet.bodyHtml).not.toContain('container.hidden = true');
   });
 
   it('registers comment, login, and snippet hooks', () => {

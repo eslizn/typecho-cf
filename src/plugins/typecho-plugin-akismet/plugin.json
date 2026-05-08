@@ -1,0 +1,47 @@
+{
+  "id": "typecho-plugin-akismet",
+  "name": "Akismet",
+  "description": "通过 Akismet API 自动检测和过滤垃圾评论",
+  "author": "eslizn",
+  "authorUrl": "https://eslizn.com",
+  "version": "1.0.0",
+  "homepage": "https://github.com/eslizn/typecho-cf/tree/master/src/plugins/typecho-plugin-akismet",
+  "license": "MIT",
+  "tags": ["akismet", "antispam", "spam"],
+  "config": {
+    "apiKey": {
+      "type": "text",
+      "label": "API Key",
+      "default": "",
+      "description": "Akismet API Key，<a href=\"//akismet.com\" target=\"_blank\">点击申请</a>"
+    },
+    "siteUrl": {
+      "type": "text",
+      "label": "站点地址",
+      "default": "",
+      "description": "发送给 Akismet 的站点首页地址，留空则自动使用系统站点地址"
+    },
+    "mode": {
+      "type": "select",
+      "label": "拦截模式",
+      "default": "spam",
+      "options": {
+        "spam": "标记为垃圾评论",
+        "reject": "直接拒绝评论"
+      },
+      "description": "检测到垃圾评论时的处理方式：标记为垃圾评论（静默）或直接拒绝"
+    },
+    "isTest": {
+      "type": "checkbox",
+      "label": "测试模式",
+      "default": "0",
+      "description": "启用后 Akismet 不会记录评论，仅返回检测结果"
+    },
+    "checkLoggedIn": {
+      "type": "checkbox",
+      "label": "检测登录用户",
+      "default": "0",
+      "description": "是否对已登录用户的评论也进行垃圾检测"
+    }
+  }
+}

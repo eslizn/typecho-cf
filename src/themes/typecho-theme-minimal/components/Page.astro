@@ -34,6 +34,7 @@ const totalComments = countAll(comments);
   urls={urls}
   user={user}
   isLoggedIn={isLoggedIn}
+  pageContext={{ hasComments: commentOptions.allowComment, pageType: 'page' }}
 >
   <header id="header" class="clearfix">
     <div class="container">

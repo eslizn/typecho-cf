@@ -178,9 +178,13 @@ function isFieldVisible(field: PluginConfigField, row: Record<string, any>): boo
             );
           }
 
+          const isBoolCheckbox = field.type === 'checkbox' && !field.options;
+
           return (
             <li>
-              <label for={`cfg-${key}`} class="typecho-label">{field.label}</label>
+              {!isBoolCheckbox && (
+                <label for={`cfg-${key}`} class="typecho-label">{field.label}</label>
+              )}
 
               {field.type === 'text' && (
                 <p><input type="text" id={`cfg-${key}`} name={key} class="text w-100" value={String(value)} /></p>
@@ -218,6 +222,21 @@ function isFieldVisible(field: PluginConfigField, row: Record<string, any>): boo
                       <label for={`cfg-${key}-${optVal}`}>{optLabel}</label>
                     </span>
                   ))}
+                </p>
+              )}
+
+              {isBoolCheckbox && (
+                <p>
+                  <label for={`cfg-${key}`}>
+                    <input
+                      type="checkbox"
+                      id={`cfg-${key}`}
+                      name={key}
+                      value="1"
+                      checked={value === '1' || value === true}
+                    />
+                    {' '}{field.label}
+                  </label>
                 </p>
               )}
 

@@ -272,6 +272,71 @@ pnpm run build
 
 ---
 
+## 测试
+
+每个插件必须包含 `index.test.ts`，与 `index.ts` 同目录，使用 vitest。
+
+### 测试基础设施
+
+```ts
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import init from './index';
+
+// 通过 mock PluginInitContext 收集注册的 hooks
+function collectHooks() {
+  const hooks = new Map<string, Function>();
+  init({
+    pluginId: 'typecho-plugin-<name>',
+    HookPoints: {} as any,
+    addHook: (point: string, _pluginId: string, handler: Function) => {
+      hooks.set(point, handler);
+    },
+  });
+  return hooks;
+}
+
+// 构造插件运行时读取的 options 对象
+function options(settings: Record<string, unknown>) {
+  return {
+    'plugin:typecho-plugin-<name>': JSON.stringify(settings),
+    // 可包含插件读取的站点级配置（如 siteUrl、secret）
+  };
+}
+```
+
+### 必备测试类别
+
+1. **Hook 注册** — 验证 `hooks.keys()` 与预期的 hook 集合一致
+2. **守卫分支** — 未配置时跳过、已登录时跳过、pageContext 跳过
+3. **正常路径** — 有效输入下各项功能正常工作
+4. **拒绝路径** — 各守卫/检查正确拒绝
+5. **模式分发** — 若插件支持多种模式（如 spam/waiting/discard），覆盖每种模式
+6. **边界情况** — 零值、空字符串、缺失 token、API 故障
+7. **外部 API mock** — 使用 `vi.stubGlobal('fetch', mock)`，在 `afterEach` 中调用 `vi.unstubAllGlobals()`
+8. **配置验证** — `plugin:config:beforeSave` 接受合法配置，拒绝非法配置，忽略其他插件
+
+### 文件命名
+
+- `index.test.ts` — 与 `index.ts` 同目录
+
+### 运行
+
+```sh
+npx vitest run src/plugins/<插件名>/index.test.ts
+```
+
+### 新插件检查清单
+
+- [ ] `index.test.ts` 存在
+- [ ] 所有注册的 hook 已验证
+- [ ] 每个检查分支至少有 1 个测试
+- [ ] 默认模式/spam 路径已覆盖
+- [ ] discard/reject 路径已覆盖（如适用）
+- [ ] 已登录用户跳过已测试
+- [ ] 缺少配置时跳过已测试
+- [ ] API 故障（mock）不会导致 handler 崩溃
+- [ ] `pageContext` 守卫已测试（针对 `archive:header`/`archive:footer` hook）
+
 ## 参考示例
 
 `typecho-plugin-captcha/` 目录演示了：

@@ -1,4 +1,5 @@
 import type { PluginInitContext } from '@/lib/plugin';
+import { parsePluginOption, escapeAttr, getClientIp } from '@/lib/plugin';
 
 interface CaptchaConfig {
   client: string;
@@ -37,21 +38,8 @@ const DEFAULTS: CaptchaConfig = {
   score: 0.5,
 };
 
-function readObject(value: unknown): Record<string, unknown> {
-  if (!value) return {};
-  if (typeof value === 'object') return value as Record<string, unknown>;
-  if (typeof value !== 'string') return {};
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : {};
-  } catch {
-    console.error('[captcha] Failed to parse plugin config');
-    return {};
-  }
-}
-
 function getPluginConfig(options?: Record<string, unknown>): CaptchaConfig {
-  const config = readObject(options?.['plugin:typecho-plugin-captcha']);
+  const config = parsePluginOption(options?.['plugin:typecho-plugin-captcha'], 'captcha');
   return {
     client: String(config.client || DEFAULTS.client),
     server: String(config.server || DEFAULTS.server),
@@ -89,14 +77,6 @@ async function verifyRecaptcha(
   } finally {
     clearTimeout(timer);
   }
-}
-
-function escapeAttr(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/"/g, '&quot;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
 }
 
 function buildClientSnippet(options?: Record<string, unknown>): { headHtml: string; bodyHtml: string } {
@@ -150,13 +130,6 @@ function buildClientSnippet(options?: Record<string, unknown>): { headHtml: stri
   return { headHtml, bodyHtml };
 }
 
-function getIp(request?: Request): string {
-  const cfIp = request?.headers.get('cf-connecting-ip');
-  if (cfIp) return cfIp.trim();
-  const xffRaw = request?.headers.get('x-forwarded-for');
-  return xffRaw ? (xffRaw.split(',')[0] ?? '').trim() : '';
-}
-
 export default function init({ addHook, pluginId }: PluginInitContext): void {
   addHook('feedback:comment', pluginId, async (commentData: CommentData, extra?: CommentExtra) => {
     if (!extra?.options) {
@@ -176,7 +149,7 @@ export default function init({ addHook, pluginId }: PluginInitContext): void {
     }
 
     try {
-      const result = await verifyRecaptcha(token, config.server, config.api, getIp(extra.request));
+      const result = await verifyRecaptcha(token, config.server, config.api, getClientIp(extra.request));
       if (!result.success || (typeof result.score === 'number' && result.score < config.score)) {
         commentData._rejected = '验证码验证失败';
       }
@@ -188,12 +161,14 @@ export default function init({ addHook, pluginId }: PluginInitContext): void {
     return commentData;
   });
 
-  addHook('archive:header', pluginId, (headHtml: string, extra?: { options?: Record<string, unknown> }) => {
+  addHook('archive:header', pluginId, (headHtml: string, extra?: { options?: Record<string, unknown>; pageContext?: { hasComments?: boolean } }) => {
+    if (!extra?.pageContext?.hasComments) return headHtml;
     const snippet = buildClientSnippet(extra?.options);
     return headHtml + snippet.headHtml;
   });
 
-  addHook('archive:footer', pluginId, (bodyHtml: string, extra?: { options?: Record<string, unknown> }) => {
+  addHook('archive:footer', pluginId, (bodyHtml: string, extra?: { options?: Record<string, unknown>; pageContext?: { hasComments?: boolean } }) => {
+    if (!extra?.pageContext?.hasComments) return bodyHtml;
     const snippet = buildClientSnippet(extra?.options);
     return bodyHtml + snippet.bodyHtml;
   });

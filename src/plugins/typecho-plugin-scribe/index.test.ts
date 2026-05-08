@@ -4,7 +4,7 @@ import init from './index';
 function collectHooks() {
   const hooks = new Map<string, Function[]>();
   init({
-    pluginId: 'typecho-plugin-ai-writer',
+    pluginId: 'typecho-plugin-scribe',
     HookPoints: {} as any,
     addHook: (point: string, _pluginId: string, handler: Function) => {
       const list = hooks.get(point) || [];
@@ -15,7 +15,7 @@ function collectHooks() {
   return hooks;
 }
 
-describe('typecho-plugin-ai-writer', () => {
+describe('typecho-plugin-scribe', () => {
   it('registers editor, config validation, and action hooks', () => {
     const hooks = collectHooks();
 
@@ -23,7 +23,7 @@ describe('typecho-plugin-ai-writer', () => {
       'admin:writePage:bottom',
       'admin:writePost:bottom',
       'plugin:config:beforeSave',
-      'plugin:typecho-plugin-ai-writer:action',
+      'plugin:typecho-plugin-scribe:action',
     ]);
   });
 
@@ -32,7 +32,7 @@ describe('typecho-plugin-ai-writer', () => {
     const postHtml = hooks.get('admin:writePost:bottom')![0]('');
     const pageHtml = hooks.get('admin:writePage:bottom')![0]('');
 
-    expect(postHtml).toContain('typecho-ai-writer');
+    expect(postHtml).toContain('typecho-scribe');
     expect(postHtml).toContain('data-content-type="post"');
     expect(pageHtml).toContain('data-content-type="page"');
   });
@@ -53,7 +53,7 @@ describe('typecho-plugin-ai-writer', () => {
     const validate = hooks.get('plugin:config:beforeSave')![0];
 
     const result = await validate({ success: true, settings: {} }, {
-      pluginId: 'typecho-plugin-ai-writer',
+      pluginId: 'typecho-plugin-scribe',
       settings: {
         endpoint: '',
         apiKey: '',
@@ -69,7 +69,7 @@ describe('typecho-plugin-ai-writer', () => {
 
   it('returns not handled for unsupported plugin actions', async () => {
     const hooks = collectHooks();
-    const action = hooks.get('plugin:typecho-plugin-ai-writer:action')![0];
+    const action = hooks.get('plugin:typecho-plugin-scribe:action')![0];
     const original = { handled: false };
 
     await expect(action(original, { action: 'unknown', payload: {} })).resolves.toBe(original);
@@ -77,13 +77,13 @@ describe('typecho-plugin-ai-writer', () => {
 
   it('handles generation action with a clear configuration error', async () => {
     const hooks = collectHooks();
-    const action = hooks.get('plugin:typecho-plugin-ai-writer:action')![0];
+    const action = hooks.get('plugin:typecho-plugin-scribe:action')![0];
 
     const result = await action({ handled: false }, {
       action: 'generate',
       payload: { contentType: 'post', title: 'Test' },
       options: {
-        'plugin:typecho-plugin-ai-writer': JSON.stringify({
+        'plugin:typecho-plugin-scribe': JSON.stringify({
           endpoint: 'https://llm.example/v1',
           apiKey: '',
           model: 'demo-model',

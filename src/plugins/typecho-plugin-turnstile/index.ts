@@ -1,4 +1,5 @@
 import type { PluginInitContext } from '@/lib/plugin';
+import { parsePluginOption, escapeAttr, getClientIp } from '@/lib/plugin';
 
 interface TurnstileConfig {
   sitekey: string;
@@ -35,21 +36,8 @@ const DEFAULTS: TurnstileConfig = {
   size: 'normal',
 };
 
-function readObject(value: unknown): Record<string, unknown> {
-  if (!value) return {};
-  if (typeof value === 'object') return value as Record<string, unknown>;
-  if (typeof value !== 'string') return {};
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : {};
-  } catch {
-    console.error('[turnstile] Failed to parse plugin config');
-    return {};
-  }
-}
-
 function getPluginConfig(options?: Record<string, unknown>): TurnstileConfig {
-  const config = readObject(options?.['plugin:typecho-plugin-turnstile']);
+  const config = parsePluginOption(options?.['plugin:typecho-plugin-turnstile'], 'turnstile');
   return {
     sitekey: String(config.sitekey || DEFAULTS.sitekey),
     secret: String(config.secret || DEFAULTS.secret),
@@ -239,21 +227,6 @@ function buildSnippet(options: Record<string, unknown> | undefined, formId: stri
   };
 }
 
-function escapeAttr(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/"/g, '&quot;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-}
-
-function getIp(request?: Request): string {
-  const cfIp = request?.headers.get('cf-connecting-ip');
-  if (cfIp) return cfIp.trim();
-  const xff = request?.headers.get('x-forwarded-for');
-  return xff ? (xff.split(',')[0] ?? '').trim() : '';
-}
-
 async function checkTurnstile(config: TurnstileConfig, extra: VerificationExtra): Promise<string | null> {
   if (!config.sitekey || !config.secret) {
     return null;
@@ -268,7 +241,7 @@ async function checkTurnstile(config: TurnstileConfig, extra: VerificationExtra)
   }
 
   try {
-    const result = await verifyTurnstile(token, config.secret, getIp(extra.request));
+    const result = await verifyTurnstile(token, config.secret, getClientIp(extra.request));
     return result.success ? null : '人机验证失败';
   } catch (err) {
     console.error('[turnstile] Verification API error:', err);
@@ -288,12 +261,14 @@ export default function init({ addHook, pluginId }: PluginInitContext): void {
     return commentData;
   });
 
-  addHook('archive:header', pluginId, (headHtml: string, extra?: { options?: Record<string, unknown> }) => {
+  addHook('archive:header', pluginId, (headHtml: string, extra?: { options?: Record<string, unknown>; pageContext?: { hasComments?: boolean } }) => {
+    if (!extra?.pageContext?.hasComments) return headHtml;
     const snippet = buildSnippet(extra?.options, 'comment-form');
     return headHtml + snippet.headHtml;
   });
 
-  addHook('archive:footer', pluginId, (bodyHtml: string, extra?: { options?: Record<string, unknown> }) => {
+  addHook('archive:footer', pluginId, (bodyHtml: string, extra?: { options?: Record<string, unknown>; pageContext?: { hasComments?: boolean } }) => {
+    if (!extra?.pageContext?.hasComments) return bodyHtml;
     const snippet = buildSnippet(extra?.options, 'comment-form');
     return bodyHtml + snippet.bodyHtml;
   });

@@ -1,11 +1,11 @@
 {
   "id": "typecho-plugin-webdav",
   "name": "WebDAV",
-  "description": "基于当前站点用户系统，通过 WebDAV 协议访问多个 S3/R2 后端存储挂载。",
+  "description": "通过 WebDAV 协议挂载和访问 S3/R2 存储后端，支持多挂载点",
   "author": "eslizn",
   "authorUrl": "https://eslizn.com",
   "version": "1.0.0",
-  "homepage": "https://github.com/eslizn/typecho-cf",
+  "homepage": "https://github.com/eslizn/typecho-cf/tree/master/src/plugins/typecho-plugin-webdav",
   "license": "MIT",
   "tags": ["webdav", "storage", "s3", "r2"],
   "config": {

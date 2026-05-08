@@ -272,6 +272,71 @@ pnpm run build
 
 ---
 
+## Testing
+
+Every plugin must include an `index.test.ts` alongside `index.ts` using vitest.
+
+### Test Infrastructure
+
+```ts
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import init from './index';
+
+// Collect registered hooks by mocking the PluginInitContext
+function collectHooks() {
+  const hooks = new Map<string, Function>();
+  init({
+    pluginId: 'typecho-plugin-<name>',
+    HookPoints: {} as any,
+    addHook: (point: string, _pluginId: string, handler: Function) => {
+      hooks.set(point, handler);
+    },
+  });
+  return hooks;
+}
+
+// Build the options bag shaped like what the plugin reads at runtime
+function options(settings: Record<string, unknown>) {
+  return {
+    'plugin:typecho-plugin-<name>': JSON.stringify(settings),
+    // Include any site-level options the plugin reads (e.g. siteUrl, secret)
+  };
+}
+```
+
+### Required Test Categories
+
+1. **Hook registration** — verify `hooks.keys()` matches the expected set
+2. **Guard clauses** — no config → skip, logged-in skip, pageContext skip
+3. **Happy path** — each feature works with valid input
+4. **Rejection path** — each guard/check rejects appropriately
+5. **Mode dispatch** — if the plugin supports multiple modes (e.g. spam/waiting/discard), each mode is covered
+6. **Edge cases** — zero values, empty strings, missing tokens, API failures
+7. **External API mocking** — use `vi.stubGlobal('fetch', mock)` and call `vi.unstubAllGlobals()` in `afterEach`
+8. **Config validation** — `plugin:config:beforeSave` accepts good config, rejects bad, ignores other plugins
+
+### File Naming
+
+- `index.test.ts` — in the same directory as `index.ts`
+
+### Running
+
+```sh
+npx vitest run src/plugins/<plugin-name>/index.test.ts
+```
+
+### Checklist for New Plugins
+
+- [ ] `index.test.ts` exists
+- [ ] All hooks registered are verified
+- [ ] Each check branch has at least one test
+- [ ] Default mode/spam path is covered
+- [ ] Discard/reject path is covered (if applicable)
+- [ ] Logged-in user skip is tested
+- [ ] Missing config skip is tested
+- [ ] API failure (mocked) does not crash the handler
+- [ ] `pageContext` guard is tested (for `archive:header`/`archive:footer` hooks)
+
 ## Reference Example
 
 `typecho-plugin-captcha/` demonstrates:

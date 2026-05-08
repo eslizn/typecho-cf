@@ -23,12 +23,18 @@ importers:
       sanitize-html:
         specifier: ^2.17.3
         version: 2.17.3
-      typecho-plugin-ai-writer:
-        specifier: file:src/plugins/typecho-plugin-ai-writer
-        version: file:src/plugins/typecho-plugin-ai-writer
+      typecho-plugin-akismet:
+        specifier: file:src/plugins/typecho-plugin-akismet
+        version: file:src/plugins/typecho-plugin-akismet
+      typecho-plugin-antispam:
+        specifier: file:src/plugins/typecho-plugin-antispam
+        version: file:src/plugins/typecho-plugin-antispam
       typecho-plugin-captcha:
         specifier: file:src/plugins/typecho-plugin-captcha
         version: file:src/plugins/typecho-plugin-captcha
+      typecho-plugin-scribe:
+        specifier: file:src/plugins/typecho-plugin-scribe
+        version: file:src/plugins/typecho-plugin-scribe
       typecho-plugin-turnstile:
         specifier: file:src/plugins/typecho-plugin-turnstile
         version: file:src/plugins/typecho-plugin-turnstile
@@ -2320,11 +2326,17 @@ packages:
   tunnel-agent@0.6.0:
     resolution: {integrity: sha512-McnNiV1l8RYeY8tBgEpuodCC1mLUdbSN+CYBL7kJsJNInOP8UjDDEwdk6Mw60vdLLrr5NHKZhMAOSrR2NZuQ+w==}
 
-  typecho-plugin-ai-writer@file:src/plugins/typecho-plugin-ai-writer:
-    resolution: {directory: src/plugins/typecho-plugin-ai-writer, type: directory}
+  typecho-plugin-akismet@file:src/plugins/typecho-plugin-akismet:
+    resolution: {directory: src/plugins/typecho-plugin-akismet, type: directory}
+
+  typecho-plugin-antispam@file:src/plugins/typecho-plugin-antispam:
+    resolution: {directory: src/plugins/typecho-plugin-antispam, type: directory}
 
   typecho-plugin-captcha@file:src/plugins/typecho-plugin-captcha:
     resolution: {directory: src/plugins/typecho-plugin-captcha, type: directory}
+
+  typecho-plugin-scribe@file:src/plugins/typecho-plugin-scribe:
+    resolution: {directory: src/plugins/typecho-plugin-scribe, type: directory}
 
   typecho-plugin-turnstile@file:src/plugins/typecho-plugin-turnstile:
     resolution: {directory: src/plugins/typecho-plugin-turnstile, type: directory}
@@ -4902,9 +4914,13 @@ snapshots:
     dependencies:
       safe-buffer: 5.2.1
 
-  typecho-plugin-ai-writer@file:src/plugins/typecho-plugin-ai-writer: {}
+  typecho-plugin-akismet@file:src/plugins/typecho-plugin-akismet: {}
+
+  typecho-plugin-antispam@file:src/plugins/typecho-plugin-antispam: {}
 
   typecho-plugin-captcha@file:src/plugins/typecho-plugin-captcha: {}
+
+  typecho-plugin-scribe@file:src/plugins/typecho-plugin-scribe: {}
 
   typecho-plugin-turnstile@file:src/plugins/typecho-plugin-turnstile: {}
 

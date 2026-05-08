@@ -184,6 +184,7 @@ export const HookPoints = {
   'feedback:comment': 'feedback:comment',            // Filter: comment data before save
   'feedback:finishComment': 'feedback:finishComment', // After comment saved
   'feedback:reply': 'feedback:reply',                // On comment reply
+  'comment:action': 'comment:action',                // Call: comment moderation action applied
 
   // --- User System ---
   'user:login': 'user:login',                        // Login attempt
@@ -478,11 +479,19 @@ export function parseActivatedPlugins(value: string | null | undefined): string[
  * @param options - Site options object from loadOptions()
  * @returns {{ headHtml: string, bodyHtml: string }}
  */
+export interface PageContext {
+  /** Whether the current page includes a comment form */
+  hasComments?: boolean;
+  /** Page type hint for plugins */
+  pageType?: 'index' | 'post' | 'page' | 'archive' | 'search' | 'notfound';
+}
+
 export async function getClientSnippets(
   options: Record<string, any>,
+  pageContext?: PageContext,
 ): Promise<{ headHtml: string; bodyHtml: string }> {
-  let headHtml = await applyFilterSafely('archive:header', '', { options });
-  let bodyHtml = await applyFilterSafely('archive:footer', '', { options });
+  let headHtml = await applyFilterSafely('archive:header', '', { options, pageContext });
+  let bodyHtml = await applyFilterSafely('archive:footer', '', { options, pageContext });
   return { headHtml, bodyHtml };
 }
 
@@ -530,7 +539,12 @@ export function parsePluginConfigFormData(
   const settings: Record<string, any> = {};
   for (const [key, field] of Object.entries(configDef)) {
     if (field.type === 'checkbox') {
-      settings[key] = formData.getAll(key).map(v => v.toString());
+      if (field.options) {
+        settings[key] = formData.getAll(key).map(v => v.toString());
+      } else {
+        // Boolean toggle: "1" when checked, "0" when unchecked
+        settings[key] = formData.has(key) ? '1' : '0';
+      }
     } else if (field.type === 'repeatable') {
       settings[key] = parseRepeatableField(key, field, formData);
     } else {
@@ -623,4 +637,44 @@ export function loadPluginConfig(
   } catch {
     return { ...defaults };
   }
+}
+
+// ==================== Shared Plugin Utilities ====================
+
+/**
+ * Parse a plugin config value from the options store.
+ * Handles both raw objects and JSON-encoded strings.
+ */
+export function parsePluginOption(value: unknown, label?: string): Record<string, unknown> {
+  if (!value) return {};
+  if (typeof value === 'object') return value as Record<string, unknown>;
+  if (typeof value !== 'string') return {};
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : {};
+  } catch {
+    if (label) console.error(`[${label}] Failed to parse plugin config`);
+    return {};
+  }
+}
+
+/**
+ * Escape a string for use in HTML attribute values.
+ */
+export function escapeAttr(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+/**
+ * Extract client IP from a Request object.
+ */
+export function getClientIp(request?: Request): string {
+  const cfIp = request?.headers.get('cf-connecting-ip');
+  if (cfIp) return cfIp.trim();
+  const xff = request?.headers.get('x-forwarded-for');
+  return xff ? (xff.split(',')[0] ?? '').trim() : '';
 }

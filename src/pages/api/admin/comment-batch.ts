@@ -48,7 +48,7 @@ async function handler({ request, locals, url }: { request: Request; locals: App
       if (comment.status === 404) continue;
       return comment;
     }
-    await applyCommentAction(auth.db, comment, normalizedAction);
+    await applyCommentAction(auth.db, comment, normalizedAction, auth.options);
   }
 
   // Comments affect post pages and feeds

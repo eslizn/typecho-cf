@@ -1,11 +1,11 @@
 {
   "id": "typecho-plugin-turnstile",
-  "name": "Cloudflare Turnstile",
-  "description": "评论验证码插件，集成 Cloudflare Turnstile，防止垃圾评论",
+  "name": "Turnstile",
+  "description": "Cloudflare Turnstile 验证码，防止垃圾评论",
   "author": "eslizn",
   "authorUrl": "https://eslizn.com",
   "version": "1.0.0",
-  "homepage": "https://github.com/eslizn/typecho-cf",
+  "homepage": "https://github.com/eslizn/typecho-cf/tree/master/src/plugins/typecho-plugin-turnstile",
   "license": "MIT",
   "tags": ["turnstile", "captcha", "antispam"],
   "config": {

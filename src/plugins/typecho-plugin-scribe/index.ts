@@ -1,4 +1,5 @@
 import type { PluginInitContext } from '@/lib/plugin';
+import { parsePluginOption } from '@/lib/plugin';
 import type { Database } from '@/db';
 import { schema } from '@/db';
 import { and, desc, eq, inArray, or } from 'drizzle-orm';
@@ -6,7 +7,7 @@ import { and, desc, eq, inArray, or } from 'drizzle-orm';
 type WriterMode = 'generate' | 'complete' | 'polish';
 type ContentType = 'post' | 'page';
 
-interface AiWriterConfig {
+interface ScribeConfig {
   endpoint: string;
   apiKey: string;
   model: string;
@@ -35,7 +36,7 @@ interface PluginActionResult {
 
 interface ConfigValidationResult {
   success: boolean;
-  settings?: AiWriterConfig;
+  settings?: ScribeConfig;
   error?: string;
 }
 
@@ -85,9 +86,9 @@ interface ModelsResponse {
   data?: ModelInfo[];
 }
 
-const PLUGIN_ID = 'typecho-plugin-ai-writer';
+const PLUGIN_ID = 'typecho-plugin-scribe';
 
-const DEFAULTS: AiWriterConfig = {
+const DEFAULTS: ScribeConfig = {
   endpoint: 'https://open.bigmodel.cn/api/paas/v4/',
   apiKey: '',
   model: 'glm-4.7-flash',
@@ -109,19 +110,7 @@ const SYSTEM_PROMPT = [
   '默认输出 Markdown，并保留已有正文中的核心观点、事实和结构意图。',
 ].join('\n');
 
-function readObject(value: unknown): Record<string, unknown> {
-  if (!value) return {};
-  if (typeof value === 'object') return value as Record<string, unknown>;
-  if (typeof value !== 'string') return {};
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : {};
-  } catch {
-    return {};
-  }
-}
-
-function normalizeConfig(settings?: Record<string, unknown>): AiWriterConfig {
+function normalizeConfig(settings?: Record<string, unknown>): ScribeConfig {
   return {
     endpoint: String(settings?.endpoint || '').trim(),
     apiKey: String(settings?.apiKey || '').trim(),
@@ -134,10 +123,10 @@ function normalizeConfig(settings?: Record<string, unknown>): AiWriterConfig {
   };
 }
 
-function getConfig(options?: Record<string, unknown>): AiWriterConfig {
+function getConfig(options?: Record<string, unknown>): ScribeConfig {
   return normalizeConfig({
     ...DEFAULTS,
-    ...readObject(options?.[`plugin:${PLUGIN_ID}`]),
+    ...parsePluginOption(options?.[`plugin:${PLUGIN_ID}`]),
   });
 }
 
@@ -172,11 +161,11 @@ function buildStyleContext(samples: StyleSample[]): string {
 
   return samples.map((sample, index) => [
     `样本 ${index + 1} 标题：${sample.title || '无标题'}`,
-    `样本 ${index + 1} 正文片段：${truncateText(normalizeText(sample.text), 1200)}`,
+    `样本 ${index + 1} 正文片段：${normalizeText(truncateText(sample.text, 1200))}`,
   ].join('\n')).join('\n\n');
 }
 
-function buildConfiguredUserPrompt(config: AiWriterConfig): string {
+function buildConfiguredUserPrompt(config: ScribeConfig): string {
   if (!config.userPrompt) {
     return '未配置额外写作要求。';
   }
@@ -187,7 +176,7 @@ function buildConfiguredUserPrompt(config: AiWriterConfig): string {
   ].join('\n');
 }
 
-function shouldIncludeBodyAssets(config: AiWriterConfig): boolean {
+function shouldIncludeBodyAssets(config: ScribeConfig): boolean {
   return config.includeBodyAssets === '1';
 }
 
@@ -213,7 +202,7 @@ function buildPrompt(
   mode: WriterMode,
   payload: WriterPayload,
   styleSamples: StyleSample[],
-  config: AiWriterConfig,
+  config: ScribeConfig,
   assets: ContentAsset[],
 ): string {
   const typeLabel = payload.contentType === 'page' ? '页面' : '文章';
@@ -329,13 +318,13 @@ async function fetchWithTimeout(
   }
 }
 
-function validationHeaders(config: AiWriterConfig): HeadersInit {
+function validationHeaders(config: ScribeConfig): HeadersInit {
   return {
     Authorization: `Bearer ${config.apiKey}`,
   };
 }
 
-async function assertModelsResponse(response: Response, config: AiWriterConfig): Promise<void> {
+async function assertModelsResponse(response: Response, config: ScribeConfig): Promise<void> {
   if (!response.ok) {
     const suffix = await readErrorSnippet(response);
     if (response.status === 401 || response.status === 403) {
@@ -356,7 +345,7 @@ async function assertModelsResponse(response: Response, config: AiWriterConfig):
   }
 }
 
-async function validateModelAccess(config: AiWriterConfig): Promise<void> {
+async function validateModelAccess(config: ScribeConfig): Promise<void> {
   const modelResponse = await fetchWithTimeout(buildModelUrl(config.endpoint, config.model), {
     method: 'GET',
     headers: validationHeaders(config),
@@ -378,7 +367,7 @@ async function validateModelAccess(config: AiWriterConfig): Promise<void> {
   await assertModelsResponse(listResponse, config);
 }
 
-async function validateConfig(settings?: Record<string, unknown>): Promise<AiWriterConfig> {
+async function validateConfig(settings?: Record<string, unknown>): Promise<ScribeConfig> {
   const config = normalizeConfig(settings);
   if (!config.endpoint || !config.apiKey || !config.model) {
     throw new Error('请填写接口地址、API Key 和模型名称');
@@ -567,7 +556,7 @@ async function loadAttachmentAssets(
 
 async function loadContentAssets(
   db: Database | undefined,
-  config: AiWriterConfig,
+  config: ScribeConfig,
   payload: WriterPayload,
 ): Promise<ContentAsset[]> {
   if (!shouldIncludeBodyAssets(config)) return [];
@@ -606,7 +595,7 @@ function buildUserContent(prompt: string, assets: ContentAsset[], siteUrl?: stri
 }
 
 function buildChatCompletionPayload(
-  config: AiWriterConfig,
+  config: ScribeConfig,
   mode: WriterMode,
   payload: WriterPayload,
   styleSamples: StyleSample[],
@@ -627,7 +616,7 @@ function buildChatCompletionPayload(
 }
 
 async function callLLM(
-  config: AiWriterConfig,
+  config: ScribeConfig,
   mode: WriterMode,
   payload: WriterPayload,
   styleSamples: StyleSample[],
@@ -644,7 +633,7 @@ async function callLLM(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${config.apiKey}`,
+        ...validationHeaders(config),
       },
       body: JSON.stringify(buildChatCompletionPayload(config, mode, payload, styleSamples, assets, siteUrl)),
     },
@@ -730,7 +719,7 @@ function createTextStreamFromLLM(response: Response): ReadableStream<Uint8Array>
 }
 
 async function callLLMStream(
-  config: AiWriterConfig,
+  config: ScribeConfig,
   mode: WriterMode,
   payload: WriterPayload,
   styleSamples: StyleSample[],
@@ -765,24 +754,92 @@ async function callLLMStream(
   });
 }
 
+const POST_EDITOR_HTML = editorHtml('post');
+const PAGE_EDITOR_HTML = editorHtml('page');
+
 function editorHtml(contentType: ContentType): string {
   return `
-<div class="typecho-ai-writer" data-content-type="${contentType}" hidden>
-  <span class="typecho-ai-writer-fallback-actions"></span>
+<style>
+#wmd-scribe-button span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #666;
+}
+#wmd-scribe-button[aria-disabled="true"] {
+  opacity: .5;
+  cursor: default;
+}
+
+#wmd-editarea {
+  position: relative;
+}
+
+.typecho-scribe-overlay {
+  display: none;
+  position: absolute;
+  inset: 0;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.85);
+  z-index: 10;
+  border-radius: 3px;
+}
+.typecho-scribe-overlay[aria-hidden="false"] {
+  display: flex;
+}
+
+.typecho-scribe-loader {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.typecho-scribe-loader-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid #e0e0e0;
+  border-top-color: #467b96;
+  border-radius: 50%;
+  animation: typecho-scribe-spin 0.8s linear infinite;
+}
+
+@keyframes typecho-scribe-spin {
+  to { transform: rotate(360deg); }
+}
+
+.typecho-scribe-loader-text {
+  font-size: 13px;
+  color: #666;
+}
+
+.typecho-scribe-locked {
+  overflow: hidden !important;
+  resize: none;
+  pointer-events: none;
+}
+</style>
+<div class="typecho-scribe" data-content-type="${contentType}" hidden>
+  <span class="typecho-scribe-fallback-actions"></span>
 </div>
-<div class="typecho-ai-writer-overlay" hidden>
-  <div class="typecho-ai-writer-loader" role="status" aria-live="polite">
-    <span class="typecho-ai-writer-loader-spinner" aria-hidden="true"></span>
-    <span class="typecho-ai-writer-loader-text">AI 正在补全...</span>
+<div class="typecho-scribe-overlay" role="status" aria-live="polite" aria-hidden="true">
+  <div class="typecho-scribe-loader">
+    <span class="typecho-scribe-loader-spinner" aria-hidden="true"></span>
+    <span class="typecho-scribe-loader-text">AI 正在补全...</span>
   </div>
 </div>
 <script is:inline>
 (function() {
-  if (window.__typechoAiWriterReady) return;
-  window.__typechoAiWriterReady = true;
+  if (window.__typechoScribeReady) return;
+  window.__typechoScribeReady = true;
 
   function clearAdminNotice() {
-    var notice = document.querySelector('.typecho-ai-writer-notice');
+    var notice = document.querySelector('.typecho-scribe-notice');
     if (notice && notice.parentNode) {
       notice.parentNode.removeChild(notice);
     }
@@ -793,7 +850,7 @@ function editorHtml(contentType: ContentType): string {
 
     var notice = document.createElement('div');
     var isError = type === 'error';
-    notice.className = 'typecho-ai-writer-notice typecho-option-tabs notice typecho-dismissible ' + (isError ? 'notice-error' : 'notice-success');
+    notice.className = 'typecho-scribe-notice typecho-option-tabs notice typecho-dismissible ' + (isError ? 'notice-error' : 'notice-success');
     notice.style.padding = '10px 15px';
     notice.style.marginBottom = '20px';
     notice.style.borderRadius = '3px';
@@ -828,46 +885,25 @@ function editorHtml(contentType: ContentType): string {
 
   function setBusy(text, button, busy) {
     var toolbar = document.getElementById('wmd-button-row');
-    var preview = document.getElementById('wmd-preview');
     var editarea = document.getElementById('wmd-editarea') || (text ? text.parentElement : null);
-    var overlay = document.querySelector('.typecho-ai-writer-overlay');
+    var overlay = document.querySelector('.typecho-scribe-overlay');
     if (toolbar) {
-      toolbar.classList.toggle('typecho-ai-writer-busy', busy);
-    }
-    if (editarea && overlay && busy && overlay.parentNode !== editarea) {
-      editarea.appendChild(overlay);
-    }
-    if (editarea) {
-      editarea.classList.toggle('typecho-ai-writer-editing', busy);
+      toolbar.classList.toggle('typecho-scribe-busy', busy);
     }
     if (overlay) {
-      overlay.hidden = !busy;
+      if (busy && editarea && overlay.parentNode !== editarea) {
+        editarea.appendChild(overlay);
+      }
+      overlay.setAttribute('aria-hidden', busy ? 'false' : 'true');
     }
     if (button) {
       button.setAttribute('aria-disabled', busy ? 'true' : 'false');
     }
     if (text) {
-      if (busy) {
-        text.dataset.aiWriterReadonly = text.readOnly ? '1' : '0';
-        text.dataset.aiWriterScrollTop = String(text.scrollTop || 0);
-        text.readOnly = true;
-      } else if (text.dataset.aiWriterReadonly !== '1') {
-        text.readOnly = false;
-      }
-      text.classList.toggle('typecho-ai-writer-locked', busy);
+      text.readOnly = busy;
+      text.classList.toggle('typecho-scribe-locked', busy);
       text.setAttribute('aria-busy', busy ? 'true' : 'false');
     }
-    if (preview) {
-      if (busy) preview.dataset.aiWriterScrollTop = String(preview.scrollTop || 0);
-      preview.classList.toggle('typecho-ai-writer-scroll-locked', busy);
-    }
-  }
-
-  function keepEditorScrollLocked(text) {
-    var preview = document.getElementById('wmd-preview');
-    var top = Number(text.dataset.aiWriterScrollTop || '0');
-    text.scrollTop = top;
-    if (preview) preview.scrollTop = Number(preview.dataset.aiWriterScrollTop || '0');
   }
 
   function mergeAiCompletion(oldText, streamedText, mode) {
@@ -1060,16 +1096,12 @@ function editorHtml(contentType: ContentType): string {
     var decoder = new TextDecoder();
     var nextText = '';
     text.value = mode === 'complete' ? oldText : '';
-    keepEditorScrollLocked(text);
 
     for (;;) {
       var result = await reader.read();
       if (result.done) break;
       nextText += decoder.decode(result.value, { stream: true });
-      text.value = mergeAiCompletion(oldText, nextText, mode);
-      text.dispatchEvent(new Event('input', { bubbles: true }));
-      if (window.jQuery) window.jQuery(text).trigger('input');
-      keepEditorScrollLocked(text);
+      text.value = nextText;
     }
 
     var tail = decoder.decode();
@@ -1084,7 +1116,7 @@ function editorHtml(contentType: ContentType): string {
     }
   }
 
-  async function runAiWriter(box, button) {
+  async function runScribe(box, button) {
     if (button && button.getAttribute('aria-disabled') === 'true') return;
 
     var title = document.getElementById('title');
@@ -1121,8 +1153,9 @@ function editorHtml(contentType: ContentType): string {
       await readStreamIntoEditor(response, text, oldText, mode);
       text.dispatchEvent(new Event('input', { bubbles: true }));
       if (window.jQuery) window.jQuery(text).trigger('input');
-      clearAdminNotice();
+      showAdminNotice('AI 补全完成', 'success');
     } catch (error) {
+      text.value = oldText;
       showAdminNotice(error && error.message ? error.message : 'AI 写作失败', 'error');
     } finally {
       setBusy(text, button, false);
@@ -1130,24 +1163,24 @@ function editorHtml(contentType: ContentType): string {
   }
 
   function bindButton(button, box) {
-    if (!button || button.dataset.aiWriterBound === '1') return;
-    button.dataset.aiWriterBound = '1';
+    if (!button || button.dataset.scribeBound === '1') return;
+    button.dataset.scribeBound = '1';
     button.addEventListener('click', function(event) {
       event.preventDefault();
-      runAiWriter(box, button);
+      runScribe(box, button);
     });
     button.addEventListener('keydown', function(event) {
       if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault();
-        runAiWriter(box, button);
+        runScribe(box, button);
       }
     });
   }
 
   function createToolbarButton(box) {
     var item = document.createElement('li');
-    item.id = 'wmd-ai-writer-button';
-    item.className = 'wmd-button typecho-ai-writer-toolbar-button';
+    item.id = 'wmd-scribe-button';
+    item.className = 'wmd-button typecho-scribe-toolbar-button';
     item.title = 'AI 补全';
     item.tabIndex = 0;
     item.setAttribute('role', 'button');
@@ -1158,11 +1191,11 @@ function editorHtml(contentType: ContentType): string {
   }
 
   function createFallbackButton(box) {
-    var actions = box.querySelector('.typecho-ai-writer-fallback-actions');
-    if (!actions || actions.querySelector('.typecho-ai-writer-fallback-btn')) return;
+    var actions = box.querySelector('.typecho-scribe-fallback-actions');
+    if (!actions || actions.querySelector('.typecho-scribe-fallback-btn')) return;
     var button = document.createElement('button');
     button.type = 'button';
-    button.className = 'btn btn-xs typecho-ai-writer-fallback-btn';
+    button.className = 'btn btn-xs typecho-scribe-fallback-btn';
     button.textContent = 'AI 补全';
     bindButton(button, box);
     actions.appendChild(button);
@@ -1170,21 +1203,21 @@ function editorHtml(contentType: ContentType): string {
   }
 
   function mountButton(box) {
-    if (document.getElementById('wmd-ai-writer-button')) return true;
+    if (document.getElementById('wmd-scribe-button')) return true;
     var row = document.getElementById('wmd-button-row');
     if (!row) return false;
 
     var spacer = document.createElement('li');
-    spacer.className = 'wmd-spacer typecho-ai-writer-spacer';
+    spacer.className = 'wmd-spacer typecho-scribe-spacer';
     row.appendChild(spacer);
     row.appendChild(createToolbarButton(box));
     box.hidden = false;
-    box.classList.add('typecho-ai-writer-mounted');
+    box.classList.add('typecho-scribe-mounted');
     return true;
   }
 
-  function initAiWriter() {
-    var box = document.querySelector('.typecho-ai-writer');
+  function initScribe() {
+    var box = document.querySelector('.typecho-scribe');
     if (!box) return;
     var attempts = 0;
     var timer = window.setInterval(function() {
@@ -1199,17 +1232,17 @@ function editorHtml(contentType: ContentType): string {
   }
 
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initAiWriter);
+    document.addEventListener('DOMContentLoaded', initScribe);
   } else {
-    initAiWriter();
+    initScribe();
   }
 })();
 </script>`;
 }
 
 export default function init({ addHook, pluginId }: PluginInitContext): void {
-  addHook('admin:writePost:bottom', pluginId, (html: string) => html + editorHtml('post'));
-  addHook('admin:writePage:bottom', pluginId, (html: string) => html + editorHtml('page'));
+  addHook('admin:writePost:bottom', pluginId, (html: string) => html + POST_EDITOR_HTML);
+  addHook('admin:writePage:bottom', pluginId, (html: string) => html + PAGE_EDITOR_HTML);
 
   addHook(
     'plugin:config:beforeSave',
@@ -1241,10 +1274,12 @@ export default function init({ addHook, pluginId }: PluginInitContext): void {
 
       try {
         const config = getConfig(extra?.options);
-        const styleSamples = await loadStyleSamples(extra?.db, Number(config.stylePostCount) || 0);
         const payload = extra?.payload || {};
-        const assets = await loadContentAssets(extra?.db, config, payload);
         const siteUrl = typeof extra?.options?.siteUrl === 'string' ? extra.options.siteUrl : undefined;
+        const [styleSamples, assets] = await Promise.all([
+          loadStyleSamples(extra?.db, Number.isFinite(Number(config.stylePostCount)) ? Number(config.stylePostCount) : 0),
+          loadContentAssets(extra?.db, config, payload),
+        ]);
         const response = await callLLMStream(config, action as WriterMode, payload, styleSamples, assets, siteUrl);
         return {
           handled: true,

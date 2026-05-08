@@ -1,0 +1,60 @@
+{
+  "id": "typecho-plugin-antispam",
+  "name": "AntiSpam",
+  "description": "本地反垃圾评论，蜜罐陷阱+时间验证+链接检测，无需外部 API",
+  "author": "eslizn",
+  "authorUrl": "https://eslizn.com",
+  "version": "1.0.0",
+  "homepage": "https://github.com/eslizn/typecho-cf/tree/master/src/plugins/typecho-plugin-antispam",
+  "license": "MIT",
+  "tags": ["antispam", "spam", "honeypot"],
+  "config": {
+    "mode": {
+      "type": "select",
+      "label": "处理方式",
+      "default": "spam",
+      "options": {
+        "spam": "垃圾箱",
+        "waiting": "待审核",
+        "discard": "丢弃"
+      },
+      "description": "检测到垃圾评论时的处理方式"
+    },
+    "honeypot": {
+      "type": "checkbox",
+      "label": "启用蜜罐陷阱",
+      "default": "1",
+      "description": "添加隐藏字段诱使机器人填写，正常用户不可见"
+    },
+    "timeCheck": {
+      "type": "checkbox",
+      "label": "启用时间验证",
+      "default": "1",
+      "description": "验证表单提交时间是否合理，阻止过快或过期的提交"
+    },
+    "minTime": {
+      "type": "text",
+      "label": "最短提交时间（秒）",
+      "default": "3",
+      "description": "页面加载后多少秒内不允许提交，用于拦截秒填机器人"
+    },
+    "maxTime": {
+      "type": "text",
+      "label": "最长有效时间（秒）",
+      "default": "86400",
+      "description": "页面加载后超过此时间的提交将被拒绝，默认24小时"
+    },
+    "linkCheck": {
+      "type": "checkbox",
+      "label": "启用链接检测",
+      "default": "0",
+      "description": "检测评论内容中的链接数量"
+    },
+    "maxLinks": {
+      "type": "text",
+      "label": "最大链接数",
+      "default": "2",
+      "description": "评论中允许的最大链接数量，0 表示不允许任何链接"
+    }
+  }
+}

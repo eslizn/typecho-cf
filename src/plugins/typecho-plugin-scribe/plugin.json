@@ -1,11 +1,11 @@
 {
-  "id": "typecho-plugin-ai-writer",
-  "name": "妙笔生花",
-  "description": "在文章和页面编辑器中接入 OpenAI 兼容 LLM，用于生成、补全和润色正文。",
+  "id": "typecho-plugin-scribe",
+  "name": "Scribe",
+  "description": "接入 OpenAI 兼容 LLM，在编辑器中生成、补全和润色正文",
   "author": "eslizn",
   "authorUrl": "https://eslizn.com",
   "version": "1.0.0",
-  "homepage": "https://github.com/eslizn/typecho-cf",
+  "homepage": "https://github.com/eslizn/typecho-cf/tree/master/src/plugins/typecho-plugin-scribe",
   "license": "MIT",
   "tags": ["ai", "writer", "llm", "content"],
   "config": {

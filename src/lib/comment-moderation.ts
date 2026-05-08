@@ -3,6 +3,7 @@ import { schema, type Database } from '@/db';
 import { hasPermission } from '@/lib/auth';
 import { bumpCacheVersion, purgeContentCache } from '@/lib/cache';
 import type { SiteOptions } from '@/lib/options';
+import { doHook } from '@/lib/plugin';
 
 export const COMMENT_ACTIONS = ['approve', 'approved', 'waiting', 'spam', 'delete'] as const;
 export type CommentAction = typeof COMMENT_ACTIONS[number];
@@ -36,6 +37,7 @@ export async function applyCommentAction(
   db: Database,
   comment: CommentRow,
   action: CommentAction,
+  options?: Record<string, unknown>,
 ): Promise<void> {
   const oldStatus = comment.status;
 
@@ -44,6 +46,7 @@ export async function applyCommentAction(
     if (oldStatus === 'approved') {
       await decrementCommentCount(db, comment.cid || 0);
     }
+    await doHook('comment:action', comment, { action, oldStatus, newStatus: 'deleted', options });
     return;
   }
 
@@ -57,6 +60,8 @@ export async function applyCommentAction(
   } else if (oldStatus === 'approved' && nextStatus !== 'approved') {
     await decrementCommentCount(db, comment.cid || 0);
   }
+
+  await doHook('comment:action', comment, { action, oldStatus, newStatus: nextStatus, options });
 }
 
 export async function deleteSpamCommentsForUser(

@@ -1,5 +1,5 @@
 {
-  "name": "typecho-plugin-ai-writer",
+  "name": "typecho-plugin-scribe",
   "version": "1.0.0",
   "description": "AI writing assistant for Typecho-CF posts and pages",
   "keywords": ["typecho", "plugin", "ai", "writer"],

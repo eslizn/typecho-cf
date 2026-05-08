@@ -98,25 +98,12 @@ const pluginCount = getPluginCount();
       </div>
     )}
 
-    <div class="typecho-option-tabs">
-      <ul class="typecho-option-tabs-nav clearfix" style="margin-bottom: 20px;">
-        <li class="current"><a href="/admin/plugins">已安装插件</a></li>
-      </ul>
-    </div>
-
     {pluginCount === 0 ? (
       <div class="typecho-mini-panel" style="text-align: center; padding: 40px 20px;">
         <h3>暂无插件</h3>
-        <p class="description" style="max-width: 500px; margin: 15px auto;">
-          Typecho 的插件系统通过 npm 包分发。安装新插件：在 npm 搜索 keywords 包含
-          <code>typecho</code> 和 <code>plugin</code> 的包，<code>pnpm add 包名</code> 安装后重新构建即可。
-        </p>
       </div>
     ) : (
       <>
-        <p class="description" style="margin-bottom: 20px;">
-          当前共有 {pluginCount} 个可用插件。安装新插件：在 npm 搜索 keywords 包含 <code>typecho</code> 和 <code>plugin</code> 的包，<code>pnpm add 包名</code> 安装后重新构建即可。
-        </p>
 
         <div class="typecho-list-operate clearfix">
           <div class="operate">
@@ -211,90 +198,5 @@ const pluginCount = getPluginCount();
       </>
     )}
 
-    {/* Plugin development guide */}
-    <div class="typecho-mini-panel" style="margin-top: 30px; padding: 20px;">
-      <h3 style="margin: 0 0 15px 0;">如何安装新插件</h3>
-      <ol style="margin: 0; padding-left: 20px; line-height: 2;">
-        <li>在 npm 搜索 keywords 同时包含 <code>typecho</code> 和 <code>plugin</code> 的包</li>
-        <li>在项目根目录运行 <code>pnpm add 包名</code> 安装</li>
-        <li>重新构建/部署项目：<code>pnpm build</code></li>
-        <li>在此页面选择并启用新插件</li>
-      </ol>
-
-      <h4 style="margin: 20px 0 10px 0;">创建自定义插件</h4>
-      <p class="description" style="margin: 0; line-height: 1.8;">
-        创建一个 npm 包，在 <code>package.json</code> 的 <code>keywords</code> 中包含 <code>"typecho"</code> 和 <code>"plugin"</code>，并包含以下文件：
-      </p>
-      <pre style="background: #f5f5f5; padding: 12px; border-radius: 4px; margin-top: 10px; overflow-x: auto;"><code>typecho-plugin-myname/
-  ├── plugin.json          # 插件描述文件 (必须)
-  ├── index.ts             # 插件入口 (必须)
-  └── package.json         # keywords: ["typecho", "plugin"]
-
-// plugin.json 示例:
-{'{'}"id": "myname",
-  "name": "我的插件",
-  "description": "一个示例插件",
-  "author": "Your Name",
-  "version": "1.0.0"
-{'}'}
-
-// index.ts 示例:
-import type {'{'} PluginInitContext {'}'} from '@/lib/plugin';
-
-export default function init({'{'} addHook, pluginId {'}'}: PluginInitContext): void {'{'
-}  // 注册内容过滤 hook
-  addHook('content:content', pluginId, (html: string) =&gt; {'{'
-}    return html + '&lt;!-- powered by my plugin --&gt;';
-  {'}'});
-  
-  // 注册评论提交 hook  
-  addHook('feedback:finishComment', pluginId, (comment: {'{'} author?: string {'}'}) =&gt; {'{'
-}    console.log('New comment from:', comment.author);
-  {'}'});
-{'}'}</code></pre>
-
-      <h4 style="margin: 20px 0 10px 0;">可用 Hook 列表</h4>
-      <div style="border: 1px solid #e0e0e0; border-radius: 4px; padding: 10px;">
-        <table class="typecho-list-table" style="margin: 0;">
-          <thead>
-            <tr>
-              <th>Hook 名称</th>
-              <th>类型</th>
-              <th>说明</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr><td><code>system:begin</code></td><td>call</td><td>系统启动时调用</td></tr>
-            <tr><td><code>admin:header</code></td><td>call</td><td>后台头部注入 CSS/meta</td></tr>
-            <tr><td><code>admin:footer</code></td><td>call</td><td>后台底部注入 JS</td></tr>
-            <tr><td><code>admin:navBar</code></td><td>call</td><td>后台导航栏扩展</td></tr>
-            <tr><td><code>admin:writePost:option</code></td><td>call</td><td>文章编辑侧边栏选项</td></tr>
-            <tr><td><code>admin:writePage:option</code></td><td>call</td><td>页面编辑侧边栏选项</td></tr>
-            <tr><td><code>content:markdown</code></td><td>filter</td><td>过滤 Markdown 原文</td></tr>
-            <tr><td><code>content:content</code></td><td>filter</td><td>过滤渲染后的 HTML</td></tr>
-            <tr><td><code>content:title</code></td><td>filter</td><td>过滤内容标题</td></tr>
-            <tr><td><code>content:excerpt</code></td><td>filter</td><td>过滤内容摘要</td></tr>
-            <tr><td><code>comment:content</code></td><td>filter</td><td>过滤评论渲染内容</td></tr>
-            <tr><td><code>post:write</code></td><td>filter</td><td>过滤文章写入数据</td></tr>
-            <tr><td><code>post:finishPublish</code></td><td>call</td><td>文章发布完成</td></tr>
-            <tr><td><code>post:finishSave</code></td><td>call</td><td>文章保存完成</td></tr>
-            <tr><td><code>post:delete</code></td><td>call</td><td>文章删除前</td></tr>
-            <tr><td><code>post:finishDelete</code></td><td>call</td><td>文章删除后</td></tr>
-            <tr><td><code>page:write</code></td><td>filter</td><td>过滤页面写入数据</td></tr>
-            <tr><td><code>page:finishPublish</code></td><td>call</td><td>页面发布完成</td></tr>
-            <tr><td><code>feedback:comment</code></td><td>filter</td><td>过滤评论数据（保存前）</td></tr>
-            <tr><td><code>feedback:finishComment</code></td><td>call</td><td>评论提交完成</td></tr>
-            <tr><td><code>user:login</code></td><td>call</td><td>登录尝试</td></tr>
-            <tr><td><code>user:loginSucceed</code></td><td>call</td><td>登录成功</td></tr>
-            <tr><td><code>user:logout</code></td><td>call</td><td>用户登出</td></tr>
-            <tr><td><code>upload:beforeUpload</code></td><td>call</td><td>文件上传前</td></tr>
-            <tr><td><code>upload:upload</code></td><td>call</td><td>文件上传后</td></tr>
-            <tr><td><code>feed:item</code></td><td>filter</td><td>过滤 RSS/Atom 项</td></tr>
-            <tr><td><code>widget:sidebar</code></td><td>filter</td><td>过滤侧边栏数据</td></tr>
-            <tr><td><code>plugin:config:beforeSave</code></td><td>filter</td><td>插件配置保存前校验或规范化</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
   </div>
 </Admin>

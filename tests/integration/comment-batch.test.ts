@@ -6,28 +6,19 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as schema from '@/db/schema';
-import { createTestDb } from '../helpers';
-import { hashPassword, generateAuthToken } from '@/lib/auth';
+import { createTestDb, seedAdmin, makeAuthCookie, type TestDatabase } from '../helpers';
 
 // ---- shared DB ref (mutated in beforeEach) -----------------------------------
 
-let testDb: ReturnType<typeof createTestDb>;
+let testDb: TestDatabase;
 
 vi.mock('@/db', async () => {
   const actual = await vi.importActual<typeof import('@/db')>('@/db');
-  return {
-    ...actual,
-    getDb: (_d1: any) => testDb,
-    schema: actual.schema,
-  };
+  return { ...actual, getDb: (_d1: any) => testDb, schema: actual.schema };
 });
-
 vi.mock('@/lib/auth', async () => {
   const actual = await vi.importActual<typeof import('@/lib/auth')>('@/lib/auth');
-  return {
-    ...actual,
-    requireAdminCSRF: async () => null,
-  };
+  return { ...actual, requireAdminCSRF: async () => null };
 });
 
 import { GET, POST } from '@/pages/api/admin/comment-batch';
@@ -35,29 +26,7 @@ import { GET, POST } from '@/pages/api/admin/comment-batch';
 const TEST_SECRET = 'test-secret-batch';
 const TEST_AUTH_CODE = 'batchauthcode';
 
-async function seedAdmin(
-  db: ReturnType<typeof createTestDb>,
-  group: string = 'administrator',
-) {
-  await db.insert(schema.options).values({ name: 'secret', user: 0, value: TEST_SECRET });
-  await db.insert(schema.users).values({
-    name: 'admin',
-    password: await hashPassword('admin123'),
-    mail: 'admin@example.com',
-    group,
-    authCode: TEST_AUTH_CODE,
-  });
-  const user = await db.query.users.findFirst();
-  return user!;
-}
-
-async function makeAuthCookie(db: ReturnType<typeof createTestDb>, uid: number) {
-  const token = await generateAuthToken(uid, TEST_AUTH_CODE, TEST_SECRET);
-  const [uidPart, hash] = token.split(':');
-  return `__typecho_uid=${uidPart}; __typecho_authCode=${hash}`;
-}
-
-async function seedPost(db: ReturnType<typeof createTestDb>, commentsNum = 0) {
+async function seedPost(db: TestDatabase, commentsNum = 0) {
   await db.insert(schema.contents).values({
     title: 'Test Post',
     slug: 'test-post',
@@ -71,7 +40,7 @@ async function seedPost(db: ReturnType<typeof createTestDb>, commentsNum = 0) {
 }
 
 async function seedComment(
-  db: ReturnType<typeof createTestDb>,
+  db: TestDatabase,
   postCid: number,
   status: 'approved' | 'waiting' | 'spam' = 'approved',
 ) {
@@ -118,30 +87,30 @@ function makeBatchRequest(
 // ---- tests -------------------------------------------------------------------
 
 describe('POST /api/admin/comment-batch', () => {
-  beforeEach(() => {
-    testDb = createTestDb();
+  beforeEach(async () => {
+    testDb = await createTestDb();
   });
 
   // -- Auth guards --
 
   it('returns 401 when no cookie', async () => {
-    await seedAdmin(testDb);
+    await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE });
     const req = makeBatchRequest('POST', 'delete', [1]);
     const res = await POST({ request: req, locals: {}, url: new URL(req.url) } as any);
     expect(res.status).toBe(401);
   });
 
   it('returns 403 when user is not contributor', async () => {
-    const admin = await seedAdmin(testDb, 'visitor');
-    const cookie = await makeAuthCookie(testDb, admin.uid);
+    const admin = await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE, group: 'visitor' });
+    const cookie = await makeAuthCookie(testDb, admin.uid, TEST_AUTH_CODE, TEST_SECRET);
     const req = makeBatchRequest('POST', 'delete', [1], cookie);
     const res = await POST({ request: req, locals: {}, url: new URL(req.url) } as any);
     expect(res.status).toBe(403);
   });
 
   it('redirects to referer when no coids are submitted', async () => {
-    const admin = await seedAdmin(testDb);
-    const cookie = await makeAuthCookie(testDb, admin.uid);
+    const admin = await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE });
+    const cookie = await makeAuthCookie(testDb, admin.uid, TEST_AUTH_CODE, TEST_SECRET);
     const req = makeBatchRequest('POST', 'delete', [], cookie);
     const res = await POST({ request: req, locals: {}, url: new URL(req.url) } as any);
     expect(res.status).toBe(302);
@@ -150,8 +119,8 @@ describe('POST /api/admin/comment-batch', () => {
   // -- delete action --
 
   it('deletes selected comments', async () => {
-    const admin = await seedAdmin(testDb);
-    const cookie = await makeAuthCookie(testDb, admin.uid);
+    const admin = await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE });
+    const cookie = await makeAuthCookie(testDb, admin.uid, TEST_AUTH_CODE, TEST_SECRET);
     const post = await seedPost(testDb, 2);
     const c1 = await seedComment(testDb, post.cid!, 'approved');
     const c2 = await seedComment(testDb, post.cid!, 'waiting');
@@ -165,8 +134,8 @@ describe('POST /api/admin/comment-batch', () => {
   });
 
   it('decrements commentsNum when deleting approved comment', async () => {
-    const admin = await seedAdmin(testDb);
-    const cookie = await makeAuthCookie(testDb, admin.uid);
+    const admin = await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE });
+    const cookie = await makeAuthCookie(testDb, admin.uid, TEST_AUTH_CODE, TEST_SECRET);
     const post = await seedPost(testDb, 1);
     const comment = await seedComment(testDb, post.cid!, 'approved');
 
@@ -178,8 +147,8 @@ describe('POST /api/admin/comment-batch', () => {
   });
 
   it('does NOT decrement commentsNum when deleting waiting comment', async () => {
-    const admin = await seedAdmin(testDb);
-    const cookie = await makeAuthCookie(testDb, admin.uid);
+    const admin = await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE });
+    const cookie = await makeAuthCookie(testDb, admin.uid, TEST_AUTH_CODE, TEST_SECRET);
     const post = await seedPost(testDb, 1);
     const comment = await seedComment(testDb, post.cid!, 'waiting');
 
@@ -193,8 +162,8 @@ describe('POST /api/admin/comment-batch', () => {
   // -- approved action --
 
   it('marks waiting comments as approved and increments commentsNum', async () => {
-    const admin = await seedAdmin(testDb);
-    const cookie = await makeAuthCookie(testDb, admin.uid);
+    const admin = await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE });
+    const cookie = await makeAuthCookie(testDb, admin.uid, TEST_AUTH_CODE, TEST_SECRET);
     const post = await seedPost(testDb, 0);
     const comment = await seedComment(testDb, post.cid!, 'waiting');
 
@@ -209,8 +178,8 @@ describe('POST /api/admin/comment-batch', () => {
   });
 
   it('does NOT double-increment commentsNum if comment is already approved', async () => {
-    const admin = await seedAdmin(testDb);
-    const cookie = await makeAuthCookie(testDb, admin.uid);
+    const admin = await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE });
+    const cookie = await makeAuthCookie(testDb, admin.uid, TEST_AUTH_CODE, TEST_SECRET);
     const post = await seedPost(testDb, 1);
     const comment = await seedComment(testDb, post.cid!, 'approved');
 
@@ -224,8 +193,8 @@ describe('POST /api/admin/comment-batch', () => {
   // -- waiting action --
 
   it('marks approved comment as waiting and decrements commentsNum', async () => {
-    const admin = await seedAdmin(testDb);
-    const cookie = await makeAuthCookie(testDb, admin.uid);
+    const admin = await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE });
+    const cookie = await makeAuthCookie(testDb, admin.uid, TEST_AUTH_CODE, TEST_SECRET);
     const post = await seedPost(testDb, 1);
     const comment = await seedComment(testDb, post.cid!, 'approved');
 
@@ -242,8 +211,8 @@ describe('POST /api/admin/comment-batch', () => {
   // -- spam action --
 
   it('marks approved comment as spam and decrements commentsNum', async () => {
-    const admin = await seedAdmin(testDb);
-    const cookie = await makeAuthCookie(testDb, admin.uid);
+    const admin = await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE });
+    const cookie = await makeAuthCookie(testDb, admin.uid, TEST_AUTH_CODE, TEST_SECRET);
     const post = await seedPost(testDb, 1);
     const comment = await seedComment(testDb, post.cid!, 'approved');
 
@@ -258,8 +227,8 @@ describe('POST /api/admin/comment-batch', () => {
   });
 
   it('marks waiting comment as spam without changing commentsNum', async () => {
-    const admin = await seedAdmin(testDb);
-    const cookie = await makeAuthCookie(testDb, admin.uid);
+    const admin = await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE });
+    const cookie = await makeAuthCookie(testDb, admin.uid, TEST_AUTH_CODE, TEST_SECRET);
     const post = await seedPost(testDb, 0);
     const comment = await seedComment(testDb, post.cid!, 'waiting');
 
@@ -276,8 +245,8 @@ describe('POST /api/admin/comment-batch', () => {
   // -- multiple selection --
 
   it('processes multiple coids in a single request', async () => {
-    const admin = await seedAdmin(testDb);
-    const cookie = await makeAuthCookie(testDb, admin.uid);
+    const admin = await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE });
+    const cookie = await makeAuthCookie(testDb, admin.uid, TEST_AUTH_CODE, TEST_SECRET);
     const post = await seedPost(testDb, 0);
 
     // Seed 3 waiting comments
@@ -297,8 +266,8 @@ describe('POST /api/admin/comment-batch', () => {
   });
 
   it('returns 403 when contributor tries to moderate another author owner comment', async () => {
-    const contributor = await seedAdmin(testDb, 'contributor');
-    const cookie = await makeAuthCookie(testDb, contributor.uid);
+    const contributor = await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE, group: 'contributor' });
+    const cookie = await makeAuthCookie(testDb, contributor.uid, TEST_AUTH_CODE, TEST_SECRET);
     const post = await seedPost(testDb, 1);
     await testDb.insert(schema.comments).values({
       cid: post.cid!,
@@ -320,8 +289,8 @@ describe('POST /api/admin/comment-batch', () => {
   });
 
   it('returns 400 for invalid action', async () => {
-    const admin = await seedAdmin(testDb);
-    const cookie = await makeAuthCookie(testDb, admin.uid);
+    const admin = await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE });
+    const cookie = await makeAuthCookie(testDb, admin.uid, TEST_AUTH_CODE, TEST_SECRET);
     const post = await seedPost(testDb, 0);
     const comment = await seedComment(testDb, post.cid!, 'waiting');
 
@@ -332,20 +301,20 @@ describe('POST /api/admin/comment-batch', () => {
 });
 
 describe('POST /api/admin/comment-batch (delete-spam)', () => {
-  beforeEach(() => {
-    testDb = createTestDb();
+  beforeEach(async () => {
+    testDb = await createTestDb();
   });
 
   it('rejects GET state changes', async () => {
-    await seedAdmin(testDb);
+    await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE });
     const req = makeBatchRequest('GET', 'delete-spam');
     const res = await GET({ request: req, locals: {}, url: new URL(req.url) } as any);
     expect(res.status).toBe(405);
   });
 
   it('deletes all spam comments via POST delete-spam', async () => {
-    const admin = await seedAdmin(testDb);
-    const cookie = await makeAuthCookie(testDb, admin.uid);
+    const admin = await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE });
+    const cookie = await makeAuthCookie(testDb, admin.uid, TEST_AUTH_CODE, TEST_SECRET);
     const post = await seedPost(testDb, 0);
 
     // Seed spam and non-spam
@@ -365,8 +334,8 @@ describe('POST /api/admin/comment-batch (delete-spam)', () => {
   });
 
   it('delete-spam via POST also works', async () => {
-    const admin = await seedAdmin(testDb);
-    const cookie = await makeAuthCookie(testDb, admin.uid);
+    const admin = await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE });
+    const cookie = await makeAuthCookie(testDb, admin.uid, TEST_AUTH_CODE, TEST_SECRET);
     const post = await seedPost(testDb, 0);
 
     await testDb.insert(schema.comments).values([
@@ -382,8 +351,8 @@ describe('POST /api/admin/comment-batch (delete-spam)', () => {
   });
 
   it('delete-spam redirects to manage-comments?status=spam', async () => {
-    const admin = await seedAdmin(testDb);
-    const cookie = await makeAuthCookie(testDb, admin.uid);
+    const admin = await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE });
+    const cookie = await makeAuthCookie(testDb, admin.uid, TEST_AUTH_CODE, TEST_SECRET);
     await seedPost(testDb);
 
     const req = makeBatchRequest('POST', 'delete-spam', [], cookie);

@@ -6,28 +6,20 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as schema from '@/db/schema';
-import { createTestDb } from '../helpers';
-import { hashPassword, generateAuthToken } from '@/lib/auth';
+import { createTestDb, seedAdmin, type TestDatabase } from '../helpers';
+import { generateAuthToken } from '@/lib/auth';
 
 // ---- shared DB ref (mutated in beforeEach) ----------------------------------
 
-let testDb: ReturnType<typeof createTestDb>;
+let testDb: TestDatabase;
 
 vi.mock('@/db', async () => {
   const actual = await vi.importActual<typeof import('@/db')>('@/db');
-  return {
-    ...actual,
-    getDb: (_d1: any) => testDb,
-    schema: actual.schema,
-  };
+  return { ...actual, getDb: (_d1: any) => testDb, schema: actual.schema };
 });
-
 vi.mock('@/lib/auth', async () => {
   const actual = await vi.importActual<typeof import('@/lib/auth')>('@/lib/auth');
-  return {
-    ...actual,
-    requireAdminCSRF: async () => null,
-  };
+  return { ...actual, requireAdminCSRF: async () => null };
 });
 
 import { POST } from '@/pages/api/admin/options';
@@ -38,19 +30,8 @@ import { POST } from '@/pages/api/admin/options';
 const TEST_SECRET = 'test-secret-admin';
 const TEST_AUTH_CODE = 'adminauthcode123';
 
-async function seedAdmin(db: ReturnType<typeof createTestDb>) {
-  await db.insert(schema.options).values({ name: 'secret', user: 0, value: TEST_SECRET });
-  await db.insert(schema.users).values({
-    name: 'admin',
-    password: await hashPassword('admin123'),
-    mail: 'admin@example.com',
-    group: 'administrator',
-    authCode: TEST_AUTH_CODE,
-  });
-}
-
 async function makeAdminRequest(
-  db: ReturnType<typeof createTestDb>,
+  db: TestDatabase,
   formFields: Record<string, string>,
   referer = 'https://example.com/admin/options-general',
 ): Promise<Request> {
@@ -71,7 +52,7 @@ async function makeAdminRequest(
   });
 }
 
-async function getOption(db: ReturnType<typeof createTestDb>, name: string) {
+async function getOption(db: TestDatabase, name: string) {
   const row = await db.query.options.findFirst({
     where: (t, { eq, and }) => and(eq(t.name, name), eq(t.user, 0)),
   });
@@ -82,8 +63,8 @@ async function getOption(db: ReturnType<typeof createTestDb>, name: string) {
 
 describe('POST /api/admin/options', () => {
   beforeEach(async () => {
-    testDb = createTestDb();
-    await seedAdmin(testDb);
+    testDb = await createTestDb();
+    await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE });
   });
 
   // -- Access control --

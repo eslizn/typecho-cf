@@ -3,27 +3,18 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as schema from '@/db/schema';
-import { createTestDb } from '../helpers';
-import { generateAuthToken, hashPassword } from '@/lib/auth';
+import { createTestDb, seedAdmin, makeAuthCookie, type TestDatabase } from '../helpers';
 import { eq } from 'drizzle-orm';
 
-let testDb: ReturnType<typeof createTestDb>;
+let testDb: TestDatabase;
 
 vi.mock('@/db', async () => {
   const actual = await vi.importActual<typeof import('@/db')>('@/db');
-  return {
-    ...actual,
-    getDb: (_d1: any) => testDb,
-    schema: actual.schema,
-  };
+  return { ...actual, getDb: (_d1: any) => testDb, schema: actual.schema };
 });
-
 vi.mock('@/lib/auth', async () => {
   const actual = await vi.importActual<typeof import('@/lib/auth')>('@/lib/auth');
-  return {
-    ...actual,
-    requireAdminCSRF: async () => null,
-  };
+  return { ...actual, requireAdminCSRF: async () => null };
 });
 
 vi.mock('@/lib/plugin', () => ({
@@ -37,25 +28,6 @@ import { POST } from '@/pages/api/admin/content';
 
 const TEST_SECRET = 'content-secret';
 const TEST_AUTH_CODE = 'content-auth-code';
-
-async function seedAdmin() {
-  await testDb.insert(schema.options).values({ name: 'secret', user: 0, value: TEST_SECRET });
-  await testDb.insert(schema.options).values({ name: 'siteUrl', user: 0, value: 'https://example.com' });
-  await testDb.insert(schema.users).values({
-    name: 'admin',
-    password: await hashPassword('admin123'),
-    mail: 'admin@example.com',
-    group: 'administrator',
-    authCode: TEST_AUTH_CODE,
-  });
-  return (await testDb.query.users.findFirst())!;
-}
-
-async function makeAuthCookie(uid: number) {
-  const token = await generateAuthToken(uid, TEST_AUTH_CODE, TEST_SECRET);
-  const [uidPart, hash] = token.split(':');
-  return `__typecho_uid=${uidPart}; __typecho_authCode=${hash}`;
-}
 
 async function makeContentRequest(fields: Record<string, string>, cookie: string) {
   const body = new URLSearchParams(fields);
@@ -71,13 +43,14 @@ async function makeContentRequest(fields: Record<string, string>, cookie: string
 
 describe('POST /api/admin/content', () => {
   beforeEach(async () => {
-    testDb = createTestDb();
-    await seedAdmin();
+    testDb = await createTestDb();
+    await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE });
+    await testDb.insert(schema.options).values({ name: 'siteUrl', user: 0, value: 'https://example.com' });
   });
 
   it('counts duplicate tag names once when creating content', async () => {
     const admin = await testDb.query.users.findFirst();
-    const cookie = await makeAuthCookie(admin!.uid);
+    const cookie = await makeAuthCookie(testDb, admin!.uid, TEST_AUTH_CODE, TEST_SECRET);
     const req = await makeContentRequest({
       do: 'create',
       type: 'post',

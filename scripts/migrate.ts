@@ -23,11 +23,12 @@
  *   npx tsx scripts/migrate.ts --source /path/to/typecho.db --uploads /path/to/usr/uploads --target cloudflare --site-url https://example.com
  */
 
-import Database from 'better-sqlite3';
+import { createClient, type Client } from '@libsql/client/node';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { execSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { exec as execAsync } from 'node:child_process/promises';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -133,11 +134,11 @@ interface SourceRow {
 }
 
 class SourceReader {
-  private db: ReturnType<typeof Database>;
+  private db: Client;
   private prefix: string;
 
   constructor(dbPath: string, prefix: string) {
-    this.db = new Database(dbPath, { readonly: true });
+    this.db = createClient({ url: pathToFileURL(dbPath).href });
     this.prefix = prefix;
   }
 
@@ -146,46 +147,46 @@ class SourceReader {
   }
 
   /** Check if a table exists in the source database */
-  private tableExists(name: string): boolean {
-    const row = this.db.prepare(
-      `SELECT COUNT(*) as count FROM sqlite_master WHERE type='table' AND name=?`
-    ).get(this.table(name)) as { count: number };
-    return row.count > 0;
+  private async tableExists(name: string): Promise<boolean> {
+    const result = await this.db.execute({
+      sql: `SELECT COUNT(*) as count FROM sqlite_master WHERE type='table' AND name=?`,
+      args: [this.table(name)],
+    });
+    return Number(result.rows[0]?.count ?? 0) > 0;
   }
 
-  getUsers(): SourceRow[] {
-    if (!this.tableExists('users')) return [];
-    return this.db.prepare(`SELECT * FROM ${this.table('users')}`).all() as SourceRow[];
+  private async selectAll(name: string): Promise<SourceRow[]> {
+    if (!await this.tableExists(name)) return [];
+    const result = await this.db.execute(`SELECT * FROM ${this.table(name)}`);
+    return result.rows as SourceRow[];
   }
 
-  getContents(): SourceRow[] {
-    if (!this.tableExists('contents')) return [];
-    return this.db.prepare(`SELECT * FROM ${this.table('contents')}`).all() as SourceRow[];
+  getUsers(): Promise<SourceRow[]> {
+    return this.selectAll('users');
   }
 
-  getComments(): SourceRow[] {
-    if (!this.tableExists('comments')) return [];
-    return this.db.prepare(`SELECT * FROM ${this.table('comments')}`).all() as SourceRow[];
+  getContents(): Promise<SourceRow[]> {
+    return this.selectAll('contents');
   }
 
-  getMetas(): SourceRow[] {
-    if (!this.tableExists('metas')) return [];
-    return this.db.prepare(`SELECT * FROM ${this.table('metas')}`).all() as SourceRow[];
+  getComments(): Promise<SourceRow[]> {
+    return this.selectAll('comments');
   }
 
-  getRelationships(): SourceRow[] {
-    if (!this.tableExists('relationships')) return [];
-    return this.db.prepare(`SELECT * FROM ${this.table('relationships')}`).all() as SourceRow[];
+  getMetas(): Promise<SourceRow[]> {
+    return this.selectAll('metas');
   }
 
-  getOptions(): SourceRow[] {
-    if (!this.tableExists('options')) return [];
-    return this.db.prepare(`SELECT * FROM ${this.table('options')}`).all() as SourceRow[];
+  getRelationships(): Promise<SourceRow[]> {
+    return this.selectAll('relationships');
   }
 
-  getFields(): SourceRow[] {
-    if (!this.tableExists('fields')) return [];
-    return this.db.prepare(`SELECT * FROM ${this.table('fields')}`).all() as SourceRow[];
+  getOptions(): Promise<SourceRow[]> {
+    return this.selectAll('options');
+  }
+
+  getFields(): Promise<SourceRow[]> {
+    return this.selectAll('fields');
   }
 
   close() {
@@ -452,7 +453,7 @@ abstract class TargetWriter {
   abstract writeRelationships(rows: SourceRow[]): number;
   abstract writeOptions(rows: SourceRow[], siteUrl: string): number;
   abstract writeFields(rows: SourceRow[]): number;
-  abstract uploadFile(relativePath: string, absolutePath: string): boolean;
+  abstract uploadFile(relativePath: string, absolutePath: string): Promise<boolean>;
   abstract finalize(): void;
 }
 
@@ -716,10 +717,15 @@ class WranglerWriter extends TargetWriter {
     return mapped.length;
   }
 
-  uploadFile(relativePath: string, absolutePath: string): boolean {
+  async uploadFile(relativePath: string, absolutePath: string): Promise<boolean> {
     const r2Key = `usr/uploads/${relativePath}`;
-    this.exec(`wrangler r2 object put "${this.r2Bucket}/${r2Key}" --file="${absolutePath}" ${this.locationFlag}`);
-    return true;
+    const cmd = `wrangler r2 object put "${this.r2Bucket}/${r2Key}" --file="${absolutePath}" ${this.locationFlag}`;
+    try {
+      await execAsync(cmd, { encoding: 'utf-8' });
+      return true;
+    } catch (e: any) {
+      throw new Error(`Upload failed: ${cmd}\n${e.stderr || e.message}`);
+    }
   }
 
   finalize() {
@@ -741,7 +747,7 @@ class DryRunWriter extends TargetWriter {
   writeRelationships(rows: SourceRow[]) { return rows.length; }
   writeOptions(rows: SourceRow[]) { return rows.length; }
   writeFields(rows: SourceRow[]) { return rows.length; }
-  uploadFile() { return true; }
+  async uploadFile() { return true; }
   finalize() {}
 }
 
@@ -793,13 +799,15 @@ async function main() {
   console.log('📖 Reading source database...');
   const reader = new SourceReader(opts.source, opts.prefix);
 
-  const users = reader.getUsers();
-  const contents = reader.getContents();
-  const comments = reader.getComments();
-  const metas = reader.getMetas();
-  const relationships = reader.getRelationships();
-  const options = reader.getOptions();
-  const fields = reader.getFields();
+  const [users, contents, comments, metas, relationships, options, fields] = await Promise.all([
+    reader.getUsers(),
+    reader.getContents(),
+    reader.getComments(),
+    reader.getMetas(),
+    reader.getRelationships(),
+    reader.getOptions(),
+    reader.getFields(),
+  ]);
   reader.close();
 
   console.log(`  Users:         ${users.length}`);
@@ -872,16 +880,20 @@ async function main() {
     console.log();
     console.log('📁 Migrating upload files...');
     let fileCount = 0;
-    for (const file of uploadFiles) {
-      try {
-        writer.uploadFile(file.relativePath, file.absolutePath);
-        fileCount++;
-        if (fileCount % 10 === 0 || fileCount === uploadFiles.length) {
-          process.stdout.write(`\r  Files: ${fileCount}/${uploadFiles.length}`);
+    const CONCURRENCY = 5;
+    for (let i = 0; i < uploadFiles.length; i += CONCURRENCY) {
+      const batch = uploadFiles.slice(i, i + CONCURRENCY);
+      const results = await Promise.allSettled(batch.map(file =>
+        writer.uploadFile(file.relativePath, file.absolutePath)
+      ));
+      for (let j = 0; j < results.length; j++) {
+        if (results[j].status === 'fulfilled') {
+          fileCount++;
+        } else {
+          stats.errors.push(`File ${batch[j].relativePath}: ${(results[j] as PromiseRejectedResult).reason?.message || 'unknown'}`);
         }
-      } catch (e: any) {
-        stats.errors.push(`File ${file.relativePath}: ${e.message}`);
       }
+      process.stdout.write(`\r  Files: ${fileCount}/${uploadFiles.length}`);
     }
     stats.files = fileCount;
     console.log(` ✅`);

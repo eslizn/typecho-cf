@@ -1,22 +1,18 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { createTestDb } from '../helpers';
+import { createTestDb, type TestDatabase } from '../helpers';
 
-let testDb: ReturnType<typeof createTestDb>;
+let testDb: TestDatabase;
 
 vi.mock('@/db', async () => {
   const actual = await vi.importActual<typeof import('@/db')>('@/db');
-  return {
-    ...actual,
-    getDb: (_d1: any) => testDb,
-    schema: actual.schema,
-  };
+  return { ...actual, getDb: (_d1: any) => testDb, schema: actual.schema };
 });
 
 import { POST } from '@/pages/api/users/login';
 
 describe('POST /api/users/login flash errors', () => {
-  beforeEach(() => {
-    testDb = createTestDb();
+  beforeEach(async () => {
+    testDb = await createTestDb();
   });
 
   it('redirects validation errors without exposing the message in the URL', async () => {

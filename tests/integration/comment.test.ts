@@ -6,20 +6,14 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as schema from '@/db/schema';
-import { createTestDb } from '../helpers';
+import { createTestDb, type TestDatabase } from '../helpers';
 import { generateCommentToken } from '@/lib/auth';
 
-// We need to intercept the module-level `getDb(env.DB)` call inside comment.ts
-// by mocking the `@/db` module so it returns our in-memory DB.
-let testDb: ReturnType<typeof createTestDb>;
+let testDb: TestDatabase;
 
 vi.mock('@/db', async () => {
   const actual = await vi.importActual<typeof import('@/db')>('@/db');
-  return {
-    ...actual,
-    getDb: (_d1: any) => testDb,
-    schema: actual.schema,
-  };
+  return { ...actual, getDb: (_d1: any) => testDb, schema: actual.schema };
 });
 
 // Mock plugin module to be a no-op in tests
@@ -35,7 +29,7 @@ import { POST } from '@/pages/api/comment';
 // ---- test helpers -----------------------------------------------------------
 
 async function seedContent(
-  db: ReturnType<typeof createTestDb>,
+  db: TestDatabase,
   overrides: Partial<typeof schema.contents.$inferInsert> = {},
 ) {
   await db.insert(schema.contents).values({
@@ -52,7 +46,7 @@ async function seedContent(
 }
 
 async function seedOptions(
-  db: ReturnType<typeof createTestDb>,
+  db: TestDatabase,
   opts: Record<string, string> = {},
 ) {
   const defaults: Record<string, string> = {
@@ -92,8 +86,8 @@ function makeCommentRequest(
 // ---- tests ------------------------------------------------------------------
 
 describe('POST /api/comment', () => {
-  beforeEach(() => {
-    testDb = createTestDb();
+  beforeEach(async () => {
+    testDb = await createTestDb();
   });
 
   it('returns 400 when cid is missing', async () => {

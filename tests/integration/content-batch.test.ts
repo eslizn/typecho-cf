@@ -6,28 +6,19 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as schema from '@/db/schema';
-import { createTestDb } from '../helpers';
-import { hashPassword, generateAuthToken } from '@/lib/auth';
+import { createTestDb, seedAdmin, makeAuthCookie, type TestDatabase } from '../helpers';
 
 // ---- shared DB ref -----------------------------------------------------------
 
-let testDb: ReturnType<typeof createTestDb>;
+let testDb: TestDatabase;
 
 vi.mock('@/db', async () => {
   const actual = await vi.importActual<typeof import('@/db')>('@/db');
-  return {
-    ...actual,
-    getDb: (_d1: any) => testDb,
-    schema: actual.schema,
-  };
+  return { ...actual, getDb: (_d1: any) => testDb, schema: actual.schema };
 });
-
 vi.mock('@/lib/auth', async () => {
   const actual = await vi.importActual<typeof import('@/lib/auth')>('@/lib/auth');
-  return {
-    ...actual,
-    requireAdminCSRF: async () => null,
-  };
+  return { ...actual, requireAdminCSRF: async () => null };
 });
 
 vi.mock('@/lib/plugin', () => ({
@@ -44,29 +35,8 @@ import { POST } from '@/pages/api/admin/content-batch';
 const TEST_SECRET = 'content-batch-secret';
 const TEST_AUTH_CODE = 'contentbatchcode';
 
-async function seedAdmin(
-  db: ReturnType<typeof createTestDb>,
-  group: string = 'administrator',
-) {
-  await db.insert(schema.options).values({ name: 'secret', user: 0, value: TEST_SECRET });
-  await db.insert(schema.users).values({
-    name: 'admin',
-    password: await hashPassword('admin123'),
-    mail: 'admin@example.com',
-    group,
-    authCode: TEST_AUTH_CODE,
-  });
-  return (await db.query.users.findFirst())!;
-}
-
-async function makeAuthCookie(db: ReturnType<typeof createTestDb>, uid: number) {
-  const token = await generateAuthToken(uid, TEST_AUTH_CODE, TEST_SECRET);
-  const [uidPart, hash] = token.split(':');
-  return `__typecho_uid=${uidPart}; __typecho_authCode=${hash}`;
-}
-
 async function seedPost(
-  db: ReturnType<typeof createTestDb>,
+  db: TestDatabase,
   overrides: Partial<typeof schema.contents.$inferInsert> = {},
   authorId = 1,
 ) {
@@ -111,30 +81,30 @@ function makeBatchRequest(
 // ---- tests -------------------------------------------------------------------
 
 describe('POST /api/admin/content-batch', () => {
-  beforeEach(() => {
-    testDb = createTestDb();
+  beforeEach(async () => {
+    testDb = await createTestDb();
   });
 
   // -- Auth guards --
 
   it('returns 401 when no cookie', async () => {
-    await seedAdmin(testDb);
+    await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE });
     const req = makeBatchRequest('delete', [1], '');
     const res = await POST({ request: req, locals: {}, url: new URL(req.url) } as any);
     expect(res.status).toBe(401);
   });
 
   it('returns 403 when user is not contributor', async () => {
-    const user = await seedAdmin(testDb, 'visitor');
-    const cookie = await makeAuthCookie(testDb, user.uid);
+    const user = await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE, group: 'visitor' });
+    const cookie = await makeAuthCookie(testDb, user.uid, TEST_AUTH_CODE, TEST_SECRET);
     const req = makeBatchRequest('delete', [1], cookie);
     const res = await POST({ request: req, locals: {}, url: new URL(req.url) } as any);
     expect(res.status).toBe(403);
   });
 
   it('redirects to referer when no cids are submitted', async () => {
-    const admin = await seedAdmin(testDb);
-    const cookie = await makeAuthCookie(testDb, admin.uid);
+    const admin = await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE });
+    const cookie = await makeAuthCookie(testDb, admin.uid, TEST_AUTH_CODE, TEST_SECRET);
     const req = makeBatchRequest('delete', [], cookie);
     const res = await POST({ request: req, locals: {}, url: new URL(req.url) } as any);
     expect(res.status).toBe(302);
@@ -143,8 +113,8 @@ describe('POST /api/admin/content-batch', () => {
   // -- delete action --
 
   it('deletes selected posts', async () => {
-    const admin = await seedAdmin(testDb);
-    const cookie = await makeAuthCookie(testDb, admin.uid);
+    const admin = await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE });
+    const cookie = await makeAuthCookie(testDb, admin.uid, TEST_AUTH_CODE, TEST_SECRET);
     const p1 = await seedPost(testDb, { slug: 'p1' });
     const p2 = await seedPost(testDb, { slug: 'p2' });
 
@@ -157,8 +127,8 @@ describe('POST /api/admin/content-batch', () => {
   });
 
   it('also deletes associated comments and fields when deleting post', async () => {
-    const admin = await seedAdmin(testDb);
-    const cookie = await makeAuthCookie(testDb, admin.uid);
+    const admin = await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE });
+    const cookie = await makeAuthCookie(testDb, admin.uid, TEST_AUTH_CODE, TEST_SECRET);
     const post = await seedPost(testDb, { slug: 'post-with-comments' });
 
     // Add a comment and a field
@@ -188,8 +158,8 @@ describe('POST /api/admin/content-batch', () => {
   });
 
   it('decrements meta count when post with category relationship is deleted', async () => {
-    const admin = await seedAdmin(testDb);
-    const cookie = await makeAuthCookie(testDb, admin.uid);
+    const admin = await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE });
+    const cookie = await makeAuthCookie(testDb, admin.uid, TEST_AUTH_CODE, TEST_SECRET);
     const post = await seedPost(testDb, { slug: 'categorized-post' });
 
     // Add a category with count=2
@@ -211,8 +181,8 @@ describe('POST /api/admin/content-batch', () => {
 
   it('contributor can only delete their own posts', async () => {
     // Admin (uid=1) is the owner; contributor (uid=2) tries to delete admin's post
-    const admin = await seedAdmin(testDb, 'contributor');
-    const cookie = await makeAuthCookie(testDb, admin.uid);
+    const admin = await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE, group: 'contributor' });
+    const cookie = await makeAuthCookie(testDb, admin.uid, TEST_AUTH_CODE, TEST_SECRET);
 
     // Seed a post owned by a different (non-existent) user id=99
     const post = await seedPost(testDb, { slug: 'other-post', authorId: 99 });
@@ -228,8 +198,8 @@ describe('POST /api/admin/content-batch', () => {
   // -- mark action --
 
   it('returns 403 when contributor tries to mark status', async () => {
-    const admin = await seedAdmin(testDb, 'contributor');
-    const cookie = await makeAuthCookie(testDb, admin.uid);
+    const admin = await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE, group: 'contributor' });
+    const cookie = await makeAuthCookie(testDb, admin.uid, TEST_AUTH_CODE, TEST_SECRET);
     const post = await seedPost(testDb, { slug: 'contrib-post' });
 
     const req = makeBatchRequest('mark', [post.cid!], cookie, { status: 'hidden' });
@@ -238,8 +208,8 @@ describe('POST /api/admin/content-batch', () => {
   });
 
   it('editor can mark post status to publish', async () => {
-    const editor = await seedAdmin(testDb, 'editor');
-    const cookie = await makeAuthCookie(testDb, editor.uid);
+    const editor = await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE, group: 'editor' });
+    const cookie = await makeAuthCookie(testDb, editor.uid, TEST_AUTH_CODE, TEST_SECRET);
     const post = await seedPost(testDb, { slug: 'draft-post', status: 'waiting' });
 
     const req = makeBatchRequest('mark', [post.cid!], cookie, { status: 'publish' });
@@ -251,8 +221,8 @@ describe('POST /api/admin/content-batch', () => {
   });
 
   it('editor can mark post status to hidden', async () => {
-    const editor = await seedAdmin(testDb, 'editor');
-    const cookie = await makeAuthCookie(testDb, editor.uid);
+    const editor = await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE, group: 'editor' });
+    const cookie = await makeAuthCookie(testDb, editor.uid, TEST_AUTH_CODE, TEST_SECRET);
     const post = await seedPost(testDb, { slug: 'visible-post', status: 'publish' });
 
     const req = makeBatchRequest('mark', [post.cid!], cookie, { status: 'hidden' });
@@ -263,8 +233,8 @@ describe('POST /api/admin/content-batch', () => {
   });
 
   it('editor can mark post status to waiting', async () => {
-    const editor = await seedAdmin(testDb, 'editor');
-    const cookie = await makeAuthCookie(testDb, editor.uid);
+    const editor = await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE, group: 'editor' });
+    const cookie = await makeAuthCookie(testDb, editor.uid, TEST_AUTH_CODE, TEST_SECRET);
     const post = await seedPost(testDb, { slug: 'pub-post', status: 'publish' });
 
     const req = makeBatchRequest('mark', [post.cid!], cookie, { status: 'waiting' });
@@ -275,8 +245,8 @@ describe('POST /api/admin/content-batch', () => {
   });
 
   it('editor can mark post status to private', async () => {
-    const editor = await seedAdmin(testDb, 'editor');
-    const cookie = await makeAuthCookie(testDb, editor.uid);
+    const editor = await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE, group: 'editor' });
+    const cookie = await makeAuthCookie(testDb, editor.uid, TEST_AUTH_CODE, TEST_SECRET);
     const post = await seedPost(testDb, { slug: 'pub-post-2', status: 'publish' });
 
     const req = makeBatchRequest('mark', [post.cid!], cookie, { status: 'private' });
@@ -287,8 +257,8 @@ describe('POST /api/admin/content-batch', () => {
   });
 
   it('rejects invalid status value', async () => {
-    const editor = await seedAdmin(testDb, 'editor');
-    const cookie = await makeAuthCookie(testDb, editor.uid);
+    const editor = await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE, group: 'editor' });
+    const cookie = await makeAuthCookie(testDb, editor.uid, TEST_AUTH_CODE, TEST_SECRET);
     const post = await seedPost(testDb, { slug: 'status-test', status: 'publish' });
 
     const req = makeBatchRequest('mark', [post.cid!], cookie, { status: 'evil' });
@@ -300,8 +270,8 @@ describe('POST /api/admin/content-batch', () => {
   });
 
   it('marks multiple posts in one request', async () => {
-    const editor = await seedAdmin(testDb, 'editor');
-    const cookie = await makeAuthCookie(testDb, editor.uid);
+    const editor = await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE, group: 'editor' });
+    const cookie = await makeAuthCookie(testDb, editor.uid, TEST_AUTH_CODE, TEST_SECRET);
     const p1 = await seedPost(testDb, { slug: 'multi-1', status: 'publish' });
     const p2 = await seedPost(testDb, { slug: 'multi-2', status: 'publish' });
 
@@ -315,8 +285,8 @@ describe('POST /api/admin/content-batch', () => {
   // -- page batch (type=page) --
 
   it('deletes pages when type=page is specified', async () => {
-    const admin = await seedAdmin(testDb);
-    const cookie = await makeAuthCookie(testDb, admin.uid);
+    const admin = await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE });
+    const cookie = await makeAuthCookie(testDb, admin.uid, TEST_AUTH_CODE, TEST_SECRET);
     const page = await seedPost(testDb, { slug: 'my-page', type: 'page' });
 
     const req = makeBatchRequest('delete', [page.cid!], cookie, { type: 'page' });
@@ -328,8 +298,8 @@ describe('POST /api/admin/content-batch', () => {
   });
 
   it('redirects to manage-pages when type=page after operation', async () => {
-    const admin = await seedAdmin(testDb);
-    const cookie = await makeAuthCookie(testDb, admin.uid);
+    const admin = await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE });
+    const cookie = await makeAuthCookie(testDb, admin.uid, TEST_AUTH_CODE, TEST_SECRET);
 
     // No cids → redirect immediately
     const req = makeBatchRequest('delete', [], cookie, { type: 'page' }, 'https://example.com/admin/manage-pages');

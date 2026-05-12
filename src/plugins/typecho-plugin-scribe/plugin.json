@@ -1,7 +1,7 @@
 {
   "id": "typecho-plugin-scribe",
   "name": "Scribe",
-  "description": "接入 OpenAI 兼容 LLM，在编辑器中生成、补全和润色正文",
+  "description": "接入 OpenAI 兼容 LLM，在编辑器中生成、润色和纠错正文",
   "author": "eslizn",
   "authorUrl": "https://eslizn.com",
   "version": "1.0.0",
@@ -40,7 +40,47 @@
       "type": "text",
       "label": "风格参考文章数",
       "default": "5",
-      "description": "生成、补全和润色时读取最近 N 篇已发布文章作为作者风格样本，填写 0 可关闭"
+      "description": "生成、润色和纠错时读取最近 N 篇已发布文章作为作者风格样本，填写 0 可关闭"
+    },
+    "outputLanguage": {
+      "type": "select",
+      "label": "输出语言",
+      "default": "auto",
+      "options": {
+        "auto": "自动判断",
+        "zh-CN": "简体中文",
+        "zh-TW": "繁体中文",
+        "en": "English",
+        "ja": "日本語",
+        "ko": "한국어"
+      },
+      "description": "自动模式会优先沿用标题、正文和风格样本的主要语言"
+    },
+    "targetAudience": {
+      "type": "text",
+      "label": "目标读者",
+      "default": "",
+      "description": "可选，例如：后端工程师、个人博客读者、产品经理；留空时由模型根据历史文章推断"
+    },
+    "lengthPreset": {
+      "type": "select",
+      "label": "篇幅策略",
+      "default": "balanced",
+      "options": {
+        "concise": "偏短",
+        "balanced": "标准",
+        "detailed": "深入"
+      }
+    },
+    "factPolicy": {
+      "type": "select",
+      "label": "事实策略",
+      "default": "conservative",
+      "options": {
+        "conservative": "保守，不确定不写死",
+        "assumptive": "允许低风险常识推断"
+      },
+      "description": "保守模式会要求模型避免把上下文中没有的具体事实写成确定结论"
     },
     "userPrompt": {
       "type": "textarea",

@@ -20,8 +20,8 @@
     "reset-password:cloudflare": "tsx scripts/reset-password.ts --target cloudflare"
   },
   "dependencies": {
-    "@astrojs/cloudflare": "^13.3.1",
-    "astro": "^6.2.2",
+    "@astrojs/cloudflare": "^13.5.0",
+    "astro": "^6.3.1",
     "drizzle-orm": "^0.45.2",
     "marked": "^18.0.3",
     "sanitize-html": "^2.17.3",
@@ -34,23 +34,26 @@
     "typecho-theme-minimal": "file:src/themes/typecho-theme-minimal"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.13",
+    "@libsql/client": "^0.17.3",
     "@types/sanitize-html": "^2.16.1",
-    "@vitest/coverage-v8": "^4.1.5",
-    "better-sqlite3": "^12.9.0",
+    "@vitest/coverage-v8": "^4.1.6",
     "drizzle-kit": "^0.31.10",
     "tsx": "^4.21.0",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.5",
-    "wrangler": "^4.88.0"
+    "vitest": "^4.1.6",
+    "wrangler": "^4.90.0"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
-      "better-sqlite3",
       "esbuild",
+      "libsql",
       "sharp",
       "workerd"
     ],
-    "overrides": {}
+    "allowedDeprecatedVersions": {
+      "@esbuild-kit/core-utils": "3.3.2",
+      "@esbuild-kit/esm-loader": "2.6.5",
+      "@ungap/structured-clone": "1.3.0"
+    }
   }
 }

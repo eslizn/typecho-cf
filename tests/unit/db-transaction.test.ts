@@ -18,12 +18,9 @@ describe('withWriteTransaction()', () => {
     expect(db.transaction).toHaveBeenCalledOnce();
   });
 
-  it('does not pass async callbacks to better-sqlite3 synchronous transactions', async () => {
+  it('runs the callback directly when no transaction implementation is available', async () => {
     const db = {
-      constructor: { name: 'BetterSQLite3Database' },
-      transaction: vi.fn(() => {
-        throw new TypeError('Transaction function cannot return a promise');
-      }),
+      query: true,
     };
 
     const result = await withWriteTransaction(db, async (tx) => {
@@ -32,6 +29,5 @@ describe('withWriteTransaction()', () => {
     });
 
     expect(result).toBe('ok');
-    expect(db.transaction).not.toHaveBeenCalled();
   });
 });

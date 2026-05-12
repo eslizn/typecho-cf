@@ -4,8 +4,20 @@ import type { Database } from '@/db';
 import { schema } from '@/db';
 import { and, desc, eq, inArray, or } from 'drizzle-orm';
 
-type WriterMode = 'generate' | 'complete' | 'polish';
+type WriterMode = 'generate' | 'polish' | 'correct';
 type ContentType = 'post' | 'page';
+type LengthPreset = 'concise' | 'balanced' | 'detailed';
+type FactPolicy = 'conservative' | 'assumptive';
+
+const LENGTH_PRESETS = ['concise', 'balanced', 'detailed'] as const;
+const FACT_POLICIES = ['conservative', 'assumptive'] as const;
+const OUTPUT_LANGUAGES = ['auto', 'zh-CN', 'zh-TW', 'en', 'ja', 'ko'] as const;
+
+const LENGTH_LABELS: Record<LengthPreset, string> = {
+  concise: '偏短：聚焦核心观点，避免铺陈。',
+  balanced: '标准：结构完整，信息密度适中。',
+  detailed: '深入：展开背景、细节、例证和必要的小结。',
+};
 
 interface ScribeConfig {
   endpoint: string;
@@ -14,6 +26,10 @@ interface ScribeConfig {
   temperature: string;
   maxTokens: string;
   stylePostCount: string;
+  outputLanguage: string;
+  targetAudience: string;
+  lengthPreset: LengthPreset;
+  factPolicy: FactPolicy;
   userPrompt: string;
   includeBodyAssets: string;
 }
@@ -95,6 +111,10 @@ const DEFAULTS: ScribeConfig = {
   temperature: '0.7',
   maxTokens: '32000',
   stylePostCount: '5',
+  outputLanguage: 'auto',
+  targetAudience: '',
+  lengthPreset: 'balanced',
+  factPolicy: 'conservative',
   userPrompt: '',
   includeBodyAssets: '0',
 };
@@ -102,12 +122,13 @@ const DEFAULTS: ScribeConfig = {
 const VALIDATION_TIMEOUT_MS = 3500;
 const LLM_REQUEST_TIMEOUT_MS = 60_000;
 const SYSTEM_PROMPT = [
-  '你是一个内容写作助手，不限定输出语言。',
-  '根据用户提供的标题、已有正文和最近文章样本，自行判断应使用的语言、文体、术语密度、段落节奏和表达习惯。',
-  '先在内部总结作者风格，再按照该风格生成、补全或润色完整正文。',
-  '不要解释你的分析过程，不要输出风格总结；只输出可直接保存的正文。',
-  '不要编造事实；当上下文不足时使用克制、可核验的表述。',
-  '默认输出 Markdown，并保留已有正文中的核心观点、事实和结构意图。',
+  '你是 Typecho-CF 的资深内容编辑助手。',
+  '你的目标是帮助作者生成、润色或纠错可直接保存的正文，而不是回答关于写作过程的问题。',
+  '先在内部完成任务理解、风格归纳、结构规划和事实风险检查，但不要输出分析过程、计划、检查清单或解释。',
+  '严格遵守用户提供的标题、已有正文、站点风格样本、附件资料和管理员写作要求。',
+  '不要编造事实、出处、数字、人物、机构或链接；上下文不足时使用克制、可核验的表述。',
+  '默认输出 Markdown 正文。除非用户明确要求，不要输出 front matter、JSON、代码围栏、标题重复、问候语或说明文字。',
+  '润色和纠错任务必须返回完整正文，不能只返回修改或新增片段。',
 ].join('\n');
 
 function normalizeConfig(settings?: Record<string, unknown>): ScribeConfig {
@@ -118,9 +139,29 @@ function normalizeConfig(settings?: Record<string, unknown>): ScribeConfig {
     temperature: String(settings?.temperature || DEFAULTS.temperature).trim(),
     maxTokens: String(settings?.maxTokens || DEFAULTS.maxTokens).trim(),
     stylePostCount: String(settings?.stylePostCount || DEFAULTS.stylePostCount).trim(),
+    outputLanguage: String(settings?.outputLanguage || DEFAULTS.outputLanguage).trim(),
+    targetAudience: String(settings?.targetAudience || DEFAULTS.targetAudience).trim(),
+    lengthPreset: normalizeLengthPreset(settings?.lengthPreset),
+    factPolicy: normalizeFactPolicy(settings?.factPolicy),
     userPrompt: String(settings?.userPrompt || DEFAULTS.userPrompt).trim(),
     includeBodyAssets: String(settings?.includeBodyAssets || DEFAULTS.includeBodyAssets).trim(),
   };
+}
+
+function normalizeEnum<T extends string>(value: unknown, validValues: readonly T[], fallback: T): T {
+  return validValues.includes(value as T) ? (value as T) : fallback;
+}
+
+function assertValid<T extends string>(value: string, validValues: readonly T[], label: string): void {
+  if (!(validValues as readonly string[]).includes(value)) throw new Error(`${label}配置不正确`);
+}
+
+function normalizeLengthPreset(value: unknown): LengthPreset {
+  return normalizeEnum(value, LENGTH_PRESETS, 'balanced');
+}
+
+function normalizeFactPolicy(value: unknown): FactPolicy {
+  return normalizeEnum(value, FACT_POLICIES, 'conservative');
 }
 
 function getConfig(options?: Record<string, unknown>): ScribeConfig {
@@ -154,6 +195,10 @@ function truncateText(text: string, limit: number): string {
   return text.length > limit ? `${text.slice(0, limit)}...` : text;
 }
 
+function xmlBlock(name: string, content: string): string {
+  return `<${name}>\n${content.trim() || '无'}\n</${name}>`;
+}
+
 function buildStyleContext(samples: StyleSample[]): string {
   if (samples.length === 0) {
     return '暂无最近文章样本。';
@@ -174,6 +219,52 @@ function buildConfiguredUserPrompt(config: ScribeConfig): string {
     '以下是站点管理员配置的额外写作要求，请在不违背系统约束和事实准确性的前提下遵循：',
     config.userPrompt,
   ].join('\n');
+}
+
+function buildWritingProfile(config: ScribeConfig): string {
+  const language = config.outputLanguage === 'auto'
+    ? '自动判断：优先沿用标题、正文和样本的主要语言。'
+    : `固定使用：${config.outputLanguage}`;
+  const audience = config.targetAudience
+    ? config.targetAudience
+    : '未指定，按站点既有文章的读者画像推断。';
+  const length = LENGTH_LABELS[config.lengthPreset] ?? LENGTH_LABELS.balanced;
+  const factPolicy = config.factPolicy === 'assumptive'
+    ? '允许基于常识做低风险推断，但必须避免虚构具体事实、数据、链接和来源。'
+    : '保守事实策略：没有在上下文出现或无法确定的具体事实不要写成确定结论。';
+
+  return [
+    `输出语言：${language}`,
+    `目标读者：${audience}`,
+    `篇幅策略：${length}`,
+    `事实策略：${factPolicy}`,
+  ].join('\n');
+}
+
+const MODE_INSTRUCTIONS: Record<WriterMode, (label: string) => string[]> = {
+  generate: (label) => [`根据标题和上下文生成一篇完整${label}正文。`, '不要重复输出标题。', '先组织清晰结构，再输出正文。'],
+  polish: (label) => [`润色下面这篇${label}，输出润色后的完整正文。`, '重点提升表达清晰度、段落节奏、结构衔接和可读性。', '不得改变原文核心观点、事实、语气边界或 Markdown 语义。'],
+  correct: (label) => [`校对这篇${label}，输出校对后的完整正文。`, '修正错别字、语法错误、标点不当、事实矛盾和逻辑断裂。', '保留原文风格、结构、观点和语气，不添加新内容或做润色式改写。'],
+};
+
+function buildModeInstruction(mode: WriterMode, typeLabel: string): string {
+  return MODE_INSTRUCTIONS[mode](typeLabel).join('\n');
+}
+
+function buildOutputContract(mode: WriterMode): string {
+  const lines = [
+    '只输出最终 Markdown 正文。',
+    '不要输出标题、解释、分析过程、计划、检查清单、代码围栏或额外寒暄。',
+    '保留合理的 Markdown 链接、图片、引用、列表、脚注和代码块语义。',
+    '引用定义和脚注定义统一放在全文末尾。',
+    '避免重复段落和重复小标题。',
+  ];
+
+  if (mode !== 'generate') {
+    lines.push('必须返回完整正文，从正文第一段开始，到正文最后一段结束。');
+  }
+
+  return lines.map((line, index) => `${index + 1}. ${line}`).join('\n');
 }
 
 function shouldIncludeBodyAssets(config: ScribeConfig): boolean {
@@ -210,54 +301,20 @@ function buildPrompt(
   const body = payload.body || '';
   const styleContext = buildStyleContext(styleSamples);
   const configuredUserPrompt = buildConfiguredUserPrompt(config);
-  const assetsSection = shouldIncludeBodyAssets(config)
-    ? `正文图片和附件：\n${buildAssetsContext(assets)}`
-    : '';
-
-  if (mode === 'generate') {
-    return [
-      '请先根据最近文章样本在内部总结作者风格，然后按该风格生成内容。',
-      `最近文章样本：\n${styleContext}`,
-      `额外写作要求：\n${configuredUserPrompt}`,
-      assetsSection,
-      `请根据标题生成一篇完整${typeLabel}。`,
-      `标题：${title}`,
-      body ? `已有正文可作为上下文参考：\n${body}` : '',
-      '要求：输出完整 Markdown 正文，不要重复输出标题，不要解释你的写作过程；语言需根据标题、正文和样本自行适配。',
-    ].filter(Boolean).join('\n\n');
-  }
-
-  if (mode === 'complete') {
-    return [
-      '请先根据最近文章样本在内部总结作者风格，然后按该风格生成一版完整正文。',
-      `最近文章样本：\n${styleContext}`,
-      `额外写作要求：\n${configuredUserPrompt}`,
-      assetsSection,
-      `请基于下面这篇${typeLabel}输出修改后的完整正文，保持原有结构、语气和 Markdown 风格。`,
-      `标题：${title}`,
-      `已有正文开始：\n${body}\n已有正文结束。`,
-      [
-        '硬性输出要求：',
-        '1. 只输出一篇完整 Markdown 正文，从正文第一段开始，到正文最后一段结束。',
-        '2. 即使只是续写或新增章节，也必须把已有正文中应保留的内容和新增内容一起输出。',
-        '3. 如果需要修改原章节，请直接在完整正文中改写该章节，不要只输出修改片段、补全部分或新增段落。',
-        '4. 不要重复输出标题，不要解释写作过程，不要重复章节。',
-        '5. Markdown 引用定义和脚注定义统一放在全文末尾。',
-        '6. 语言需根据标题、正文和样本自行适配。',
-      ].join('\n'),
-    ].join('\n\n');
-  }
 
   return [
-    '请先根据最近文章样本在内部总结作者风格，然后按该风格润色内容。',
-    `最近文章样本：\n${styleContext}`,
-    `额外写作要求：\n${configuredUserPrompt}`,
-    assetsSection,
-    `请润色下面这篇${typeLabel}，提升表达、结构和可读性。`,
-    `标题：${title}`,
-    `已有正文：\n${body}`,
-    '要求：保留核心观点和事实，输出润色后的完整 Markdown 正文；语言需根据标题、正文和样本自行适配。',
-  ].join('\n\n');
+    xmlBlock('style_samples', styleContext),
+    xmlBlock('writing_profile', buildWritingProfile(config)),
+    xmlBlock('admin_requirements', configuredUserPrompt),
+    shouldIncludeBodyAssets(config) ? xmlBlock('assets', buildAssetsContext(assets)) : '',
+    xmlBlock('draft', [
+      `content_type: ${typeLabel}`,
+      `title: ${title}`,
+      body ? `body:\n${body}` : 'body: 无',
+    ].join('\n')),
+    xmlBlock('task', buildModeInstruction(mode, typeLabel)),
+    xmlBlock('output_contract', buildOutputContract(mode)),
+  ].filter(Boolean).join('\n\n');
 }
 
 async function readErrorSnippet(response: Response): Promise<string> {
@@ -400,6 +457,9 @@ async function validateConfig(settings?: Record<string, unknown>): Promise<Scrib
   if (!['0', '1'].includes(config.includeBodyAssets)) {
     throw new Error('发送正文图片和附件配置不正确');
   }
+  assertValid(config.outputLanguage, OUTPUT_LANGUAGES, '输出语言');
+  assertValid(config.lengthPreset, LENGTH_PRESETS, '篇幅策略');
+  assertValid(config.factPolicy, FACT_POLICIES, '事实策略');
 
   await validateModelAccess(config);
 
@@ -730,14 +790,19 @@ async function callLLMStream(
     throw new Error('请先完整配置接口地址、API Key 和模型名称');
   }
 
-  const response = await fetch(buildChatCompletionsUrl(config.endpoint), {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${config.apiKey}`,
+  const response = await fetchWithTimeout(
+    buildChatCompletionsUrl(config.endpoint),
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${config.apiKey}`,
+      },
+      body: JSON.stringify(buildChatCompletionPayload(config, mode, payload, styleSamples, assets, siteUrl, true)),
     },
-    body: JSON.stringify(buildChatCompletionPayload(config, mode, payload, styleSamples, assets, siteUrl, true)),
-  });
+    LLM_REQUEST_TIMEOUT_MS,
+    'LLM 请求超时，请稍后重试',
+  );
 
   if (!response.ok) {
     const suffix = await readErrorSnippet(response);
@@ -770,7 +835,53 @@ function editorHtml(contentType: ContentType): string {
   font-weight: 700;
   color: #666;
 }
+#wmd-scribe-button {
+  position: relative;
+}
 #wmd-scribe-button[aria-disabled="true"] {
+  opacity: .5;
+  cursor: default;
+}
+
+.typecho-scribe-menu {
+  display: none;
+  position: absolute;
+  top: 24px;
+  left: 0;
+  gap: 4px;
+  padding: 4px;
+  background: #fff;
+  border: 1px solid #d9d9d9;
+  border-radius: 3px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .12);
+  z-index: 30;
+}
+.typecho-scribe-menu[aria-hidden="false"] {
+  display: flex;
+}
+.typecho-scribe-menu-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  color: #555;
+  cursor: pointer;
+}
+.typecho-scribe-menu-button svg {
+  flex-shrink: 0;
+}
+.typecho-scribe-menu-button:hover,
+.typecho-scribe-menu-button:focus {
+  background: #f0f0f0;
+  color: #222;
+  outline: none;
+}
+.typecho-scribe-menu-button[aria-disabled="true"] {
   opacity: .5;
   cursor: default;
 }
@@ -823,6 +934,12 @@ function editorHtml(contentType: ContentType): string {
   resize: none;
   pointer-events: none;
 }
+
+.typecho-scribe-fallback-btn svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
 </style>
 <div class="typecho-scribe" data-content-type="${contentType}" hidden>
   <span class="typecho-scribe-fallback-actions"></span>
@@ -830,7 +947,7 @@ function editorHtml(contentType: ContentType): string {
 <div class="typecho-scribe-overlay" role="status" aria-live="polite" aria-hidden="true">
   <div class="typecho-scribe-loader">
     <span class="typecho-scribe-loader-spinner" aria-hidden="true"></span>
-    <span class="typecho-scribe-loader-text">AI 正在补全...</span>
+    <span class="typecho-scribe-loader-text">AI 正在生成...</span>
   </div>
 </div>
 <script is:inline>
@@ -883,10 +1000,25 @@ function editorHtml(contentType: ContentType): string {
     notice.scrollIntoView({ block: 'start', behavior: 'smooth' });
   }
 
-  function setBusy(text, button, busy) {
+  var SCRIBE_ICON = '<span aria-hidden="true">AI</span>';
+  var MODE_ICONS = {
+    generate: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>',
+    polish: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>',
+    correct: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 10 2 2 4-4"/><rect width="20" height="20" x="2" y="2" rx="4" opacity=".25"/><path d="M20.5 2.5 15 20 9 17l-5.5 3L6 14Z"/></svg>'
+  };
+  var scribeButtons = [];
+  var MODE_LABELS = { generate: '生成', polish: '润色', correct: '纠错' };
+  var MODE_TITLES = { generate: 'AI 生成', polish: 'AI 润色', correct: 'AI 纠错' };
+
+  function modeLabel(mode) {
+    return MODE_LABELS[mode] || MODE_LABELS.generate;
+  }
+
+  function setBusy(text, button, busy, label) {
     var toolbar = document.getElementById('wmd-button-row');
     var editarea = document.getElementById('wmd-editarea') || (text ? text.parentElement : null);
     var overlay = document.querySelector('.typecho-scribe-overlay');
+    var overlayText = document.querySelector('.typecho-scribe-loader-text');
     if (toolbar) {
       toolbar.classList.toggle('typecho-scribe-busy', busy);
     }
@@ -896,6 +1028,13 @@ function editorHtml(contentType: ContentType): string {
       }
       overlay.setAttribute('aria-hidden', busy ? 'false' : 'true');
     }
+    if (overlayText && label) {
+      overlayText.textContent = busy ? 'AI 正在' + label + '...' : 'AI 正在生成...';
+    }
+    if (busy) closeScribeMenus();
+    scribeButtons.forEach(function(control) {
+      control.setAttribute('aria-disabled', busy ? 'true' : 'false');
+    });
     if (button) {
       button.setAttribute('aria-disabled', busy ? 'true' : 'false');
     }
@@ -1095,7 +1234,7 @@ function editorHtml(contentType: ContentType): string {
     var reader = response.body.getReader();
     var decoder = new TextDecoder();
     var nextText = '';
-    text.value = mode === 'complete' ? oldText : '';
+    text.value = mode === 'polish' || mode === 'correct' ? oldText : '';
 
     for (;;) {
       var result = await reader.read();
@@ -1116,7 +1255,7 @@ function editorHtml(contentType: ContentType): string {
     }
   }
 
-  async function runScribe(box, button) {
+  async function runScribe(box, button, requestedMode) {
     if (button && button.getAttribute('aria-disabled') === 'true') return;
 
     var title = document.getElementById('title');
@@ -1126,9 +1265,20 @@ function editorHtml(contentType: ContentType): string {
     if (!box || !title || !text || !csrf) return;
 
     var oldText = text.value || '';
-    var mode = oldText.trim() ? 'complete' : 'generate';
+    var hasText = oldText.trim() !== '';
+    var mode;
+    if (requestedMode) {
+      if ((requestedMode === 'polish' || requestedMode === 'correct') && !hasText) {
+        showAdminNotice('请先输入正文，再使用 AI ' + modeLabel(requestedMode), 'error');
+        return;
+      }
+      mode = requestedMode;
+    } else {
+      mode = 'generate';
+    }
+    var label = modeLabel(mode);
 
-    setBusy(text, button, true);
+    setBusy(text, button, true, label);
     clearAdminNotice();
 
     try {
@@ -1153,52 +1303,120 @@ function editorHtml(contentType: ContentType): string {
       await readStreamIntoEditor(response, text, oldText, mode);
       text.dispatchEvent(new Event('input', { bubbles: true }));
       if (window.jQuery) window.jQuery(text).trigger('input');
-      showAdminNotice('AI 补全完成', 'success');
+      showAdminNotice('AI ' + label + '完成', 'success');
     } catch (error) {
       text.value = oldText;
       showAdminNotice(error && error.message ? error.message : 'AI 写作失败', 'error');
     } finally {
-      setBusy(text, button, false);
+      setBusy(text, button, false, label);
     }
   }
 
-  function bindButton(button, box) {
-    if (!button || button.dataset.scribeBound === '1') return;
-    button.dataset.scribeBound = '1';
+  var scribeMenuOpen = false;
+
+  function closeScribeMenus() {
+    if (!scribeMenuOpen) return;
+    scribeMenuOpen = false;
+    document.querySelectorAll('.typecho-scribe-menu').forEach(function(menu) {
+      menu.setAttribute('aria-hidden', 'true');
+    });
+    document.querySelectorAll('.typecho-scribe-menu-trigger').forEach(function(trigger) {
+      trigger.setAttribute('aria-expanded', 'false');
+    });
+  }
+
+  function toggleScribeMenu(trigger) {
+    if (!trigger || trigger.getAttribute('aria-disabled') === 'true') return;
+    var menu = trigger.querySelector('.typecho-scribe-menu');
+    if (!menu) return;
+    var willOpen = menu.getAttribute('aria-hidden') !== 'false';
+    closeScribeMenus();
+    menu.setAttribute('aria-hidden', willOpen ? 'false' : 'true');
+    trigger.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+    scribeMenuOpen = willOpen;
+  }
+
+  function createMenuButton(box, mode, title) {
+    var button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'typecho-scribe-menu-button';
+    button.innerHTML = MODE_ICONS[mode] || '';
+    button.title = title;
+    button.setAttribute('aria-label', title);
+    button.setAttribute('role', 'menuitem');
     button.addEventListener('click', function(event) {
       event.preventDefault();
-      runScribe(box, button);
+      event.stopPropagation();
+      closeScribeMenus();
+      runScribe(box, button, mode);
     });
-    button.addEventListener('keydown', function(event) {
-      if (event.key === 'Enter' || event.key === ' ') {
-        event.preventDefault();
-        runScribe(box, button);
-      }
+    scribeButtons.push(button);
+    return button;
+  }
+
+  function createScribeMenu(box) {
+    var menu = document.createElement('div');
+    menu.className = 'typecho-scribe-menu';
+    menu.setAttribute('role', 'menu');
+    menu.setAttribute('aria-hidden', 'true');
+    Object.keys(MODE_TITLES).forEach(function(mode) {
+      menu.appendChild(createMenuButton(box, mode, MODE_TITLES[mode]));
     });
+    return menu;
   }
 
   function createToolbarButton(box) {
     var item = document.createElement('li');
     item.id = 'wmd-scribe-button';
-    item.className = 'wmd-button typecho-scribe-toolbar-button';
-    item.title = 'AI 补全';
+    item.className = 'wmd-button typecho-scribe-toolbar-button typecho-scribe-menu-trigger';
+    item.title = 'AI 写作';
     item.tabIndex = 0;
     item.setAttribute('role', 'button');
-    item.setAttribute('aria-label', 'AI 补全');
-    item.innerHTML = '<span aria-hidden="true">AI</span>';
-    bindButton(item, box);
+    item.setAttribute('aria-label', 'AI 写作');
+    item.setAttribute('aria-haspopup', 'menu');
+    item.setAttribute('aria-expanded', 'false');
+    item.innerHTML = SCRIBE_ICON;
+    item.appendChild(createScribeMenu(box));
+    item.addEventListener('click', function(event) {
+      event.preventDefault();
+      event.stopPropagation();
+      toggleScribeMenu(item);
+    });
+    item.addEventListener('keydown', function(event) {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        toggleScribeMenu(item);
+      } else if (event.key === 'Escape') {
+        closeScribeMenus();
+      }
+    });
+    scribeButtons.push(item);
     return item;
   }
 
   function createFallbackButton(box) {
     var actions = box.querySelector('.typecho-scribe-fallback-actions');
     if (!actions || actions.querySelector('.typecho-scribe-fallback-btn')) return;
+    var wrapper = document.createElement('span');
+    wrapper.className = 'typecho-scribe-fallback-menu typecho-scribe-menu-trigger';
+    wrapper.style.position = 'relative';
     var button = document.createElement('button');
     button.type = 'button';
     button.className = 'btn btn-xs typecho-scribe-fallback-btn';
-    button.textContent = 'AI 补全';
-    bindButton(button, box);
-    actions.appendChild(button);
+    button.innerHTML = SCRIBE_ICON;
+    button.title = 'AI 写作';
+    button.setAttribute('aria-label', 'AI 写作');
+    button.setAttribute('aria-haspopup', 'menu');
+    button.setAttribute('aria-expanded', 'false');
+    wrapper.appendChild(button);
+    wrapper.appendChild(createScribeMenu(box));
+    button.addEventListener('click', function(event) {
+      event.preventDefault();
+      event.stopPropagation();
+      toggleScribeMenu(wrapper);
+    });
+    actions.appendChild(wrapper);
+    scribeButtons.push(button);
     box.hidden = false;
   }
 
@@ -1236,6 +1454,7 @@ function editorHtml(contentType: ContentType): string {
   } else {
     initScribe();
   }
+  document.addEventListener('click', closeScribeMenus);
 })();
 </script>`;
 }
@@ -1270,7 +1489,7 @@ export default function init({ addHook, pluginId }: PluginInitContext): void {
       extra?: { action?: string; payload?: WriterPayload; options?: Record<string, unknown>; db?: Database },
     ) => {
       const action = extra?.action || '';
-      if (!['generate', 'complete', 'polish'].includes(action)) return result;
+      if (!['generate', 'polish', 'correct'].includes(action)) return result;
 
       try {
         const config = getConfig(extra?.options);

@@ -3,18 +3,14 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as schema from '@/db/schema';
-import { createTestDb } from '../helpers';
+import { createTestDb, type TestDatabase } from '../helpers';
 import { eq } from 'drizzle-orm';
 
-let testDb: ReturnType<typeof createTestDb>;
+let testDb: TestDatabase;
 
 vi.mock('@/db', async () => {
   const actual = await vi.importActual<typeof import('@/db')>('@/db');
-  return {
-    ...actual,
-    getDb: (_d1: any) => testDb,
-    schema: actual.schema,
-  };
+  return { ...actual, getDb: (_d1: any) => testDb, schema: actual.schema };
 });
 
 vi.mock('@/lib/plugin', () => ({
@@ -71,7 +67,7 @@ async function seedComment(cid: number, text: string, status = 'approved') {
 
 describe('GET /feed/comments', () => {
   beforeEach(async () => {
-    testDb = createTestDb();
+    testDb = await createTestDb();
     await seedOptions();
   });
 

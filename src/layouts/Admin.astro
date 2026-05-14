@@ -3,6 +3,7 @@ import type { SiteOptions } from '@/lib/options';
 import type { computeUrls } from '@/lib/options';
 import type { UserRow } from '@/lib/context';
 import { hasPermission } from '@/lib/auth';
+import { applyFilterSafely } from '@/lib/plugin';
 
 interface Props {
   title: string;
@@ -69,6 +70,8 @@ const menuGroups = [
 // Compute index among visible (filtered) groups to match the .map() idx
 const visibleGroups = menuGroups.filter(g => g.show);
 const focusGroupIdx = visibleGroups.findIndex(g => g.children.some(c => c.active));
+const adminHeadHtml = await applyFilterSafely('admin:header', '', { options, urls, user, activeMenu, title });
+const adminFooterHtml = await applyFilterSafely('admin:footer', '', { options, urls, user, activeMenu, title });
 ---
 <!DOCTYPE html>
 <html lang={options.lang === 'zh_CN' ? 'zh-CN' : 'en'}>
@@ -81,6 +84,7 @@ const focusGroupIdx = visibleGroups.findIndex(g => g.children.some(c => c.active
   <link rel="stylesheet" href="/css/normalize.css" />
   <link rel="stylesheet" href="/css/grid.css" />
   <link rel="stylesheet" href="/css/admin.css" />
+  {adminHeadHtml && <Fragment set:html={adminHeadHtml} />}
   <slot name="head" />
 </head>
 <body>
@@ -258,5 +262,6 @@ const focusGroupIdx = visibleGroups.findIndex(g => g.children.some(c => c.active
   </script>
 
   <slot name="footer" />
+  {adminFooterHtml && <Fragment set:html={adminFooterHtml} />}
 </body>
 </html>

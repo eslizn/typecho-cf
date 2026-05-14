@@ -1,0 +1,12 @@
+{
+  "name": "typecho-plugin-wechat-publisher",
+  "version": "1.0.0",
+  "description": "Sync Typecho posts to WeChat Official Account drafts",
+  "type": "module",
+  "keywords": ["typecho", "plugin", "wechat", "mp"],
+  "main": "index.ts",
+  "exports": {
+    ".": "./index.ts",
+    "./index.ts": "./index.ts"
+  }
+}

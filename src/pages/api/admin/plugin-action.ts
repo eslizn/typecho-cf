@@ -3,7 +3,7 @@ import { isAdminActionResponse, requireAdminAction } from '@/lib/admin-auth';
 import { applyFilter, parseActivatedPlugins, setActivatedPlugins } from '@/lib/plugin';
 import { withTimeout } from '@/lib/timeout';
 
-const PLUGIN_ACTION_TIMEOUT_MS = 15_000;
+const PLUGIN_ACTION_TIMEOUT_MS = 60_000;
 
 export const POST: APIRoute = async ({ request }) => {
   const auth = await requireAdminAction(request, 'contributor');

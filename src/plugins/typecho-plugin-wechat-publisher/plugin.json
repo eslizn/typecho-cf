@@ -1,0 +1,64 @@
+{
+  "id": "typecho-plugin-wechat-publisher",
+  "name": "WeChat Publisher",
+  "description": "在文章列表中同步文章到微信公众号草稿，自动处理 Markdown 转换、封面和正文图片上传",
+  "author": "eslizn",
+  "authorUrl": "https://eslizn.com",
+  "version": "1.0.0",
+  "homepage": "https://github.com/eslizn/typecho-cf/tree/master/src/plugins/typecho-plugin-wechat-publisher",
+  "license": "MIT",
+  "tags": ["wechat", "mp", "sync", "content"],
+  "config": {
+    "appId": {
+      "type": "text",
+      "label": "AppID",
+      "default": "",
+      "description": "微信公众号开发者 AppID"
+    },
+    "appSecret": {
+      "type": "password",
+      "label": "AppSecret",
+      "default": "",
+      "description": "微信公众号开发者 AppSecret，用于获取 access_token"
+    },
+    "author": {
+      "type": "text",
+      "label": "默认作者",
+      "default": "",
+      "description": "留空时使用文章作者显示名"
+    },
+    "defaultCoverUrl": {
+      "type": "text",
+      "label": "默认封面图片 URL",
+      "default": "",
+      "description": "文章没有图片时使用；微信公众号草稿必须包含封面素材"
+    },
+    "sourceUrlMode": {
+      "type": "select",
+      "label": "原文链接",
+      "default": "permalink",
+      "options": {
+        "permalink": "使用站内永久链接",
+        "empty": "不填写"
+      }
+    },
+    "needOpenComment": {
+      "type": "select",
+      "label": "公众号评论",
+      "default": "0",
+      "options": {
+        "0": "关闭",
+        "1": "开启"
+      }
+    },
+    "onlyFansCanComment": {
+      "type": "select",
+      "label": "仅粉丝可评论",
+      "default": "0",
+      "options": {
+        "0": "否",
+        "1": "是"
+      }
+    }
+  }
+}

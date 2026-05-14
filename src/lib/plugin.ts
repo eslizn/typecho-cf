@@ -137,6 +137,7 @@ export const HookPoints = {
   'admin:writePost:option': 'admin:writePost:option',          // Post editor sidebar options
   'admin:writePost:advanceOption': 'admin:writePost:advanceOption', // Post editor advanced options
   'admin:writePost:bottom': 'admin:writePost:bottom',          // Post editor bottom area
+  'admin:managePosts:titleActions': 'admin:managePosts:titleActions', // Post list title inline actions
   'admin:writePage:option': 'admin:writePage:option',          // Page editor sidebar options
   'admin:writePage:advanceOption': 'admin:writePage:advanceOption', // Page editor advanced options
   'admin:writePage:bottom': 'admin:writePage:bottom',          // Page editor bottom area
@@ -358,10 +359,9 @@ export function removePluginHooks(pluginId: string): void {
  * @param args - Arguments to pass to handlers
  */
 export async function doHook(hookPoint: string, ...args: any[]): Promise<void> {
-  const handlers = hookRegistry.get(hookPoint);
-  if (!handlers || handlers.length === 0) return;
+  if (!hasHook(hookPoint)) return;
 
-  for (const reg of handlers) {
+  for (const reg of hookRegistry.get(hookPoint)!) {
     if (!activatedPlugins.has(reg.pluginId)) continue;
     try {
       await (reg.handler as CallHandler)(...args);
@@ -382,11 +382,10 @@ export async function doHook(hookPoint: string, ...args: any[]): Promise<void> {
  * @returns The filtered value
  */
 export async function applyFilter(hookPoint: string, value: any, ...args: any[]): Promise<any> {
-  const handlers = hookRegistry.get(hookPoint);
-  if (!handlers || handlers.length === 0) return value;
+  if (!hasHook(hookPoint)) return value;
 
   let result = value;
-  for (const reg of handlers) {
+  for (const reg of hookRegistry.get(hookPoint)!) {
     if (!activatedPlugins.has(reg.pluginId)) continue;
     try {
       result = await (reg.handler as FilterHandler)(result, ...args);
@@ -404,11 +403,10 @@ export async function applyFilter(hookPoint: string, value: any, ...args: any[])
  * preferable to failing the entire page.
  */
 export async function applyFilterSafely(hookPoint: string, value: any, ...args: any[]): Promise<any> {
-  const handlers = hookRegistry.get(hookPoint);
-  if (!handlers || handlers.length === 0) return value;
+  if (!hasHook(hookPoint)) return value;
 
   let result = value;
-  for (const reg of handlers) {
+  for (const reg of hookRegistry.get(hookPoint)!) {
     if (!activatedPlugins.has(reg.pluginId)) continue;
     try {
       result = await (reg.handler as FilterHandler)(result, ...args);

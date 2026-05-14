@@ -201,6 +201,7 @@ Config storage: `typecho_options` table, `name = "plugin:<pluginId>"`, value is 
 | `comment:markdown` | Comment Markdown | `(markdown, comment)` | Filter raw comment text |
 | `post:write` | Before post save | `(data, extra)` | Filter post write data |
 | `page:write` | Before page save | `(data, extra)` | Filter page write data |
+| `admin:managePosts:titleActions` | Post list title action area | `(html, extra)` | Append management actions next to each post title |
 | `feedback:comment` | Before comment save | `(commentData, extra)` | Validate/modify comment; set `_rejected` to reject |
 | `feed:item` | RSS/Atom generation | `(item, post)` | Filter feed item |
 | `widget:sidebar` | Sidebar render | `(sidebarData, context)` | Filter sidebar data |

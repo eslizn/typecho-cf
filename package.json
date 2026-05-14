@@ -30,6 +30,7 @@
     "typecho-plugin-antispam": "file:src/plugins/typecho-plugin-antispam",
     "typecho-plugin-captcha": "file:src/plugins/typecho-plugin-captcha",
     "typecho-plugin-turnstile": "file:src/plugins/typecho-plugin-turnstile",
+    "typecho-plugin-wechat-publisher": "file:src/plugins/typecho-plugin-wechat-publisher",
     "typecho-plugin-webdav": "file:src/plugins/typecho-plugin-webdav",
     "typecho-theme-minimal": "file:src/themes/typecho-theme-minimal"
   },

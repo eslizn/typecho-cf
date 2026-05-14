@@ -5,6 +5,7 @@ import { hasPermission } from '@/lib/auth';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { schema } from '@/db';
 import { formatDate, buildPermalink } from '@/lib/content';
+import { applyFilterSafely } from '@/lib/plugin';
 
 const ctx = await createContext(Astro.locals, Astro.request);
 const authCheck = requireAuth(ctx);
@@ -126,6 +127,13 @@ const draftCount = await db.select({ count: sql<number>`count(*)` }).from(schema
   .where(and(eq(schema.contents.type, 'post_draft'), ...(!isAdmin ? [eq(schema.contents.authorId, user!.uid)] : [])));
 const waitingCount = await db.select({ count: sql<number>`count(*)` }).from(schema.contents)
   .where(and(eq(schema.contents.type, 'post'), eq(schema.contents.status, 'waiting'), ...(!isAdmin ? [eq(schema.contents.authorId, user!.uid)] : [])));
+
+const titleActionHtml = new Map<number, string>(
+  await Promise.all(posts.map(async (post) => [
+    post.cid,
+    await applyFilterSafely('admin:managePosts:titleActions', '', { post, options, urls, user }),
+  ] as [number, string]))
+);
 ---
 <Admin title="管理文章" options={options} urls={urls} user={user} activeMenu="manage-posts">
   <div class="col-mb-12 typecho-list">
@@ -233,6 +241,7 @@ const waitingCount = await db.select({ count: sql<number>`count(*)` }).from(sche
                         <a href={buildPermalink({ cid: post.cid, slug: post.slug, type: post.type, created: post.created }, urls.siteUrl, options.permalinkPattern as string | undefined)}
                           title={`浏览 ${post.title}`}><i class="i-exlink"></i></a>
                       )}
+                      {titleActionHtml.get(post.cid) && <Fragment set:html={titleActionHtml.get(post.cid)} />}
                     </td>
                     <td class="kit-hidden-mb">{author?.screenName || author?.name || '未知'}</td>
                     <td class="kit-hidden-mb">

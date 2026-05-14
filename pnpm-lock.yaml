@@ -41,6 +41,9 @@ importers:
       typecho-plugin-webdav:
         specifier: file:src/plugins/typecho-plugin-webdav
         version: file:src/plugins/typecho-plugin-webdav
+      typecho-plugin-wechat-publisher:
+        specifier: file:src/plugins/typecho-plugin-wechat-publisher
+        version: file:src/plugins/typecho-plugin-wechat-publisher
       typecho-theme-minimal:
         specifier: file:src/themes/typecho-theme-minimal
         version: file:src/themes/typecho-theme-minimal
@@ -2243,6 +2246,9 @@ packages:
 
   typecho-plugin-webdav@file:src/plugins/typecho-plugin-webdav:
     resolution: {directory: src/plugins/typecho-plugin-webdav, type: directory}
+
+  typecho-plugin-wechat-publisher@file:src/plugins/typecho-plugin-wechat-publisher:
+    resolution: {directory: src/plugins/typecho-plugin-wechat-publisher, type: directory}
 
   typecho-theme-minimal@file:src/themes/typecho-theme-minimal:
     resolution: {directory: src/themes/typecho-theme-minimal, type: directory}
@@ -4717,6 +4723,8 @@ snapshots:
   typecho-plugin-turnstile@file:src/plugins/typecho-plugin-turnstile: {}
 
   typecho-plugin-webdav@file:src/plugins/typecho-plugin-webdav: {}
+
+  typecho-plugin-wechat-publisher@file:src/plugins/typecho-plugin-wechat-publisher: {}
 
   typecho-theme-minimal@file:src/themes/typecho-theme-minimal: {}
 

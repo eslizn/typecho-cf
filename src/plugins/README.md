@@ -201,6 +201,7 @@ addHook('feedback:comment', pluginId, async (commentData: { _rejected?: string }
 | `comment:markdown` | 评论 Markdown | `(markdown, comment)` | 过滤评论原始文本 |
 | `post:write` | 文章保存前 | `(data, extra)` | 过滤文章写入数据 |
 | `page:write` | 页面保存前 | `(data, extra)` | 过滤页面写入数据 |
+| `admin:managePosts:titleActions` | 文章列表标题操作区 | `(html, extra)` | 在每篇文章标题旁追加管理操作 |
 | `feedback:comment` | 评论保存前 | `(commentData, extra)` | 验证/修改评论，设置 `_rejected` 可拒绝 |
 | `feed:item` | RSS/Atom 生成 | `(item, post)` | 过滤 feed 条目 |
 | `widget:sidebar` | 侧边栏渲染 | `(sidebarData, context)` | 过滤侧边栏数据 |

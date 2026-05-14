@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import init, { extractImageUrls, normalizeConfig, renderWeChatHtml } from './index';
+import { env } from 'cloudflare:workers';
 
 function collectHooks() {
   const hooks = new Map<string, Function[]>();
@@ -63,6 +64,7 @@ function mockDb(syncState?: Record<string, unknown> | null, attachments: any[] =
 describe('typecho-plugin-wechat-publisher', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    env.BUCKET = null as any;
   });
 
   it('registers admin title, footer, config, and action hooks', () => {
@@ -183,6 +185,143 @@ describe('typecho-plugin-wechat-publisher', () => {
     expect(inserted.map(row => row.name)).toEqual([
       'plugin:typecho-plugin-wechat-publisher:post:7',
     ]);
+  });
+
+  it('reads local upload images from R2 instead of refetching the public site URL', async () => {
+    const hooks = collectHooks();
+    const action = hooks.get('plugin:typecho-plugin-wechat-publisher:action')![0];
+    const { db, inserted } = mockDb();
+    const bucketGet = vi.fn(async (key: string) => ({
+      body: new Blob(['r2-image'], { type: 'image/jpeg' }).stream(),
+      httpEtag: '"etag"',
+      httpMetadata: { contentType: 'image/jpeg' },
+      key,
+    }));
+    env.BUCKET = { get: bucketGet } as any;
+
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const target = String(url);
+      if (target.includes('/cgi-bin/token')) {
+        return new Response(JSON.stringify({ access_token: 'token-r2' }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (target === 'https://blog.example/usr/uploads/a.jpg') {
+        return new Response('timeout', { status: 522 });
+      }
+      if (target.includes('/cgi-bin/media/uploadimg')) {
+        return new Response(JSON.stringify({ url: 'https://mmbiz.qpic.cn/body-r2.jpg' }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (target.includes('/cgi-bin/material/add_material')) {
+        return new Response(JSON.stringify({ media_id: 'cover-r2-media-id' }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (target.includes('/cgi-bin/draft/add')) {
+        const body = JSON.parse(String(init?.body || '{}'));
+        expect(body.articles[0].content).toContain('https://mmbiz.qpic.cn/body-r2.jpg');
+        return new Response(JSON.stringify({ media_id: 'draft-r2-media-id' }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      throw new Error(`unexpected fetch: ${target}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await action({ handled: false }, {
+      action: 'sync',
+      payload: { cid: 7 },
+      db,
+      user: { uid: 3, group: 'contributor', screenName: '当前用户' },
+      options: {
+        siteUrl: 'https://blog.example',
+        'plugin:typecho-plugin-wechat-publisher': JSON.stringify({
+          appId: 'appid-r2',
+          appSecret: 'secret',
+        }),
+      },
+    });
+
+    expect(result).toMatchObject({
+      handled: true,
+      success: true,
+      mediaId: 'draft-r2-media-id',
+      mode: 'created',
+      uploadedImages: 1,
+    });
+    expect(bucketGet).toHaveBeenCalledWith('usr/uploads/a.jpg');
+    expect(fetchMock).not.toHaveBeenCalledWith('https://blog.example/usr/uploads/a.jpg', expect.anything());
+    expect(inserted.map(row => row.name)).toEqual([
+      'plugin:typecho-plugin-wechat-publisher:post:7',
+    ]);
+  });
+
+  it('reads absolute upload URLs from R2 even when the origin differs from siteUrl', async () => {
+    const hooks = collectHooks();
+    const action = hooks.get('plugin:typecho-plugin-wechat-publisher:action')![0];
+    const { db } = mockDb(null, [], '<!--markdown-->正文\n\n![图](https://cdn.example/usr/uploads/a.jpg)');
+    const bucketGet = vi.fn(async (key: string) => ({
+      body: new Blob(['r2-image'], { type: 'image/jpeg' }).stream(),
+      httpEtag: '"etag"',
+      httpMetadata: { contentType: 'image/jpeg' },
+      key,
+    }));
+    env.BUCKET = { get: bucketGet } as any;
+
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const target = String(url);
+      if (target.includes('/cgi-bin/token')) {
+        return new Response(JSON.stringify({ access_token: 'token-r2-origin' }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (target === 'https://cdn.example/usr/uploads/a.jpg') {
+        return new Response('timeout', { status: 522 });
+      }
+      if (target.includes('/cgi-bin/media/uploadimg')) {
+        return new Response(JSON.stringify({ url: 'https://mmbiz.qpic.cn/body-origin.jpg' }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (target.includes('/cgi-bin/material/add_material')) {
+        return new Response(JSON.stringify({ media_id: 'cover-origin-media-id' }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (target.includes('/cgi-bin/draft/add')) {
+        const body = JSON.parse(String(init?.body || '{}'));
+        expect(body.articles[0].content).toContain('https://mmbiz.qpic.cn/body-origin.jpg');
+        return new Response(JSON.stringify({ media_id: 'draft-origin-media-id' }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      throw new Error(`unexpected fetch: ${target}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await action({ handled: false }, {
+      action: 'sync',
+      payload: { cid: 7 },
+      db,
+      user: { uid: 3, group: 'contributor', screenName: '当前用户' },
+      options: {
+        siteUrl: 'https://blog.example',
+        'plugin:typecho-plugin-wechat-publisher': JSON.stringify({
+          appId: 'appid-r2-origin',
+          appSecret: 'secret',
+        }),
+      },
+    });
+
+    expect(result).toMatchObject({
+      handled: true,
+      success: true,
+      mediaId: 'draft-origin-media-id',
+    });
+    expect(bucketGet).toHaveBeenCalledWith('usr/uploads/a.jpg');
+    expect(fetchMock).not.toHaveBeenCalledWith('https://cdn.example/usr/uploads/a.jpg', expect.anything());
   });
 
   it('updates the existing WeChat draft when a sync state media id exists', async () => {

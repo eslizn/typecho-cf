@@ -9,7 +9,7 @@
  */
 import type { AstroIntegration } from 'astro';
 import { readFileSync, existsSync, readdirSync, statSync, realpathSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative, sep } from 'node:path';
 
 interface DiscoveredPlugin {
   id: string;
@@ -17,6 +17,7 @@ interface DiscoveredPlugin {
   packageDir: string;
   manifest: Record<string, any>;
   entryFile: string;
+  importPath: string;
 }
 
 /**
@@ -55,8 +56,50 @@ function findEntryFile(packageDir: string, manifest?: Record<string, any>): stri
   return null;
 }
 
+function toViteRootPath(rootDir: string, filePath: string): string {
+  return `/${relative(rootDir, filePath).split(sep).join('/')}`;
+}
+
+function discoverLocalFilePlugins(rootDir: string): DiscoveredPlugin[] {
+  const plugins: DiscoveredPlugin[] = [];
+  const rootPkgPath = join(rootDir, 'package.json');
+  if (!existsSync(rootPkgPath)) return plugins;
+
+  let rootPkg: Record<string, any>;
+  try {
+    rootPkg = JSON.parse(readFileSync(rootPkgPath, 'utf-8'));
+  } catch {
+    return plugins;
+  }
+
+  const deps = {
+    ...(rootPkg.dependencies || {}),
+    ...(rootPkg.devDependencies || {}),
+  };
+  for (const [packageName, specifier] of Object.entries(deps)) {
+    if (typeof specifier !== 'string' || !specifier.startsWith('file:src/plugins/')) continue;
+    const relativePackageDir = specifier.slice('file:'.length);
+    try {
+      const packageDir = realpathSync(join(rootDir, relativePackageDir));
+      const importBase = toViteRootPath(rootDir, packageDir);
+      const plugin = tryLoadPlugin(packageName, packageDir, importBase);
+      if (plugin) plugins.push(plugin);
+    } catch {
+      continue;
+    }
+  }
+
+  return plugins;
+}
+
 function discoverPlugins(rootDir: string): DiscoveredPlugin[] {
   const plugins: DiscoveredPlugin[] = [];
+  const seenPackages = new Set<string>();
+  for (const plugin of discoverLocalFilePlugins(rootDir)) {
+    plugins.push(plugin);
+    seenPackages.add(plugin.packageName);
+  }
+
   const nodeModulesDir = join(rootDir, 'node_modules');
 
   if (!existsSync(nodeModulesDir)) return plugins;
@@ -76,6 +119,7 @@ function discoverPlugins(rootDir: string): DiscoveredPlugin[] {
           if (scopedEntry.startsWith('.')) continue;
           try {
             const pkgDir = realpathSync(join(scopeDir, scopedEntry));
+            if (seenPackages.has(`${entry}/${scopedEntry}`)) continue;
             const plugin = tryLoadPlugin(`${entry}/${scopedEntry}`, pkgDir);
             if (plugin) plugins.push(plugin);
           } catch { continue; }
@@ -83,6 +127,7 @@ function discoverPlugins(rootDir: string): DiscoveredPlugin[] {
       } catch { continue; }
     } else {
       try {
+        if (seenPackages.has(entry)) continue;
         const pkgDir = realpathSync(join(nodeModulesDir, entry));
         const plugin = tryLoadPlugin(entry, pkgDir);
         if (plugin) plugins.push(plugin);
@@ -98,7 +143,7 @@ function discoverPlugins(rootDir: string): DiscoveredPlugin[] {
  * First checks package.json keywords for ["typecho", "plugin"],
  * then looks for plugin.json or package.json.typecho.plugin for manifest.
  */
-function tryLoadPlugin(packageName: string, packageDir: string): DiscoveredPlugin | null {
+function tryLoadPlugin(packageName: string, packageDir: string, importBase?: string): DiscoveredPlugin | null {
   const pkgJsonPath = join(packageDir, 'package.json');
   if (!existsSync(pkgJsonPath)) return null;
 
@@ -152,6 +197,9 @@ function tryLoadPlugin(packageName: string, packageDir: string): DiscoveredPlugi
     packageDir,
     manifest,
     entryFile,
+    importPath: importBase
+      ? `${importBase}/${entryFile.replace(/\\/g, '/')}`
+      : `${packageName}/${entryFile}`,
   };
 }
 
@@ -186,7 +234,7 @@ export default function pluginLoaderIntegration(): AstroIntegration {
 
           // Import and execute each plugin's entry (which calls addHook)
           const pluginImports = discoveredPlugins.map((plugin, idx) => {
-            return `import pluginInit_${idx} from '${plugin.packageName}/${plugin.entryFile}';`;
+            return `import pluginInit_${idx} from ${JSON.stringify(plugin.importPath)};`;
           }).join('\n');
 
           const pluginInits = discoveredPlugins.map((plugin, idx) => {

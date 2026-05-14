@@ -2,6 +2,7 @@ import { buildPermalink, escapeAttr, escapeHtml, fetchWithTimeout, getOption, ha
 import type { PluginInitContext } from 'typecho/plugin-sdk';
 import type { Database } from 'typecho/db';
 import { schema } from 'typecho/db';
+import { env } from 'cloudflare:workers';
 import { and, eq } from 'drizzle-orm';
 import sanitizeHtml from 'sanitize-html';
 
@@ -174,10 +175,52 @@ function filenameFromUrl(url: string, contentType = ''): string {
     const name = pathname.split('/').pop();
     if (name) return name;
   } catch {}
+  const name = url.split(/[?#]/, 1)[0]?.split('/').pop();
+  if (name) return name;
   if (contentType.includes('png')) return 'image.png';
   if (contentType.includes('gif')) return 'image.gif';
   if (contentType.includes('webp')) return 'image.webp';
   return 'image.jpg';
+}
+
+function localUploadKeyFromUrl(url: string, siteUrl?: string): { key: string; definitive: boolean } | null {
+  const value = url.trim();
+  if (!value) return null;
+  if (value.startsWith('usr/uploads/')) return { key: value, definitive: true };
+  if (value.startsWith('/usr/uploads/')) return { key: value.slice(1), definitive: true };
+
+  try {
+    const parsed = new URL(value.startsWith('//') ? `https:${value}` : value);
+    if (!parsed.pathname.startsWith('/usr/uploads/')) return null;
+    const sameSite = siteUrl ? parsed.origin === new URL(siteUrl).origin : false;
+    return { key: parsed.pathname.slice(1), definitive: sameSite };
+  } catch {
+    return null;
+  }
+}
+
+function getDefaultUploadBucket(): R2Bucket | null {
+  const bucket = env.BUCKET;
+  return bucket && typeof bucket.get === 'function' ? bucket : null;
+}
+
+async function fetchLocalUploadBlob(key: string, sourceUrl: string, definitive: boolean): Promise<{ blob: Blob; filename: string } | null> {
+  const bucket = getDefaultUploadBucket();
+  if (!bucket) return null;
+
+  const object = await bucket.get(key);
+  if (!object) {
+    if (!definitive) return null;
+    throw new Error(`读取站内图片失败：R2 对象不存在：${key}`);
+  }
+
+  const contentType = object.httpMetadata?.contentType || 'image/jpeg';
+  if (!contentType.startsWith('image/')) throw new Error(`不是可上传的图片：${sourceUrl}`);
+  const blob = await new Response(object.body).blob();
+  return {
+    blob: blob.type ? blob : new Blob([blob], { type: contentType }),
+    filename: filenameFromUrl(sourceUrl, contentType),
+  };
 }
 
 async function requestWeChatJson(url: string, init: RequestInit, label: string): Promise<WeChatJson> {
@@ -212,15 +255,22 @@ async function getAccessTokenCached(config: WeChatMpConfig): Promise<string> {
   return token;
 }
 
-async function fetchImageBlob(url: string): Promise<{ blob: Blob; filename: string }> {
-  const response = await fetchWithTimeout(url, { method: 'GET' });
-  if (!response.ok) throw new Error(`读取图片失败：${response.status}`);
+async function fetchImageBlob(url: string, siteUrl?: string): Promise<{ blob: Blob; filename: string }> {
+  const localUpload = localUploadKeyFromUrl(url, siteUrl);
+  if (localUpload) {
+    const localImage = await fetchLocalUploadBlob(localUpload.key, url, localUpload.definitive);
+    if (localImage) return localImage;
+  }
+
+  const imageUrl = absoluteUrl(url, siteUrl);
+  const response = await fetchWithTimeout(imageUrl, { method: 'GET' });
+  if (!response.ok) throw new Error(`读取图片失败：${response.status}，URL：${imageUrl}`);
   const blob = await response.blob();
   const contentType = response.headers.get('Content-Type') || blob.type || 'image/jpeg';
-  if (!contentType.startsWith('image/')) throw new Error(`不是可上传的图片：${url}`);
+  if (!contentType.startsWith('image/')) throw new Error(`不是可上传的图片：${imageUrl}`);
   return {
     blob: blob.type ? blob : new Blob([blob], { type: contentType }),
-    filename: filenameFromUrl(url, contentType),
+    filename: filenameFromUrl(imageUrl, contentType),
   };
 }
 
@@ -230,8 +280,9 @@ async function uploadImage(
   label: string,
   endpoint: string,
   extraParams?: Record<string, string>,
+  siteUrl?: string,
 ): Promise<WeChatJson> {
-  const image = await fetchImageBlob(imageUrl);
+  const image = await fetchImageBlob(imageUrl, siteUrl);
   const formData = new FormData();
   formData.append('media', image.blob, image.filename);
   const params = new URLSearchParams({ access_token: accessToken, ...(extraParams || {}) });
@@ -241,14 +292,14 @@ async function uploadImage(
   }, label);
 }
 
-async function uploadCoverImage(accessToken: string, imageUrl: string): Promise<string> {
-  const data = await uploadImage(accessToken, imageUrl, '上传封面素材', '/cgi-bin/material/add_material', { type: 'image' });
+async function uploadCoverImage(accessToken: string, imageUrl: string, siteUrl?: string): Promise<string> {
+  const data = await uploadImage(accessToken, imageUrl, '上传封面素材', '/cgi-bin/material/add_material', { type: 'image' }, siteUrl);
   if (!data.media_id) throw new Error('微信公众号未返回封面素材 media_id');
   return data.media_id;
 }
 
-async function uploadArticleImage(accessToken: string, imageUrl: string): Promise<string> {
-  const data = await uploadImage(accessToken, imageUrl, '上传正文图片', '/cgi-bin/media/uploadimg');
+async function uploadArticleImage(accessToken: string, imageUrl: string, siteUrl?: string): Promise<string> {
+  const data = await uploadImage(accessToken, imageUrl, '上传正文图片', '/cgi-bin/media/uploadimg', undefined, siteUrl);
   if (!data.url) throw new Error('微信公众号未返回正文图片 URL');
   return data.url;
 }
@@ -380,13 +431,13 @@ async function syncPostToWeChat(
 
   const accessToken = await getAccessTokenCached(config);
   const uploadResults = await Promise.all(imageUrls.map(async (src) => {
-    const uploadedUrl = await uploadArticleImage(accessToken, absoluteUrl(src, siteUrl));
+    const uploadedUrl = await uploadArticleImage(accessToken, src, siteUrl);
     return [src, uploadedUrl] as const;
   }));
   const replacements = new Map<string, string>(uploadResults);
   html = replaceImageUrls(html, replacements);
 
-  const coverMediaId = await uploadCoverImage(accessToken, absoluteUrl(coverSource, siteUrl));
+  const coverMediaId = await uploadCoverImage(accessToken, coverSource, siteUrl);
   const authorName = config.author
     || await loadAuthorName(db, post.authorId)
     || user?.screenName

@@ -1,17 +1,12 @@
-import type { Database } from '@/db';
-import { schema } from '@/db';
-import { hasPermission } from '@/lib/auth';
-import { buildPermalink } from '@/lib/content';
-import { renderMarkdown } from '@/lib/markdown';
-import { getOption, setOption } from '@/lib/options';
-import type { PluginInitContext } from '@/lib/plugin';
-import { escapeAttr, parsePluginOption } from '@/lib/plugin';
+import { buildPermalink, escapeAttr, escapeHtml, fetchWithTimeout, getOption, hasPermission, normalizeHttpUrl, parseAttachmentMeta, parsePluginOption, renderMarkdown, setOption, stripHtmlTags, stripTypechoMarkers } from 'typecho/plugin-sdk';
+import type { PluginInitContext } from 'typecho/plugin-sdk';
+import type { Database } from 'typecho/db';
+import { schema } from 'typecho/db';
 import { and, eq } from 'drizzle-orm';
 import sanitizeHtml from 'sanitize-html';
 
 const PLUGIN_ID = 'typecho-plugin-wechat-publisher';
 const WECHAT_API_BASE = 'https://api.weixin.qq.com';
-const REQUEST_TIMEOUT_MS = 12_000;
 
 interface WeChatMpConfig {
   appId: string;
@@ -117,24 +112,10 @@ export function normalizeConfig(settings?: Record<string, unknown>): WeChatMpCon
   if (!config.appId || !config.appSecret) {
     throw new Error('请填写微信公众号 AppID 和 AppSecret');
   }
-  if (config.defaultCoverUrl) assertValidHttpUrl(config.defaultCoverUrl, '默认封面图片 URL');
+  if (config.defaultCoverUrl && !normalizeHttpUrl(config.defaultCoverUrl)) {
+    throw new Error('默认封面图片 URL 格式不正确，必须使用 http 或 https');
+  }
   return config;
-}
-
-function assertValidHttpUrl(value: string, label: string): void {
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    throw new Error(`${label}格式不正确`);
-  }
-  if (!['http:', 'https:'].includes(url.protocol)) {
-    throw new Error(`${label}必须使用 http 或 https`);
-  }
-}
-
-function escapeHtml(value: string): string {
-  return escapeAttr(value).replace(/'/g, '&#39;');
 }
 
 function autopEscaped(text: string): string {
@@ -145,10 +126,6 @@ function autopEscaped(text: string): string {
     .filter(Boolean)
     .map(part => `<p>${escapeHtml(part).replace(/\n/g, '<br />')}</p>`)
     .join('\n');
-}
-
-function stripTypechoMarkers(text: string): string {
-  return text.replace(/^<!--markdown-->/, '').replace(/<!--more-->/g, '');
 }
 
 export function renderWeChatHtml(text: string): string {
@@ -203,23 +180,8 @@ function filenameFromUrl(url: string, contentType = ''): string {
   return 'image.jpg';
 }
 
-async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  try {
-    return await fetch(url, { ...init, signal: controller.signal });
-  } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') {
-      throw new Error('微信公众号接口请求超时');
-    }
-    throw error;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 async function requestWeChatJson(url: string, init: RequestInit, label: string): Promise<WeChatJson> {
-  const response = await fetchWithTimeout(url, init);
+  const response = await fetchWithTimeout(url, init, 12_000, '微信公众号接口请求超时');
   const data = await response.json().catch(() => null) as WeChatJson | null;
   if (!response.ok || !data || (typeof data.errcode === 'number' && data.errcode !== 0)) {
     const message = data?.errmsg || response.statusText || '未知错误';
@@ -292,11 +254,7 @@ async function uploadArticleImage(accessToken: string, imageUrl: string): Promis
 }
 
 function plainDigest(html: string): string {
-  return html
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 120);
+  return stripHtmlTags(html).slice(0, 120);
 }
 
 async function loadAuthorName(db: Database | undefined, authorId: number | null | undefined): Promise<string> {
@@ -313,12 +271,8 @@ async function loadAttachmentCover(db: Database | undefined, cid: number): Promi
     where: and(eq(schema.contents.parent, cid), eq(schema.contents.type, 'attachment')),
   }).catch(() => []);
   for (const attachment of attachments) {
-    try {
-      const meta = JSON.parse(attachment.text || '{}') as Record<string, unknown>;
-      const type = typeof meta.type === 'string' ? meta.type : '';
-      const url = typeof meta.url === 'string' ? meta.url : '';
-      if (url && type.startsWith('image/')) return url;
-    } catch {}
+    const meta = parseAttachmentMeta(attachment.text);
+    if (meta.url && meta.type?.startsWith('image/')) return meta.url;
   }
   return '';
 }

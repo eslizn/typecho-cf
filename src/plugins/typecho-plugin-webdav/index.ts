@@ -1,7 +1,7 @@
-import type { Database } from '@/db';
-import { schema } from '@/db';
-import type { PluginInitContext, PluginRouteResult } from '@/lib/plugin';
-import { hasPermission, verifyPassword } from '@/lib/auth';
+import { hasPermission, verifyPassword } from 'typecho/plugin-sdk';
+import type { PluginInitContext, PluginRouteResult } from 'typecho/plugin-sdk';
+import type { Database } from 'typecho/db';
+import { schema } from 'typecho/db';
 import { eq } from 'drizzle-orm';
 
 type StorageProvider = 's3' | 'r2';

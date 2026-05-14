@@ -1,7 +1,7 @@
-import type { PluginInitContext } from '@/lib/plugin';
-import { parsePluginOption } from '@/lib/plugin';
-import type { Database } from '@/db';
-import { schema } from '@/db';
+import { fetchWithTimeout, parseAttachmentMeta, parsePluginOption, stripTypechoMarkers } from 'typecho/plugin-sdk';
+import type { AttachmentMeta, PluginInitContext } from 'typecho/plugin-sdk';
+import type { Database } from 'typecho/db';
+import { schema } from 'typecho/db';
 import { and, desc, eq, inArray, or } from 'drizzle-orm';
 
 type WriterMode = 'generate' | 'polish' | 'correct';
@@ -184,11 +184,7 @@ function buildModelUrl(endpoint: string, model: string): string {
 }
 
 function normalizeText(text: string): string {
-  return text
-    .replace(/^<!--markdown-->/, '')
-    .replace(/<!--more-->/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return stripTypechoMarkers(text).replace(/\s+/g, ' ').trim();
 }
 
 function truncateText(text: string, limit: number): string {
@@ -353,26 +349,6 @@ function extractErrorMessage(data: unknown): string {
   if (typeof record.msg === 'string') return record.msg;
   if (typeof record.detail === 'string') return record.detail;
   return '';
-}
-
-async function fetchWithTimeout(
-  url: string,
-  init: RequestInit,
-  timeoutMs = VALIDATION_TIMEOUT_MS,
-  timeoutMessage = 'LLM 配置校验超时，请确认接口地址和网络',
-): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...init, signal: controller.signal });
-  } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') {
-      throw new Error(timeoutMessage);
-    }
-    throw error;
-  } finally {
-    clearTimeout(timer);
-  }
 }
 
 function validationHeaders(config: ScribeConfig): HeadersInit {
@@ -544,20 +520,6 @@ function extractBodyAssets(body: string): ContentAsset[] {
   }
 
   return assets;
-}
-
-function parseAttachmentMeta(text: string | null): { url?: string; name?: string; type?: string; size?: number } {
-  try {
-    const meta = JSON.parse(text || '{}') as Record<string, unknown>;
-    return {
-      url: typeof meta.url === 'string' ? meta.url : undefined,
-      name: typeof meta.name === 'string' ? meta.name : undefined,
-      type: typeof meta.type === 'string' ? meta.type : undefined,
-      size: typeof meta.size === 'number' ? meta.size : Number(meta.size) || undefined,
-    };
-  } catch {
-    return {};
-  }
 }
 
 function dedupeAssets(assets: ContentAsset[]): ContentAsset[] {

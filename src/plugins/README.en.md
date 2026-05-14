@@ -110,7 +110,7 @@ Fields may use `showWhen` for conditional display. Select fields may use `option
  * Plugin entry function, called by the system at build time.
  * Register all hooks via addHook. Do NOT perform I/O here.
  */
-import type { PluginInitContext } from '@/lib/plugin';
+import type { PluginInitContext } from 'typecho/plugin-sdk';
 
 export default function init({ addHook, pluginId }: PluginInitContext): void {
   // filter hook: transform data and return it
@@ -139,15 +139,13 @@ export default function init({ addHook, pluginId }: PluginInitContext): void {
 Inside a filter/call handler, read config from the `extra.options` object passed in:
 
 ```ts
-// Plugins in the main project can import loadPluginConfig from '@/lib/plugin'
-// Standalone npm plugins should implement their own config parsing (see captcha example)
+import { loadPluginConfig } from 'typecho/plugin-sdk';
 
 addHook('feedback:comment', pluginId, async (commentData: { _rejected?: string }, extra?: { options?: Record<string, unknown> }) => {
   if (!extra?.options) return commentData;
 
   // Read this plugin's config (auto-merged with plugin.json defaults)
-  const raw = extra.options[`plugin:${pluginId}`];
-  const config = typeof raw === 'string' ? JSON.parse(raw) : {};
+  const config = loadPluginConfig(extra.options, pluginId);
 
   if (!config.apiKey) return commentData;  // Not configured, skip
 
@@ -155,6 +153,8 @@ addHook('feedback:comment', pluginId, async (commentData: { _rejected?: string }
   return commentData;
 });
 ```
+
+> Plugins in the main project can also parse `extra.options[\`plugin:${pluginId}\`]` (a JSON string) directly. Standalone npm plugins should prefer the SDK-provided `loadPluginConfig`.
 
 Config storage: `typecho_options` table, `name = "plugin:<pluginId>"`, value is a JSON string.
 
@@ -232,19 +232,20 @@ Plugins can automatically inject HTML/JS into frontend pages via `archive:header
 
 ```ts
 // index.ts
-import type { PluginInitContext } from '@/lib/plugin';
+import type { PluginInitContext } from 'typecho/plugin-sdk';
+import { loadPluginConfig } from 'typecho/plugin-sdk';
 
 export default function init({ addHook, pluginId }: PluginInitContext): void {
   // Inject <head> content (e.g., SDK scripts)
   addHook('archive:header', pluginId, (headHtml: string, extra?: { options?: Record<string, unknown> }) => {
-    const config = getPluginConfig(extra?.options);
+    const config = loadPluginConfig(extra?.options, pluginId);
     if (!config.sitekey) return headHtml;
     return headHtml + '<script src="..."></script>';
   });
 
   // Inject content before </body> (e.g., interaction scripts)
   addHook('archive:footer', pluginId, (bodyHtml: string, extra?: { options?: Record<string, unknown> }) => {
-    const config = getPluginConfig(extra?.options);
+    const config = loadPluginConfig(extra?.options, pluginId);
     if (!config.sitekey) return bodyHtml;
     return bodyHtml + '<script>/* ... */</script>';
   });
@@ -252,6 +253,53 @@ export default function init({ addHook, pluginId }: PluginInitContext): void {
 ```
 
 The `Base.astro` layout automatically calls `getClientSnippets(options)` to collect injections from all activated plugins — themes need no additional code.
+
+---
+
+## Plugin SDK
+
+Plugins in this repository import the public API from `typecho/plugin-sdk`, a barrel export that re-exports commonly used types and utilities.
+
+### Import style
+
+```ts
+// Inside the monorepo (resolved via tsconfig paths + Vite alias)
+import { parsePluginOption, escapeAttr, fetchWithTimeout } from 'typecho/plugin-sdk';
+import type { PluginInitContext } from 'typecho/plugin-sdk';
+
+// Plugins that need direct database schema access
+import type { Database } from 'typecho/db';
+import { schema } from 'typecho/db';
+```
+
+### Standalone npm packages
+
+When publishing a plugin as a standalone npm package, declare `typecho` as a `peerDependency` in `package.json`:
+
+```json
+{
+  "name": "typecho-plugin-example",
+  "peerDependencies": {
+    "typecho": ">=0.1.0"
+  }
+}
+```
+
+The host project supplies the `typecho` package at install time, and `typecho/plugin-sdk` resolves via the `package.json` `exports` field.
+
+### SDK exports overview
+
+| Category | Exports |
+|----------|---------|
+| Types | `PluginInitContext`, `PluginRouteResult`, `PluginManifest`, `PluginConfigField`, `AttachmentMeta`, `Database` |
+| Plugin system | `HookPoints`, `parsePluginOption`, `parsePluginConfigFormData`, `loadPluginConfig`, `escapeAttr`, `getClientIp` |
+| Auth | `hasPermission`, `verifyPassword` |
+| Content | `buildPermalink`, `formatDate`, `buildAuthorLink`, `buildCategoryLink` |
+| Markdown/HTML | `escapeHtml`, `renderMarkdown`, `renderMarkdownFiltered`, `renderContentExcerpt`, `generateExcerpt`, `autop`, `stripTypechoMarkers`, `stripHtmlTags` |
+| Network | `fetchWithTimeout` |
+| Attachments | `parseAttachmentMeta` |
+| URL | `normalizeHttpUrl` |
+| Options | `getOption`, `setOption` |
 
 ---
 
@@ -270,6 +318,8 @@ The `Base.astro` layout automatically calls `getClientSnippets(options)` to coll
 pnpm add typecho-plugin-example
 pnpm run build
 ```
+
+> Standalone plugins must declare `typecho` as a `peerDependency`. The SDK is provided by the host project when the plugin is installed.
 
 ---
 

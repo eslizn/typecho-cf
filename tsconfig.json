@@ -2,7 +2,9 @@
   "extends": "astro/tsconfigs/strict",
   "compilerOptions": {
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "typecho/plugin-sdk": ["./src/lib/plugin-sdk.ts"],
+      "typecho/db": ["./src/db/index.ts"]
     }
   }
 }

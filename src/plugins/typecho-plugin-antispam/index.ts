@@ -1,5 +1,5 @@
-import type { PluginInitContext } from '@/lib/plugin';
-import { parsePluginOption, escapeAttr } from '@/lib/plugin';
+import { escapeAttr, parsePluginOption } from 'typecho/plugin-sdk';
+import type { PluginInitContext } from 'typecho/plugin-sdk';
 
 type SpamMode = 'spam' | 'waiting' | 'discard';
 

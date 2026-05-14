@@ -1,5 +1,5 @@
-import type { PluginInitContext } from '@/lib/plugin';
-import { parsePluginOption, escapeAttr, getClientIp } from '@/lib/plugin';
+import { escapeAttr, fetchWithTimeout, getClientIp, parsePluginOption } from 'typecho/plugin-sdk';
+import type { PluginInitContext } from 'typecho/plugin-sdk';
 
 interface TurnstileConfig {
   sitekey: string;
@@ -55,20 +55,17 @@ async function verifyTurnstile(token: string, secret: string, remoteIp: string):
     remoteip: remoteIp,
   });
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 5000);
-
-  try {
-    const resp = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+  const resp = await fetchWithTimeout(
+    'https://challenges.cloudflare.com/turnstile/v0/siteverify',
+    {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: body.toString(),
-      signal: controller.signal,
-    });
-    return await resp.json() as TurnstileVerifyResponse;
-  } finally {
-    clearTimeout(timer);
-  }
+    },
+    5_000,
+    'Turnstile verification timed out',
+  );
+  return await resp.json() as TurnstileVerifyResponse;
 }
 
 function buildSnippet(options: Record<string, unknown> | undefined, formId: string): { headHtml: string; bodyHtml: string } {

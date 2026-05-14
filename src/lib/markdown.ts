@@ -4,7 +4,7 @@ import { applyFilter } from '@/lib/plugin';
 
 // ─── HTML escape helper ─────────────────────────────────────────────────────
 
-function escapeHtml(str: string): string {
+export function escapeHtml(str: string): string {
   return str
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -62,11 +62,30 @@ export interface CommentRenderOptions {
  */
 const MORE_PLACEHOLDER = 'TYPECHO_MORE_0';
 const MORE_PLACEHOLDER_RE = /<p>\s*TYPECHO_MORE_0\s*<\/p>/;
+const MORE_COMMENT_RE = /<!--more-->/g;
+const HTML_TAG_RE = /<[^>]+>/g;
+const WHITESPACE_RE = /\s+/g;
 
 // ─── Strip <!--markdown--> prefix ────────────────────────────────────────────
 
+const MARKDOWN_PREFIX = '<!--markdown-->';
+
 function stripMarkdownPrefix(text: string): string {
-  return text.startsWith('<!--markdown-->') ? text.slice('<!--markdown-->'.length) : text;
+  return text.startsWith(MARKDOWN_PREFIX) ? text.slice(MARKDOWN_PREFIX.length) : text;
+}
+
+/**
+ * Remove Typecho-specific markers from content: <!--markdown--> prefix and all <!--more--> tags.
+ */
+export function stripTypechoMarkers(text: string): string {
+  return stripMarkdownPrefix(text).replace(MORE_COMMENT_RE, '');
+}
+
+/**
+ * Strip all HTML tags and collapse whitespace to single spaces.
+ */
+export function stripHtmlTags(html: string): string {
+  return html.replace(HTML_TAG_RE, ' ').replace(WHITESPACE_RE, ' ').trim();
 }
 
 // ─── Public API ──────────────────────────────────────────────────────────────
@@ -76,7 +95,7 @@ function stripMarkdownPrefix(text: string): string {
  */
 export function renderMarkdown(text: string): string {
   if (!text) return '';
-  const content = stripMarkdownPrefix(text).replace(/<!--more-->/g, '');
+  const content = stripMarkdownPrefix(text).replace(MORE_COMMENT_RE, '');
   const html = marked.parse(content, { async: false }) as string;
   return sanitizeHtml(html, SANITIZE_OPTIONS);
 }
@@ -104,7 +123,7 @@ export async function renderMarkdownFiltered(text: string): Promise<string> {
   let content = stripMarkdownPrefix(text);
   // Remove <!--more--> from full-content renders — it is only meaningful
   // for list/excerpt views where renderContentExcerpt() is used instead.
-  content = content.replace(/<!--more-->/g, '');
+  content = content.replace(MORE_COMMENT_RE, '');
 
   // Apply content:markdown filter — plugins can modify the raw markdown
   content = await applyFilter('content:markdown', content);
@@ -143,7 +162,7 @@ export function renderContentExcerpt(
   // This guarantees that marked wraps the placeholder in its own <p> block
   // regardless of whether the author placed <!--more--> inline or between
   // paragraphs — enabling a clean split on the rendered output.
-  const withPlaceholder = content.replace(/<!--more-->/g, '\n\n' + MORE_PLACEHOLDER + '\n\n');
+  const withPlaceholder = content.replace(MORE_COMMENT_RE, '\n\n' + MORE_PLACEHOLDER + '\n\n');
   const html = marked.parse(withPlaceholder, { async: false }) as string;
   const sanitized = sanitizeHtml(html, SANITIZE_OPTIONS);
 
@@ -158,8 +177,10 @@ export function renderContentExcerpt(
 export function generateExcerpt(text: string, maxLength = 200): string {
   if (!text) return '';
 
-  const html = renderMarkdown(text);
-  const plain = html.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+  const content = stripMarkdownPrefix(text).replace(MORE_COMMENT_RE, '');
+  // Skip sanitizeHtml since stripHtmlTags removes all tags immediately after
+  const html = marked.parse(content, { async: false }) as string;
+  const plain = stripHtmlTags(html);
   if (plain.length <= maxLength) return plain;
   return plain.substring(0, maxLength) + '...';
 }

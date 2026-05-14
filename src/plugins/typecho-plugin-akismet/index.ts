@@ -1,5 +1,5 @@
-import type { PluginInitContext } from '@/lib/plugin';
-import { parsePluginOption } from '@/lib/plugin';
+import { fetchWithTimeout, parsePluginOption } from 'typecho/plugin-sdk';
+import type { PluginInitContext } from 'typecho/plugin-sdk';
 
 interface AkismetConfig {
   apiKey: string;
@@ -99,47 +99,43 @@ async function callAkismet(
   endpoint: string,
   body: URLSearchParams,
 ): Promise<string> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 10000);
-
-  try {
-    const resp = await fetch(`https://${apiKey}.rest.akismet.com/${AKISMET_VERSION}/${endpoint}`, {
+  const resp = await fetchWithTimeout(
+    `https://${apiKey}.rest.akismet.com/${AKISMET_VERSION}/${endpoint}`,
+    {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: body.toString(),
-      signal: controller.signal,
-    });
+    },
+    10_000,
+    'Akismet API request timed out',
+  );
 
-    if (!resp.ok) {
-      console.error(`[akismet] API error (${resp.status}):`, await resp.text().catch(() => ''));
-      throw new Error(`Akismet API returned ${resp.status}`);
-    }
-
-    return (await resp.text()).trim();
-  } finally {
-    clearTimeout(timer);
+  if (!resp.ok) {
+    console.error(`[akismet] API error (${resp.status}):`, await resp.text().catch(() => ''));
+    throw new Error(`Akismet API returned ${resp.status}`);
   }
+
+  return (await resp.text()).trim();
 }
 
 async function verifyKey(apiKey: string, siteUrl: string): Promise<boolean> {
   const body = new URLSearchParams({ key: apiKey, blog: siteUrl });
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 10000);
-
   try {
-    const resp = await fetch(`https://rest.akismet.com/${AKISMET_VERSION}/verify-key`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: body.toString(),
-      signal: controller.signal,
-    });
+    const resp = await fetchWithTimeout(
+      `https://rest.akismet.com/${AKISMET_VERSION}/verify-key`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body.toString(),
+      },
+      10_000,
+      'Akismet key verification timed out',
+    );
     const result = (await resp.text()).trim();
     return result === 'valid';
   } catch (err) {
     console.error('[akismet] Key verification error:', err);
     return false;
-  } finally {
-    clearTimeout(timer);
   }
 }
 

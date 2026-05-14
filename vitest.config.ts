@@ -1,5 +1,6 @@
 import { defineConfig } from 'vitest/config';
 import path from 'node:path';
+import { sharedAliases } from './vite.shared.mjs';
 
 export default defineConfig({
   test: {
@@ -20,6 +21,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+      ...sharedAliases,
       // Stub Cloudflare-specific modules not available in Node.js test env
       'cloudflare:workers': path.resolve(__dirname, './tests/__mocks__/cloudflare-workers.ts'),
     },

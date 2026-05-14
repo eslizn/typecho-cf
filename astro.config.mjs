@@ -2,6 +2,7 @@ import { defineConfig } from 'astro/config';
 import cloudflare from '@astrojs/cloudflare';
 import themeLoader from './src/integrations/theme-loader.ts';
 import pluginLoader from './src/integrations/plugin-loader.ts';
+import { sharedAliases } from './vite.shared.mjs';
 
 export default defineConfig({
   output: 'server',
@@ -12,4 +13,9 @@ export default defineConfig({
     checkOrigin: true,
   },
   integrations: [themeLoader(), pluginLoader()],
+  vite: {
+    resolve: {
+      alias: sharedAliases,
+    },
+  },
 });

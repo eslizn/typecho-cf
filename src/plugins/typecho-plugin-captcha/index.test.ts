@@ -100,4 +100,78 @@ describe('typecho-plugin-captcha', () => {
       }),
     );
   });
+
+  it('rejects comments when reCAPTCHA returns success: false', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ success: false })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const hooks = collectHooks();
+    const feedback = hooks.get('feedback:comment')!;
+    const formData = new FormData();
+    formData.set('captcha-token', 'token');
+
+    const result = await feedback({}, {
+      options: options({ client: 'site-key', server: 'secret', input: 'captcha-token', score: 0.5 }),
+      formData,
+      request: new Request('https://example.com/post'),
+    });
+
+    expect(result).toMatchObject({ _rejected: '验证码验证失败' });
+  });
+
+  it('rejects comments when reCAPTCHA score is below threshold', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ success: true, score: 0.3 })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const hooks = collectHooks();
+    const feedback = hooks.get('feedback:comment')!;
+    const formData = new FormData();
+    formData.set('captcha-token', 'token');
+
+    const result = await feedback({}, {
+      options: options({ client: 'site-key', server: 'secret', input: 'captcha-token', score: 0.5 }),
+      formData,
+      request: new Request('https://example.com/post'),
+    });
+
+    expect(result).toMatchObject({ _rejected: '验证码验证失败' });
+  });
+
+  it('rejects comments with service error when verification API fails', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error('Network error'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const hooks = collectHooks();
+    const feedback = hooks.get('feedback:comment')!;
+    const formData = new FormData();
+    formData.set('captcha-token', 'token');
+
+    const result = await feedback({}, {
+      options: options({ client: 'site-key', server: 'secret', input: 'captcha-token', score: 0.5 }),
+      formData,
+      request: new Request('https://example.com/post'),
+    });
+
+    expect(result).toMatchObject({ _rejected: '验证码服务异常，请稍后重试' });
+  });
+
+  it('skips verification when user is logged in', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const hooks = collectHooks();
+    const feedback = hooks.get('feedback:comment')!;
+    const formData = new FormData();
+    formData.set('captcha-token', 'token');
+
+    const result = await feedback({}, {
+      options: options({ client: 'site-key', server: 'secret' }),
+      formData,
+      request: new Request('https://example.com/post'),
+      isLoggedIn: true,
+    });
+
+    expect(result).not.toHaveProperty('_rejected');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });

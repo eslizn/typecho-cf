@@ -1,5 +1,5 @@
-import type { PluginInitContext } from '@/lib/plugin';
-import { parsePluginOption, escapeAttr, getClientIp } from '@/lib/plugin';
+import { escapeAttr, fetchWithTimeout, getClientIp, parsePluginOption } from 'typecho/plugin-sdk';
+import type { PluginInitContext } from 'typecho/plugin-sdk';
 
 interface CaptchaConfig {
   client: string;
@@ -63,20 +63,17 @@ async function verifyRecaptcha(
     remoteip: remoteIp,
   });
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 5000);
-
-  try {
-    const resp = await fetch(`${api}/recaptcha/api/siteverify`, {
+  const resp = await fetchWithTimeout(
+    `${api}/recaptcha/api/siteverify`,
+    {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: body.toString(),
-      signal: controller.signal,
-    });
-    return await resp.json() as CaptchaVerifyResponse;
-  } finally {
-    clearTimeout(timer);
-  }
+    },
+    5_000,
+    'Captcha verification timed out',
+  );
+  return await resp.json() as CaptchaVerifyResponse;
 }
 
 function buildClientSnippet(options?: Record<string, unknown>): { headHtml: string; bodyHtml: string } {

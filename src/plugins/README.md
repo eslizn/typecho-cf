@@ -110,7 +110,7 @@ typecho-plugin-example/
  * 插件入口函数，由系统在构建时调用。
  * 所有 Hook 注册通过 addHook 完成，此处不要执行 I/O。
  */
-import type { PluginInitContext } from '@/lib/plugin';
+import type { PluginInitContext } from 'typecho/plugin-sdk';
 
 export default function init({ addHook, pluginId }: PluginInitContext): void {
   // filter 钩子：修改数据并返回
@@ -139,15 +139,13 @@ export default function init({ addHook, pluginId }: PluginInitContext): void {
 在 filter/call 处理函数中，从传入的 `extra.options` 读取配置：
 
 ```ts
-// 主项目内的插件可 import loadPluginConfig from '@/lib/plugin'
-// 独立 npm 插件自行解析（参考 captcha 示例）
+import { loadPluginConfig } from 'typecho/plugin-sdk';
 
 addHook('feedback:comment', pluginId, async (commentData: { _rejected?: string }, extra?: { options?: Record<string, unknown> }) => {
   if (!extra?.options) return commentData;
 
   // 读取本插件配置（已与 plugin.json 默认值合并）
-  const raw = extra.options[`plugin:${pluginId}`];
-  const config = typeof raw === 'string' ? JSON.parse(raw) : {};
+  const config = loadPluginConfig(extra.options, pluginId);
 
   if (!config.apiKey) return commentData;  // 未配置，跳过
 
@@ -155,6 +153,8 @@ addHook('feedback:comment', pluginId, async (commentData: { _rejected?: string }
   return commentData;
 });
 ```
+
+> 主项目内插件也可直接解析 `extra.options[\`plugin:${pluginId}\`]`（JSON 字符串）。独立 npm 插件推荐使用 SDK 提供的 `loadPluginConfig`。
 
 配置存储：`typecho_options` 表，`name = "plugin:<pluginId>"`，值为 JSON 字符串。
 
@@ -232,19 +232,20 @@ addHook('feedback:comment', pluginId, async (commentData, extra) => {
 
 ```ts
 // index.ts
-import type { PluginInitContext } from '@/lib/plugin';
+import type { PluginInitContext } from 'typecho/plugin-sdk';
+import { loadPluginConfig } from 'typecho/plugin-sdk';
 
 export default function init({ addHook, pluginId }: PluginInitContext): void {
   // 注入 <head> 内容（如 SDK 脚本）
   addHook('archive:header', pluginId, (headHtml: string, extra?: { options?: Record<string, unknown> }) => {
-    const config = getPluginConfig(extra?.options);
+    const config = loadPluginConfig(extra?.options, pluginId);
     if (!config.sitekey) return headHtml;
     return headHtml + '<script src="..."></script>';
   });
 
   // 注入 </body> 前内容（如交互脚本）
   addHook('archive:footer', pluginId, (bodyHtml: string, extra?: { options?: Record<string, unknown> }) => {
-    const config = getPluginConfig(extra?.options);
+    const config = loadPluginConfig(extra?.options, pluginId);
     if (!config.sitekey) return bodyHtml;
     return bodyHtml + '<script>/* ... */</script>';
   });
@@ -252,6 +253,53 @@ export default function init({ addHook, pluginId }: PluginInitContext): void {
 ```
 
 `Base.astro` 布局会自动调用 `getClientSnippets(options)` 收集所有激活插件的注入内容，主题无需任何额外代码。
+
+---
+
+## Plugin SDK
+
+本仓库内的插件通过 `typecho/plugin-sdk` 导入公共 API。SDK 使用 barrel export 模式，集中 re-export 插件常用的类型和函数。
+
+### 导入方式
+
+```ts
+// 在 monorepo 内（通过 tsconfig paths + Vite alias 解析）
+import { parsePluginOption, escapeAttr, fetchWithTimeout } from 'typecho/plugin-sdk';
+import type { PluginInitContext } from 'typecho/plugin-sdk';
+
+// 需要直接访问数据库 Schema 的插件
+import type { Database } from 'typecho/db';
+import { schema } from 'typecho/db';
+```
+
+### 独立 npm 包
+
+插件发布为独立 npm 包时，需在 `package.json` 中将 `typecho` 声明为 `peerDependencies`：
+
+```json
+{
+  "name": "typecho-plugin-example",
+  "peerDependencies": {
+    "typecho": ">=0.1.0"
+  }
+}
+```
+
+安装时宿主项目会自动提供 `typecho` 包，`typecho/plugin-sdk` 通过 `package.json` 的 `exports` 字段解析。
+
+### SDK 导出一览
+
+| 类别 | 导出 |
+|------|------|
+| 类型 | `PluginInitContext`, `PluginRouteResult`, `PluginManifest`, `PluginConfigField`, `AttachmentMeta`, `Database` |
+| 插件系统 | `HookPoints`, `parsePluginOption`, `parsePluginConfigFormData`, `loadPluginConfig`, `escapeAttr`, `getClientIp` |
+| 认证 | `hasPermission`, `verifyPassword` |
+| 内容 | `buildPermalink`, `formatDate`, `buildAuthorLink`, `buildCategoryLink` |
+| Markdown/HTML | `escapeHtml`, `renderMarkdown`, `renderMarkdownFiltered`, `renderContentExcerpt`, `generateExcerpt`, `autop`, `stripTypechoMarkers`, `stripHtmlTags` |
+| 网络 | `fetchWithTimeout` |
+| 附件 | `parseAttachmentMeta` |
+| URL | `normalizeHttpUrl` |
+| 选项 | `getOption`, `setOption` |
 
 ---
 
@@ -270,6 +318,8 @@ export default function init({ addHook, pluginId }: PluginInitContext): void {
 pnpm add typecho-plugin-example
 pnpm run build
 ```
+
+> 独立发布的插件必须将 `typecho` 声明为 `peerDependencies`。宿主项目安装插件时，`typecho` 包会自动提供 SDK 解析。
 
 ---
 

@@ -3,6 +3,10 @@
   "type": "module",
   "version": "0.1.0",
   "description": "Typecho blog rewrite with Astro + Cloudflare Workers + D1",
+  "exports": {
+    "./plugin-sdk": "./src/lib/plugin-sdk.ts",
+    "./db": "./src/db/index.ts"
+  },
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",

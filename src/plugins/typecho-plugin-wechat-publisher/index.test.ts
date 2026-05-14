@@ -15,7 +15,7 @@ function collectHooks() {
   return hooks;
 }
 
-function mockDb(syncState?: Record<string, unknown> | null) {
+function mockDb(syncState?: Record<string, unknown> | null, attachments: any[] = [], postText?: string) {
   const inserted: any[] = [];
   const chain = {
     values(value: any) {
@@ -37,11 +37,11 @@ function mockDb(syncState?: Record<string, unknown> | null) {
             title: '同步测试',
             slug: 'sync-test',
             type: 'post',
-            text: '<!--markdown-->正文\n\n![图](/usr/uploads/a.jpg)',
+            text: postText ?? '<!--markdown-->正文\n\n![图](/usr/uploads/a.jpg)',
             created: 1_700_000_000,
             authorId: 3,
           })),
-          findMany: vi.fn(async () => []),
+          findMany: vi.fn(async () => attachments),
         },
         users: {
           findFirst: vi.fn(async () => ({ screenName: '作者名', name: 'author' })),
@@ -316,5 +316,70 @@ describe('typecho-plugin-wechat-publisher', () => {
     });
     const saved = JSON.parse(inserted[0].value);
     expect(saved.mediaId).toBe('new-draft-media-id');
+  });
+
+  it('uses attachment cover image when post body has no images', async () => {
+    const hooks = collectHooks();
+    const action = hooks.get('plugin:typecho-plugin-wechat-publisher:action')![0];
+    // Post without inline images — cover must come from attachment
+    const postText = '<!--markdown-->纯文本文章，无图片';
+    const attachments = [
+      { cid: 8, text: JSON.stringify({ url: '/usr/uploads/cover.jpg', name: 'cover.jpg', type: 'image/jpeg', size: 51200 }) },
+    ];
+    const { db, inserted } = mockDb(null, attachments, postText);
+
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const target = String(url);
+      if (target.includes('/cgi-bin/token')) {
+        return new Response(JSON.stringify({ access_token: 'token' }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (target === 'https://blog.example/usr/uploads/cover.jpg') {
+        return new Response(new Blob(['cover-image-data'], { type: 'image/jpeg' }), {
+          headers: { 'Content-Type': 'image/jpeg' },
+        });
+      }
+      if (target.includes('/cgi-bin/media/uploadimg')) {
+        throw new Error('should not upload body images when none exist');
+      }
+      if (target.includes('/cgi-bin/material/add_material')) {
+        expect(target).toContain('type=image');
+        return new Response(JSON.stringify({ media_id: 'attachment-cover-media-id' }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (target.includes('/cgi-bin/draft/add')) {
+        const body = JSON.parse(String(init?.body || '{}'));
+        expect(body.articles[0].thumb_media_id).toBe('attachment-cover-media-id');
+        return new Response(JSON.stringify({ media_id: 'draft-from-attachment' }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      throw new Error(`unexpected fetch: ${target}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await action({ handled: false }, {
+      action: 'sync',
+      payload: { cid: 7 },
+      db,
+      user: { uid: 3, group: 'contributor', screenName: '当前用户' },
+      options: {
+        siteUrl: 'https://blog.example',
+        'plugin:typecho-plugin-wechat-publisher': JSON.stringify({
+          appId: 'appid',
+          appSecret: 'secret',
+        }),
+      },
+    });
+
+    expect(result).toMatchObject({
+      handled: true,
+      success: true,
+      mediaId: 'draft-from-attachment',
+      mode: 'created',
+      uploadedImages: 0,
+    });
   });
 });

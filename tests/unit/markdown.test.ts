@@ -7,7 +7,7 @@
  * constructs that span the boundary are resolved correctly.
  */
 import { describe, it, expect } from 'vitest';
-import { renderMarkdown, renderContentExcerpt, generateExcerpt, renderCommentText } from '@/lib/markdown';
+import { autop, escapeHtml, generateExcerpt, renderCommentText, renderContentExcerpt, renderMarkdown, stripHtmlTags, stripTypechoMarkers } from '@/lib/markdown';
 
 // ---------------------------------------------------------------------------
 // renderMarkdown
@@ -217,5 +217,95 @@ describe('renderCommentText', () => {
     const markdown = renderCommentText('**bold**', { markdown: true });
     expect(plain).not.toContain('<strong>');
     expect(markdown).toContain('<strong>bold</strong>');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// escapeHtml
+// ---------------------------------------------------------------------------
+
+describe('escapeHtml', () => {
+  it('escapes all five HTML special characters', () => {
+    expect(escapeHtml('&<>"\'')).toBe('&amp;&lt;&gt;&quot;&#39;');
+  });
+
+  it('returns empty string for empty input', () => {
+    expect(escapeHtml('')).toBe('');
+  });
+
+  it('does not double-escape already escaped text', () => {
+    const once = escapeHtml('<b>');
+    expect(escapeHtml(once)).toBe('&amp;lt;b&amp;gt;');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// stripTypechoMarkers
+// ---------------------------------------------------------------------------
+
+describe('stripTypechoMarkers', () => {
+  it('removes <!--markdown--> prefix', () => {
+    expect(stripTypechoMarkers('<!--markdown-->content')).toBe('content');
+  });
+
+  it('removes <!--more--> tags anywhere', () => {
+    expect(stripTypechoMarkers('before<!--more-->after')).toBe('beforeafter');
+    expect(stripTypechoMarkers('<!--more-->start')).toBe('start');
+    expect(stripTypechoMarkers('end<!--more-->')).toBe('end');
+  });
+
+  it('leaves plain text unchanged', () => {
+    expect(stripTypechoMarkers('plain text')).toBe('plain text');
+  });
+
+  it('removes both markers together', () => {
+    expect(stripTypechoMarkers('<!--markdown-->intro<!--more-->rest')).toBe('introrest');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// stripHtmlTags
+// ---------------------------------------------------------------------------
+
+describe('stripHtmlTags', () => {
+  it('removes all HTML tags and collapses whitespace', () => {
+    expect(stripHtmlTags('<p>hello <b>world</b></p>')).toBe('hello world');
+  });
+
+  it('handles empty input', () => {
+    expect(stripHtmlTags('')).toBe('');
+  });
+
+  it('handles plain text without tags', () => {
+    expect(stripHtmlTags('just text')).toBe('just text');
+  });
+
+  it('collapses multiple whitespace into single spaces', () => {
+    expect(stripHtmlTags('<div>a</div>   <span>b</span>\n\n<p>c</p>')).toBe('a b c');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// autop
+// ---------------------------------------------------------------------------
+
+describe('autop', () => {
+  it('wraps paragraphs in <p> tags', () => {
+    const html = autop('hello\n\nworld');
+    expect(html).toBe('<p>hello</p>\n<p>world</p>');
+  });
+
+  it('inserts <br /> for single line breaks within paragraphs', () => {
+    const html = autop('line1\nline2');
+    expect(html).toBe('<p>line1<br />line2</p>');
+  });
+
+  it('returns empty string for empty input', () => {
+    expect(autop('')).toBe('');
+  });
+
+  it('normalises \\r\\n to \\n', () => {
+    const html = autop('hello\r\n\r\nworld');
+    expect(html).toBe('<p>hello</p>\n<p>world</p>');
   });
 });

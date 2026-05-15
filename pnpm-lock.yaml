@@ -23,15 +23,9 @@ importers:
       sanitize-html:
         specifier: ^2.17.3
         version: 2.17.3
-      typecho-plugin-akismet:
-        specifier: file:src/plugins/typecho-plugin-akismet
-        version: file:src/plugins/typecho-plugin-akismet
       typecho-plugin-antispam:
         specifier: file:src/plugins/typecho-plugin-antispam
         version: file:src/plugins/typecho-plugin-antispam
-      typecho-plugin-captcha:
-        specifier: file:src/plugins/typecho-plugin-captcha
-        version: file:src/plugins/typecho-plugin-captcha
       typecho-plugin-scribe:
         specifier: file:src/plugins/typecho-plugin-scribe
         version: file:src/plugins/typecho-plugin-scribe
@@ -2229,14 +2223,8 @@ packages:
     engines: {node: '>=18.0.0'}
     hasBin: true
 
-  typecho-plugin-akismet@file:src/plugins/typecho-plugin-akismet:
-    resolution: {directory: src/plugins/typecho-plugin-akismet, type: directory}
-
   typecho-plugin-antispam@file:src/plugins/typecho-plugin-antispam:
     resolution: {directory: src/plugins/typecho-plugin-antispam, type: directory}
-
-  typecho-plugin-captcha@file:src/plugins/typecho-plugin-captcha:
-    resolution: {directory: src/plugins/typecho-plugin-captcha, type: directory}
 
   typecho-plugin-scribe@file:src/plugins/typecho-plugin-scribe:
     resolution: {directory: src/plugins/typecho-plugin-scribe, type: directory}
@@ -4712,11 +4700,7 @@ snapshots:
     optionalDependencies:
       fsevents: 2.3.3
 
-  typecho-plugin-akismet@file:src/plugins/typecho-plugin-akismet: {}
-
   typecho-plugin-antispam@file:src/plugins/typecho-plugin-antispam: {}
-
-  typecho-plugin-captcha@file:src/plugins/typecho-plugin-captcha: {}
 
   typecho-plugin-scribe@file:src/plugins/typecho-plugin-scribe: {}
 

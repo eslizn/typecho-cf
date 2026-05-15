@@ -91,13 +91,32 @@ describe('typecho-plugin-wechat-publisher', () => {
     expect(html).toContain('<svg');
   });
 
-  it('does not inject the post title sync button for posts without body images', () => {
+  it('hides the sync button for posts without images and without defaultCoverUrl', () => {
     const hooks = collectHooks();
     const render = hooks.get('admin:managePosts:titleActions')![0];
 
     expect(render('<span>existing</span>', { post: { cid: 42, type: 'post', text: '<!--markdown-->纯文本正文' } })).toBe('<span>existing</span>');
     expect(render('', { post: { cid: 42, type: 'page', text: '<!--markdown-->![图](/usr/uploads/a.jpg)' } })).toBe('');
     expect(canRenderSyncTitleAction({ cid: 42, type: 'post', text: '<p><img src="/usr/uploads/a.jpg" /></p>' })).toBe(true);
+  });
+
+  it('shows the sync button for posts without body images when defaultCoverUrl is configured', () => {
+    const hooks = collectHooks();
+    const render = hooks.get('admin:managePosts:titleActions')![0];
+    const optionsWithCover = {
+      'plugin:typecho-plugin-wechat-publisher': JSON.stringify({
+        appId: 'appid',
+        appSecret: 'secret',
+        defaultCoverUrl: 'https://example.com/default-cover.jpg',
+      }),
+    };
+
+    const html = render('', { post: { cid: 42, type: 'post', text: '<!--markdown-->纯文本正文，无图片' }, options: optionsWithCover });
+    expect(html).toContain('typecho-wechat-sync');
+    expect(html).toContain('data-cid="42"');
+
+    expect(canRenderSyncTitleAction({ cid: 42, type: 'post', text: '纯文本' }, optionsWithCover)).toBe(true);
+    expect(canRenderSyncTitleAction({ cid: 42, type: 'post', text: '纯文本' })).toBe(false);
   });
 
   it('injects admin JavaScript only on the post list page', () => {

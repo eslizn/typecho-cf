@@ -1,6 +1,6 @@
 # Plugin Development Guide
 
-> This document is the complete reference for Typecho-CF plugin development. `typecho-plugin-captcha/` serves as the working example.
+> This document is the complete reference for Typecho-CF plugin development. `typecho-plugin-antispam/` serves as the working example.
 
 [中文](README.md)
 
@@ -10,16 +10,17 @@
 
 ```
 typecho-plugin-example/
-├── package.json     # npm package manifest (keywords must include typecho + plugin)
-├── plugin.json      # Plugin metadata (with optional config declaration)
+├── package.json     # npm package manifest (keywords must include typecho + plugin, typecho.plugin has metadata)
 └── index.ts         # Entry point (ESM, export default init function)
 ```
 
-> The plugin loader discovers `index.ts` first, then falls back to `index.js` / `index.mjs` / `plugin.ts` / `plugin.js`. Built-in plugins in this repository use TypeScript. For standalone npm publishing, compile TS to JS and point `plugin.json.entry` at the compiled output.
+> The plugin loader discovers `index.ts` first, then falls back to `index.js` / `index.mjs` / `plugin.ts` / `plugin.js`. Built-in plugins in this repository use TypeScript. For standalone npm publishing, compile TS to JS and point `package.json` `typecho.plugin.entry` at the compiled output.
 
 ---
 
 ## package.json
+
+Plugin metadata is unified under the `typecho.plugin` field — no separate `plugin.json` file.
 
 ```json
 {
@@ -30,7 +31,28 @@ typecho-plugin-example/
   "author": "Your Name",
   "license": "MIT",
   "type": "module",
-  "main": "index.ts"
+  "main": "index.ts",
+  "typecho": {
+    "plugin": {
+      "id": "typecho-plugin-example",
+      "name": "Example Plugin",
+      "description": "What the plugin does",
+      "author": "Your Name",
+      "authorUrl": "https://example.com",
+      "version": "1.0.0",
+      "homepage": "https://github.com/...",
+      "license": "MIT",
+      "tags": ["example"],
+      "config": {
+        "fieldName": {
+          "type": "text",
+          "label": "Field Label",
+          "default": "",
+          "description": "Help text (HTML supported)"
+        }
+      }
+    }
+  }
 }
 ```
 
@@ -38,32 +60,7 @@ typecho-plugin-example/
 - `keywords` must include both `"typecho"` and `"plugin"` — otherwise the build-time scanner won't discover it
 - `"type": "module"` — use ESM (`export default`, not `module.exports`)
 - `main` points to the entry file; local plugins in this repository use `index.ts`
-
----
-
-## plugin.json
-
-```json
-{
-  "id": "typecho-plugin-example",
-  "name": "Example Plugin",
-  "description": "What the plugin does",
-  "author": "Your Name",
-  "authorUrl": "https://example.com",
-  "version": "1.0.0",
-  "homepage": "https://github.com/...",
-  "license": "MIT",
-  "tags": ["example"],
-  "config": {
-    "fieldName": {
-      "type": "text",
-      "label": "Field Label",
-      "default": "",
-      "description": "Help text (HTML supported)"
-    }
-  }
-}
-```
+- `typecho.plugin` contains the plugin metadata (id, name, config, etc.)
 
 ### Config Field Types
 
@@ -130,7 +127,7 @@ export default function init({ addHook, pluginId }: PluginInitContext): void {
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `addHook(point, pluginId, handler, priority?)` | function | Register a hook handler. `priority` defaults to 10; lower = earlier execution |
-| `pluginId` | string | This plugin's ID (from `plugin.json` `id` field) |
+| `pluginId` | string | This plugin's ID (from `package.json` `typecho.plugin.id` field) |
 
 ---
 
@@ -144,7 +141,7 @@ import { loadPluginConfig } from 'typecho/plugin-sdk';
 addHook('feedback:comment', pluginId, async (commentData: { _rejected?: string }, extra?: { options?: Record<string, unknown> }) => {
   if (!extra?.options) return commentData;
 
-  // Read this plugin's config (auto-merged with plugin.json defaults)
+  // Read this plugin's config (auto-merged with typecho.plugin.config defaults)
   const config = loadPluginConfig(extra.options, pluginId);
 
   if (!config.apiKey) return commentData;  // Not configured, skip
@@ -390,9 +387,8 @@ npx vitest run src/plugins/<plugin-name>/index.test.ts
 
 ## Reference Example
 
-`typecho-plugin-captcha/` demonstrates:
-- `plugin.json` config declaration (7 field types in use)
-- `feedback:comment` filter hook (token validation + comment rejection)
-- Reading plugin config (with DEFAULTS fallback)
-- Named export `getClientSnippet()` for theme integration
+`typecho-plugin-antispam/` demonstrates:
+- `package.json` config declaration (under `typecho.plugin`)
+- `feedback:comment` filter hook (anti-spam)
+- Reading plugin config
 - Correct client IP extraction (CF-Connecting-IP priority)

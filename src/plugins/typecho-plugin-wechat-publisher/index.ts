@@ -496,12 +496,12 @@ interface ManagePostTitleActionPost {
   text?: string | null;
 }
 
-export function canRenderSyncTitleAction(post?: ManagePostTitleActionPost): post is ManagePostTitleActionPost & { cid: number } {
+export function canRenderSyncTitleAction(post?: ManagePostTitleActionPost, options?: Record<string, unknown>): post is ManagePostTitleActionPost & { cid: number } {
   const cid = Number(post?.cid);
   if (!Number.isInteger(cid) || cid <= 0) return false;
   if (post?.type && !['post', 'post_draft'].includes(post.type)) return false;
-  const html = renderWeChatHtml(post?.text || '');
-  return extractImageUrls(html).length > 0;
+  if (extractImageUrls(renderWeChatHtml(post?.text || '')).length > 0) return true;
+  return !!getConfig(options).defaultCoverUrl;
 }
 
 function titleActionButton(cid: number): string {
@@ -609,9 +609,9 @@ const ADMIN_FOOTER_HTML = `<style>
 </script>`;
 
 export default function init({ addHook, pluginId }: PluginInitContext): void {
-  addHook('admin:managePosts:titleActions', pluginId, (html: string, extra?: { post?: ManagePostTitleActionPost }) => {
+  addHook('admin:managePosts:titleActions', pluginId, (html: string, extra?: { post?: ManagePostTitleActionPost; options?: Record<string, unknown> }) => {
     const post = extra?.post;
-    if (!canRenderSyncTitleAction(post)) return html;
+    if (!canRenderSyncTitleAction(post, extra?.options)) return html;
     return html + titleActionButton(post.cid);
   });
 

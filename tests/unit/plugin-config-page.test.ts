@@ -2,6 +2,14 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
+function loadWebdavManifest() {
+  const pkg = JSON.parse(readFileSync(
+    join(process.cwd(), 'src/plugins/typecho-plugin-webdav/package.json'),
+    'utf-8',
+  ));
+  return pkg.typecho.plugin;
+}
+
 describe('admin plugin config page', () => {
   it('filters R2 binding choices to bucket-like bindings when possible', () => {
     const source = readFileSync(
@@ -29,31 +37,19 @@ describe('admin plugin config page', () => {
   });
 
   it('does not expose configurable WebDAV access rules', () => {
-    const manifest = JSON.parse(readFileSync(
-      join(process.cwd(), 'src/plugins/typecho-plugin-webdav/plugin.json'),
-      'utf-8',
-    ));
-
+    const manifest = loadWebdavManifest();
     expect(manifest.config.requiredGroup).toBeUndefined();
     expect(manifest.config.mounts.itemFields.allowedUsers).toBeUndefined();
   });
 
   it('defaults the WebDAV entry route to /webdav', () => {
-    const manifest = JSON.parse(readFileSync(
-      join(process.cwd(), 'src/plugins/typecho-plugin-webdav/plugin.json'),
-      'utf-8',
-    ));
-
+    const manifest = loadWebdavManifest();
     expect(manifest.config.routePath.default).toBe('/webdav');
     expect(manifest.config.routePath.description).toContain('/webdav');
   });
 
   it('defaults WebDAV mounts to the route root and whole bucket', () => {
-    const manifest = JSON.parse(readFileSync(
-      join(process.cwd(), 'src/plugins/typecho-plugin-webdav/plugin.json'),
-      'utf-8',
-    ));
-
+    const manifest = loadWebdavManifest();
     expect(manifest.config.mounts.default[0].mount).toBe('');
     expect(manifest.config.mounts.default[0].prefix).toBe('');
     expect(manifest.config.mounts.itemFields.mount.default).toBe('');

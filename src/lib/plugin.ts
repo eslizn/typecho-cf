@@ -10,9 +10,8 @@
  * 
  * Plugin package structure:
  *   typecho-plugin-example/
- *     plugin.json        - Plugin metadata (required)
+ *     package.json       - Must have keywords: ["typecho", "plugin"] + typecho.plugin manifest
  *     index.ts/js        - Plugin entry point (required)
- *     package.json       - Must have keywords: ["typecho", "plugin"]
  */
 
 // ==================== Types ====================
@@ -78,7 +77,7 @@ export interface PluginInfo {
   id: string;
   /** npm package name */
   packageName: string;
-  /** Plugin manifest from plugin.json */
+  /** Plugin manifest from package.json's typecho.plugin */
   manifest: PluginManifest;
   /** Whether this plugin is currently activated */
   isActive: boolean;

@@ -1,6 +1,6 @@
 # 插件开发规范
 
-> 本文档是 Typecho-CF 插件开发的完整参考。以 `typecho-plugin-captcha/` 目录为示例。
+> 本文档是 Typecho-CF 插件开发的完整参考。以 `typecho-plugin-antispam/` 目录为示例。
 
 [English](README.en.md)
 
@@ -10,16 +10,17 @@
 
 ```
 typecho-plugin-example/
-├── package.json     # npm 包声明（keywords 必须包含 typecho + plugin）
-├── plugin.json      # 插件元数据（含可选配置声明）
+├── package.json     # npm 包声明（keywords 必须包含 typecho + plugin，typecho.plugin 包含元数据）
 └── index.ts         # 入口文件（ESM，export default init 函数）
 ```
 
-> 插件加载器优先发现 `index.ts`，然后才回退到 `index.js` / `index.mjs` / `plugin.ts` / `plugin.js`。本仓库内置插件统一使用 TypeScript；发布为独立 npm 包时，可将 TS 编译为 JS 并在 `plugin.json` 的 `entry` 中指向编译产物。
+> 插件加载器优先发现 `index.ts`，然后才回退到 `index.js` / `index.mjs` / `plugin.ts` / `plugin.js`。本仓库内置插件统一使用 TypeScript；发布为独立 npm 包时，可将 TS 编译为 JS 并在 `package.json` 的 `typecho.plugin.entry` 中指向编译产物。
 
 ---
 
 ## package.json
+
+插件元数据统一放在 `typecho.plugin` 字段中，不再使用独立的 `plugin.json` 文件。
 
 ```json
 {
@@ -30,7 +31,28 @@ typecho-plugin-example/
   "author": "Your Name",
   "license": "MIT",
   "type": "module",
-  "main": "index.ts"
+  "main": "index.ts",
+  "typecho": {
+    "plugin": {
+      "id": "typecho-plugin-example",
+      "name": "示例插件",
+      "description": "插件功能描述",
+      "author": "Your Name",
+      "authorUrl": "https://example.com",
+      "version": "1.0.0",
+      "homepage": "https://github.com/...",
+      "license": "MIT",
+      "tags": ["example"],
+      "config": {
+        "fieldName": {
+          "type": "text",
+          "label": "字段标签",
+          "default": "",
+          "description": "帮助文本（支持 HTML）"
+        }
+      }
+    }
+  }
 }
 ```
 
@@ -38,32 +60,7 @@ typecho-plugin-example/
 - `keywords` 必须同时包含 `"typecho"` 和 `"plugin"`，否则构建时不会被发现
 - `"type": "module"` — 使用 ESM（`export default`，不用 `module.exports`）
 - `main` 指向入口文件；本仓库本地插件使用 `index.ts`
-
----
-
-## plugin.json
-
-```json
-{
-  "id": "typecho-plugin-example",
-  "name": "示例插件",
-  "description": "插件功能描述",
-  "author": "Your Name",
-  "authorUrl": "https://example.com",
-  "version": "1.0.0",
-  "homepage": "https://github.com/...",
-  "license": "MIT",
-  "tags": ["example"],
-  "config": {
-    "fieldName": {
-      "type": "text",
-      "label": "字段标签",
-      "default": "",
-      "description": "帮助文本（支持 HTML）"
-    }
-  }
-}
-```
+- `typecho.plugin` 包含插件元数据（id、name、config 等）
 
 ### 配置字段类型
 
@@ -130,7 +127,7 @@ export default function init({ addHook, pluginId }: PluginInitContext): void {
 | 参数 | 类型 | 说明 |
 |------|------|------|
 | `addHook(point, pluginId, handler, priority?)` | function | 注册钩子处理函数。`priority` 默认 10，越小越早执行 |
-| `pluginId` | string | 当前插件 ID（来自 `plugin.json` 的 `id` 字段） |
+| `pluginId` | string | 当前插件 ID（来自 `package.json` 的 `typecho.plugin.id` 字段） |
 
 ---
 
@@ -144,7 +141,7 @@ import { loadPluginConfig } from 'typecho/plugin-sdk';
 addHook('feedback:comment', pluginId, async (commentData: { _rejected?: string }, extra?: { options?: Record<string, unknown> }) => {
   if (!extra?.options) return commentData;
 
-  // 读取本插件配置（已与 plugin.json 默认值合并）
+  // 读取本插件配置（已与 typecho.plugin.config 默认值合并）
   const config = loadPluginConfig(extra.options, pluginId);
 
   if (!config.apiKey) return commentData;  // 未配置，跳过
@@ -390,9 +387,8 @@ npx vitest run src/plugins/<插件名>/index.test.ts
 
 ## 参考示例
 
-`typecho-plugin-captcha/` 目录演示了：
-- `plugin.json` 配置声明（7 种字段类型）
-- `feedback:comment` filter 钩子（token 验证 + 评论拒绝）
-- 读取插件配置（含 DEFAULTS fallback）
-- 具名导出 `getClientSnippet()` 供主题集成
+`typecho-plugin-antispam/` 目录演示了：
+- `package.json` 配置声明（在 `typecho.plugin` 中）
+- `feedback:comment` filter 钩子（反垃圾评论）
+- 读取插件配置
 - 正确提取客户端 IP（优先 CF-Connecting-IP）

@@ -1,9 +1,0 @@
-{
-  "name": "typecho-plugin-akismet",
-  "version": "1.0.0",
-  "keywords": ["typecho", "plugin"],
-  "author": "eslizn",
-  "license": "MIT",
-  "type": "module",
-  "main": "index.ts"
-}

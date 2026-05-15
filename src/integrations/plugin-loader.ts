@@ -2,7 +2,7 @@
  * Astro integration: Plugin Loader
  * 
  * Scans node_modules for packages whose package.json keywords contain
- * both "typecho" and "plugin", reads their plugin.json, and registers
+ * both "typecho" and "plugin", reads their typecho.plugin manifest, and registers
  * all plugins at startup via injectScript.
  * 
  * This follows the same pattern as theme-loader.ts for consistency.
@@ -141,7 +141,7 @@ function discoverPlugins(rootDir: string): DiscoveredPlugin[] {
 /**
  * Try to load a plugin from a package directory.
  * First checks package.json keywords for ["typecho", "plugin"],
- * then looks for plugin.json or package.json.typecho.plugin for manifest.
+ * then reads typecho.plugin in package.json (or plugin.json as fallback) for manifest.
  */
 function tryLoadPlugin(packageName: string, packageDir: string, importBase?: string): DiscoveredPlugin | null {
   const pkgJsonPath = join(packageDir, 'package.json');
@@ -157,21 +157,23 @@ function tryLoadPlugin(packageName: string, packageDir: string, importBase?: str
   // Gate: keywords must contain both "typecho" and "plugin"
   if (!isTypechoPlugin(pkgJson.keywords)) return null;
 
-  // Try plugin.json first
-  const manifestPath = join(packageDir, 'plugin.json');
   let manifest: Record<string, any> = {};
 
-  if (existsSync(manifestPath)) {
-    try {
-      manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
-    } catch (err) {
-      console.warn(`[plugin-loader] Failed to parse plugin.json from ${packageName}:`, err);
-      return null;
-    }
-  } else if (pkgJson.typecho?.plugin) {
-    // Fallback: package.json with typecho.plugin field
-    manifest = pkgJson.typecho.plugin;
+  if (pkgJson.typecho?.plugin) {
+    manifest = { ...pkgJson.typecho.plugin };
   } else {
+    const manifestPath = join(packageDir, 'plugin.json');
+    if (existsSync(manifestPath)) {
+      try {
+        manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+      } catch (err) {
+        console.warn(`[plugin-loader] Failed to parse plugin.json from ${packageName}:`, err);
+        return null;
+      }
+    }
+  }
+
+  if (!manifest.id) {
     // Construct manifest from package.json fields
     manifest = {
       name: pkgJson.name || packageName,

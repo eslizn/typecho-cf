@@ -490,6 +490,20 @@ async function syncPostToWeChat(
   };
 }
 
+interface ManagePostTitleActionPost {
+  cid?: number | null;
+  type?: string | null;
+  text?: string | null;
+}
+
+export function canRenderSyncTitleAction(post?: ManagePostTitleActionPost): post is ManagePostTitleActionPost & { cid: number } {
+  const cid = Number(post?.cid);
+  if (!Number.isInteger(cid) || cid <= 0) return false;
+  if (post?.type && !['post', 'post_draft'].includes(post.type)) return false;
+  const html = renderWeChatHtml(post?.text || '');
+  return extractImageUrls(html).length > 0;
+}
+
 function titleActionButton(cid: number): string {
   return `<a href="#" class="typecho-wechat-sync" data-cid="${cid}" title="同步到微信公众号草稿" aria-label="同步到微信公众号草稿">
 <svg class="typecho-wechat-sync-icon" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -595,10 +609,10 @@ const ADMIN_FOOTER_HTML = `<style>
 </script>`;
 
 export default function init({ addHook, pluginId }: PluginInitContext): void {
-  addHook('admin:managePosts:titleActions', pluginId, (html: string, extra?: { post?: { cid?: number } }) => {
-    const cid = Number(extra?.post?.cid);
-    if (!Number.isInteger(cid) || cid <= 0) return html;
-    return html + titleActionButton(cid);
+  addHook('admin:managePosts:titleActions', pluginId, (html: string, extra?: { post?: ManagePostTitleActionPost }) => {
+    const post = extra?.post;
+    if (!canRenderSyncTitleAction(post)) return html;
+    return html + titleActionButton(post.cid);
   });
 
   addHook('admin:footer', pluginId, (html: string, extra?: { activeMenu?: string }) => {

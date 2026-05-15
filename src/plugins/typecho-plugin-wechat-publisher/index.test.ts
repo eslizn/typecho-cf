@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import init, { extractImageUrls, normalizeConfig, renderWeChatHtml } from './index';
+import init, { canRenderSyncTitleAction, extractImageUrls, normalizeConfig, renderWeChatHtml } from './index';
 import { env } from 'cloudflare:workers';
 
 function collectHooks() {
@@ -82,13 +82,22 @@ describe('typecho-plugin-wechat-publisher', () => {
     const hooks = collectHooks();
     const render = hooks.get('admin:managePosts:titleActions')![0];
 
-    const html = render('', { post: { cid: 42 } });
+    const html = render('', { post: { cid: 42, type: 'post', text: '<!--markdown-->正文\n\n![图](/usr/uploads/a.jpg)' } });
 
     expect(html).toContain('typecho-wechat-sync');
     expect(html).toContain('data-cid="42"');
     expect(html).toContain('aria-label="同步到微信公众号草稿"');
     expect(html).toContain('typecho-wechat-sync-icon');
     expect(html).toContain('<svg');
+  });
+
+  it('does not inject the post title sync button for posts without body images', () => {
+    const hooks = collectHooks();
+    const render = hooks.get('admin:managePosts:titleActions')![0];
+
+    expect(render('<span>existing</span>', { post: { cid: 42, type: 'post', text: '<!--markdown-->纯文本正文' } })).toBe('<span>existing</span>');
+    expect(render('', { post: { cid: 42, type: 'page', text: '<!--markdown-->![图](/usr/uploads/a.jpg)' } })).toBe('');
+    expect(canRenderSyncTitleAction({ cid: 42, type: 'post', text: '<p><img src="/usr/uploads/a.jpg" /></p>' })).toBe(true);
   });
 
   it('injects admin JavaScript only on the post list page', () => {

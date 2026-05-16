@@ -227,6 +227,35 @@ describe('typecho-plugin-webdav config', () => {
     });
   });
 
+  it('rejects path traversal via .. segments', () => {
+    const config = normalizeConfig({
+      routePath: '/dav',
+      mounts: [{
+        mount: '',
+        provider: 'r2',
+        bindingName: 'ROOT_BUCKET',
+      }],
+    });
+    expect(resolveWebDavTarget(config, 'a/../b/../secret')).toBeNull();
+    expect(resolveWebDavTarget(config, '..')).toBeNull();
+    expect(resolveWebDavTarget(config, '.')).toBeNull();
+    expect(resolveWebDavTarget(config, 'normal/path/file.txt')).not.toBeNull();
+  });
+
+  it('rejects path traversal in named mount subpaths', () => {
+    const config = normalizeConfig({
+      routePath: '/dav',
+      mounts: [{
+        mount: 'media',
+        provider: 'r2',
+        bindingName: 'MEDIA_BUCKET',
+      }],
+    });
+    expect(resolveWebDavTarget(config, 'media/../secret')).toBeNull();
+    expect(resolveWebDavTarget(config, 'media/./file.txt')).toBeNull();
+    expect(resolveWebDavTarget(config, 'media/subdir/file.txt')).not.toBeNull();
+  });
+
   it('rejects mixing the route root mount with named mounts', () => {
     expect(() => parseMounts([
       {

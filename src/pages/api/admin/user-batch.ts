@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro';
 import { schema } from '@/db';
-import { isAdminActionResponse, requireAdminAction } from '@/lib/admin-auth';
+import { isAdminActionResponse, requireAdminAction, safeAdminRedirectUrl } from '@/lib/admin-auth';
 import { eq, sql } from 'drizzle-orm';
 
 export const POST: APIRoute = handler;
@@ -20,7 +20,11 @@ async function handler({ request, locals, url }: { request: Request; locals: App
   }
 
   if (uids.length === 0) {
-    const referer = request.headers.get('referer') || '/admin/manage-users';
+    const referer = safeAdminRedirectUrl(
+      request.headers.get('referer'),
+      auth.options.siteUrl || '',
+      '/admin/manage-users',
+    );
     return new Response(null, { status: 302, headers: { Location: referer } });
   }
 
@@ -53,6 +57,10 @@ async function handler({ request, locals, url }: { request: Request; locals: App
     }
   }
 
-  const referer = request.headers.get('referer') || '/admin/manage-users';
+  const referer = safeAdminRedirectUrl(
+    request.headers.get('referer'),
+    auth.options.siteUrl || '',
+    '/admin/manage-users',
+  );
   return new Response(null, { status: 302, headers: { Location: referer } });
 }

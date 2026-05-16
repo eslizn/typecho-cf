@@ -1,5 +1,5 @@
 import type { APIRoute } from 'astro';
-import { isAdminActionResponse, requireAdminAction } from '@/lib/admin-auth';
+import { isAdminActionResponse, requireAdminAction, safeAdminRedirectUrl } from '@/lib/admin-auth';
 import {
   applyCommentAction,
   getModeratableComment,
@@ -30,7 +30,11 @@ export const POST: APIRoute = async ({ request, locals, url }) => {
   await applyCommentAction(auth.db, comment, action, auth.options);
   await purgeCommentModerationCache(auth.db, auth.options, comment.cid);
 
-  const referer = request.headers.get('referer') || '/admin/manage-comments';
+  const referer = safeAdminRedirectUrl(
+    request.headers.get('referer'),
+    auth.options.siteUrl || '',
+    '/admin/manage-comments',
+  );
   return new Response(null, {
     status: 302,
     headers: { Location: referer },

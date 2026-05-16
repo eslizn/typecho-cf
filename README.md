@@ -14,7 +14,7 @@
 
 **管理后台**：文章 & 页面编辑管理、评论审核、媒体管理（R2 拖放上传）、用户管理（5 种角色）、主题切换、插件管理（启用/禁用/配置）、全站设置、安装向导
 
-**系统**：主题系统（npm 包分发）、插件系统（Hook 机制，50+ 挂载点）、PHP 版 Typecho 数据迁移工具、SHA-256 + salt 认证
+**系统**：主题系统（npm 包分发）、插件系统（Hook 机制，50+ 挂载点）、PHP 版 Typecho 数据迁移工具、PBKDF2-SHA256 认证、CSRF 防护、安全响应头、R2 上传类型校验
 
 ---
 
@@ -84,6 +84,7 @@ pnpm run deploy
 | `pnpm run test` | 运行所有测试 |
 | `pnpm run test:watch` | 监听模式运行测试 |
 | `pnpm run test:coverage` | 生成覆盖率报告 |
+| `pnpm exec tsc --noEmit` | TypeScript 类型检查 |
 | `pnpm run db:generate` | 生成 Drizzle 数据库迁移 |
 | `pnpm run db:studio` | 启动 Drizzle Studio |
 | `pnpm run db:migrate:local` | 迁移 PHP Typecho 数据到本地 |
@@ -164,6 +165,15 @@ pnpm run reset-password:cloudflare
 | 文件存储 | [Cloudflare R2](https://developers.cloudflare.com/r2/) |
 | 测试 | [Vitest](https://vitest.dev) |
 | 包管理 | pnpm |
+
+---
+
+## 安全与测试约束
+
+- 管理 API 必须通过 `requireAdminAction()` 做登录、权限与 CSRF 校验；重定向回后台页面必须使用同源且仅限 `/admin` 路径的安全回跳。
+- 评论来源与评论提交后的回跳只按 URL `origin` 判定可信来源，禁止用字符串前缀或仅 host 比较。
+- 前台、后台、插件路由和缓存命中的响应都由中间件补齐基础安全响应头。
+- 新增功能和 bug 修复必须补对应回归测试，并同时通过 `pnpm run test` 与 `pnpm exec tsc --noEmit`。
 
 ---
 

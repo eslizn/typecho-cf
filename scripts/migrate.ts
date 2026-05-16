@@ -26,12 +26,13 @@
 import { createClient, type Client } from '@libsql/client/node';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { execSync } from 'node:child_process';
-import { exec as execAsync } from 'node:child_process/promises';
+import { execSync, exec } from 'node:child_process';
+import { promisify } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const execAsync = promisify(exec);
 
 // ─── CLI Arguments ───────────────────────────────────────────────────────────
 

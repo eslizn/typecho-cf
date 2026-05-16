@@ -1,5 +1,5 @@
 import type { APIRoute } from 'astro';
-import { isAdminActionResponse, requireAdminAction } from '@/lib/admin-auth';
+import { isAdminActionResponse, requireAdminAction, safeAdminRedirectUrl } from '@/lib/admin-auth';
 import {
   applyCommentAction,
   deleteSpamCommentsForUser,
@@ -23,7 +23,11 @@ async function handler({ request, locals, url }: { request: Request; locals: App
     await deleteSpamCommentsForUser(auth.db, auth.user);
     await purgeCommentModerationCache(auth.db, auth.options);
 
-    const referer = request.headers.get('referer') || '/admin/manage-comments?status=spam';
+    const referer = safeAdminRedirectUrl(
+      request.headers.get('referer'),
+      auth.options.siteUrl || '',
+      '/admin/manage-comments?status=spam',
+    );
     return new Response(null, { status: 302, headers: { Location: referer } });
   }
 
@@ -38,7 +42,11 @@ async function handler({ request, locals, url }: { request: Request; locals: App
   }
 
   if (coids.length === 0) {
-    const referer = request.headers.get('referer') || '/admin/manage-comments';
+    const referer = safeAdminRedirectUrl(
+      request.headers.get('referer'),
+      auth.options.siteUrl || '',
+      '/admin/manage-comments',
+    );
     return new Response(null, { status: 302, headers: { Location: referer } });
   }
 
@@ -54,6 +62,10 @@ async function handler({ request, locals, url }: { request: Request; locals: App
   // Comments affect post pages and feeds
   await purgeCommentModerationCache(auth.db, auth.options);
 
-  const referer = request.headers.get('referer') || '/admin/manage-comments';
+  const referer = safeAdminRedirectUrl(
+    request.headers.get('referer'),
+    auth.options.siteUrl || '',
+    '/admin/manage-comments',
+  );
   return new Response(null, { status: 302, headers: { Location: referer } });
 }

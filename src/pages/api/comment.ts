@@ -111,9 +111,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
   // Check referer URL matches the content's URL (anti-spam: ensure comment came from a real page view)
   if (options.commentsCheckReferer) {
-    const refererHeader = request.headers.get('referer') || '';
-    const siteUrl = options.siteUrl?.replace(/\/$/, '') || '';
-    if (!refererHeader || (siteUrl && !refererHeader.startsWith(siteUrl))) {
+    if (!isTrustedCommentReferer(request.headers.get('referer'), options.siteUrl || '')) {
       return new Response('评论来源页 URL 不合法', { status: 403 });
     }
   }
@@ -246,18 +244,36 @@ export const POST: APIRoute = async ({ request, locals }) => {
   let redirectUrl = `/archives/${cid}/#comments`;
   const referer = request.headers.get('referer');
   if (referer) {
-    try {
-      const refUrl = new URL(referer);
-      const siteHost = options.siteUrl ? new URL(options.siteUrl).host : '';
-      if (refUrl.host === siteHost || refUrl.host === new URL(request.url).host) {
-        redirectUrl = `${refUrl.pathname}${refUrl.search}#comments`;
-      }
-    } catch {
-      // Invalid referer URL, use default
-    }
+    redirectUrl = safeCommentRedirectUrl(referer, options.siteUrl || '', request.url, redirectUrl);
   }
   return new Response(null, {
     status: 302,
     headers: { Location: redirectUrl },
   });
 };
+
+function isTrustedCommentReferer(referer: string | null, siteUrl: string): boolean {
+  if (!referer || !siteUrl) return false;
+  try {
+    return new URL(referer).origin === new URL(siteUrl).origin;
+  } catch {
+    return false;
+  }
+}
+
+function safeCommentRedirectUrl(
+  referer: string,
+  siteUrl: string,
+  requestUrl: string,
+  fallback: string,
+): string {
+  try {
+    const refUrl = new URL(referer);
+    const trustedOrigins = new Set([new URL(requestUrl).origin]);
+    if (siteUrl) trustedOrigins.add(new URL(siteUrl).origin);
+    if (!trustedOrigins.has(refUrl.origin)) return fallback;
+    return `${refUrl.pathname}${refUrl.search}#comments`;
+  } catch {
+    return fallback;
+  }
+}

@@ -8,7 +8,7 @@ import { env } from 'cloudflare:workers';
 import initWebDavPlugin from 'typecho-plugin-webdav/index.ts';
 
 const redirectToInstall = () =>
-  new Response(null, { status: 302, headers: { Location: '/install' } });
+  withSecurityHeaders(new Response(null, { status: 302, headers: { Location: '/install' } }));
 
 // ── Module-level caches (persist across requests within the same isolate) ──
 const regexCache = new Map<string, RegExp | null>();
@@ -72,7 +72,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
     path === '/install' ||
     path === '/api/install'
   ) {
-    return next();
+    return withSecurityHeaders(await next());
   }
 
   // ── Pagination URL Rewriting ──────────────────────────────────────────────
@@ -129,7 +129,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
     env,
   });
   if (pluginRoute?.handled && pluginRoute.response instanceof Response) {
-    return pluginRoute.response;
+    return withSecurityHeaders(pluginRoute.response);
   }
 
   // ── Edge Cache Layer ──────────────────────────────────────────────────────
@@ -151,7 +151,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
   if (cacheKey) {
     const cached = await caches.default.match(cacheKey);
     if (cached) {
-      return cached;
+      return withSecurityHeaders(cached);
     }
   }
 
@@ -284,19 +284,21 @@ export const onRequest = defineMiddleware(async (context, next) => {
   }
 
   // Execute the route handler
-  const response = await next();
+  let response = await next();
+
+  response = withSecurityHeaders(response);
 
   // ── Write response to edge cache ──────────────────────────────────────────
   if (cacheKey && response.status === 200) {
-    const headers = new Headers(response.headers);
-    if (!headers.has('Cache-Control')) {
-      headers.set('Cache-Control', 'public, s-maxage=300');
+    const cacheHeaders = new Headers(response.headers);
+    if (!cacheHeaders.has('Cache-Control')) {
+      cacheHeaders.set('Cache-Control', 'public, s-maxage=300');
     }
 
     const cacheable = new Response(response.clone().body, {
       status: response.status,
       statusText: response.statusText,
-      headers,
+      headers: cacheHeaders,
     });
 
     await caches.default.put(cacheKey, cacheable);
@@ -309,4 +311,28 @@ function withCacheVersion(requestUrl: string, cacheVersion?: number): string {
   const url = new URL(requestUrl);
   url.searchParams.set('__typecho_cache', String(cacheVersion || 0));
   return url.toString();
+}
+
+function withSecurityHeaders(response: Response): Response {
+  const resHeaders = response.headers;
+  if (
+    resHeaders.has('X-Content-Type-Options') &&
+    resHeaders.has('X-Frame-Options') &&
+    resHeaders.has('Referrer-Policy') &&
+    resHeaders.has('Strict-Transport-Security')
+  ) {
+    return response;
+  }
+
+  const headers = new Headers(resHeaders);
+  if (!headers.has('X-Content-Type-Options')) headers.set('X-Content-Type-Options', 'nosniff');
+  if (!headers.has('X-Frame-Options')) headers.set('X-Frame-Options', 'DENY');
+  if (!headers.has('Referrer-Policy')) headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  if (!headers.has('Strict-Transport-Security')) headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
 }

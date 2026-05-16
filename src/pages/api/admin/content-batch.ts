@@ -1,7 +1,7 @@
 import type { APIRoute } from 'astro';
 import { schema } from '@/db';
 import { hasPermission } from '@/lib/auth';
-import { isAdminActionResponse, requireAdminAction } from '@/lib/admin-auth';
+import { isAdminActionResponse, requireAdminAction, safeAdminRedirectUrl } from '@/lib/admin-auth';
 import { setActivatedPlugins, parseActivatedPlugins, doHook } from '@/lib/plugin';
 import { bumpCacheVersion, purgeContentCache } from '@/lib/cache';
 import { eq, sql } from 'drizzle-orm';
@@ -18,7 +18,6 @@ async function handler({ request, locals, url }: { request: Request; locals: App
   const isAdmin = hasPermission(auth.user.group || 'visitor', 'administrator');
   const isEditor = hasPermission(auth.user.group || 'visitor', 'editor');
 
-  // Get action from query params
   const action = url.searchParams.get('do') || '';
   const markStatusInput = url.searchParams.get('status') || '';
   const VALID_STATUSES = ['publish', 'draft', 'hidden', 'private', 'waiting'];
@@ -28,17 +27,19 @@ async function handler({ request, locals, url }: { request: Request; locals: App
     return new Response('Invalid action', { status: 400 });
   }
 
-  // Get selected cids from form body or referer page's form
   let cids: number[] = [];
   if (request.method === 'POST') {
     const formData = await request.formData();
     cids = formData.getAll('cid[]').map(v => parseInt(v.toString(), 10)).filter(Boolean);
   }
 
-  // For GET requests with batch actions, we need the cids from the referring form
-  // Typecho uses JS to collect checkboxes and submit - redirect back if no cids
+  // Typecho uses JS to collect checkboxes and submit — redirect back if no cids
   if (cids.length === 0) {
-    const referer = request.headers.get('referer') || (type === 'page' ? '/admin/manage-pages' : '/admin/manage-posts');
+    const referer = safeAdminRedirectUrl(
+      request.headers.get('referer'),
+      auth.options.siteUrl || '',
+      type === 'page' ? '/admin/manage-pages' : '/admin/manage-posts',
+    );
     return new Response(null, { status: 302, headers: { Location: referer } });
   }
 
@@ -93,6 +94,10 @@ async function handler({ request, locals, url }: { request: Request; locals: App
   await bumpCacheVersion(auth.db);
   await purgeContentCache(auth.options.siteUrl || '');
 
-  const referer = request.headers.get('referer') || (type === 'page' ? '/admin/manage-pages' : '/admin/manage-posts');
+  const referer = safeAdminRedirectUrl(
+    request.headers.get('referer'),
+    auth.options.siteUrl || '',
+    type === 'page' ? '/admin/manage-pages' : '/admin/manage-posts',
+  );
   return new Response(null, { status: 302, headers: { Location: referer } });
 }

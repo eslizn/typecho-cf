@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro';
 import { setOption } from '@/lib/options';
-import { isAdminActionResponse, requireAdminAction } from '@/lib/admin-auth';
+import { isAdminActionResponse, requireAdminAction, safeAdminRedirectUrl } from '@/lib/admin-auth';
 import { bumpCacheVersion, purgeSiteCache } from '@/lib/cache';
 
 export const POST: APIRoute = async ({ request, locals }) => {
@@ -73,12 +73,16 @@ export const POST: APIRoute = async ({ request, locals }) => {
     await setOption(auth.db, 'commentsPostInterval', String(minutes * 60));
   }
 
-  const referer = request.headers.get('referer') || '/admin/options-general';
+  const referer = safeAdminRedirectUrl(
+    request.headers.get('referer'),
+    auth.options.siteUrl || '',
+    '/admin/options-general',
+  );
 
   // Handle checkbox fields that may not be present (unchecked checkboxes aren't sent in form data)
   // IMPORTANT: Only process checkboxes belonging to the current page to avoid
   // clearing checkboxes from other settings pages (each page submits to this same endpoint)
-  const refererPath = new URL(referer, 'http://localhost').pathname;
+  const refererPath = referer.split('?')[0];
 
   const checkboxFieldsByPage: Record<string, string[]> = {
     '/admin/options-general': [

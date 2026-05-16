@@ -258,6 +258,19 @@ addHook(hookPoint, pluginId, handler, priority = 10)
 - `generateSecurityToken(secret, authCode, uid)` 生成 token
 - 管理后台所有表单必须包含 CSRF token
 - 管理 API 端点必须校验 CSRF token
+- `safeAdminRedirectUrl(referer, siteUrl, fallback)` 位于 `src/lib/admin-auth.ts`，安全构造管理后台重定向 URL；必须同时满足 `origin` 与 `siteUrl` 一致且路径为 `/admin` 或 `/admin/*`，防止 Open Redirect 与后台动作跳转到前台任意路径
+- 评论来源检查和评论提交后的回跳只允许用 `URL.origin` 判定可信来源，禁止使用 `startsWith(siteUrl)` 或仅比较 `host`
+
+### 8.4 安全响应头
+
+中间件 (`src/middleware.ts`) 在每次中间件托管响应中自动添加以下安全响应头，除非路由处理程序已设置同名 Header；包括普通路由、插件 `route:request` 响应、缓存命中响应、安装/静态资源早返回路径：
+
+| Header | Value |
+|--------|-------|
+| `X-Content-Type-Options` | `nosniff` |
+| `X-Frame-Options` | `DENY` |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` |
+| `Strict-Transport-Security` | `max-age=31536000; includeSubDomains` |
 
 ---
 
@@ -269,6 +282,8 @@ addHook(hookPoint, pluginId, handler, priority = 10)
 - 管理接口 → `src/pages/api/admin/<name>.ts`（通过 context 验证登录态）
 - 文件格式：`.ts`，直接 `export const POST/PUT/DELETE = ...`，返回 `Response`
 - 路由由 Astro 文件系统路由自动生成
+- `src/pages/api/admin/meta.ts` 只能写入 `category` / `tag` 两类元数据，禁止接受任意 `type`
+- `src/pages/api/admin/content.ts` 保存文章/页面时必须确保 `contents.slug` 唯一；更新为冲突 slug 时追加当前 `cid` 后缀，不允许把唯一索引错误暴露成 500
 
 ### 9.2 管理后台页面
 
@@ -322,6 +337,9 @@ vi.mock('cloudflare:workers', () => ({ env: { DB: null, BUCKET: { delete: mockFn
 ### 10.4 测试要求
 
 - 新增功能和 bug 修复必须同步添加对应测试用例
+- 修改后必须运行 `pnpm run test` 与 `pnpm exec tsc --noEmit`
+- 若集成测试为了隔离端点 mock 了 `requireAdminCSRF`，必须另有单元/集成测试覆盖真实 `requireAdminAction()` / CSRF 失败路径
+- 安全修复必须包含负向回归用例（例如跨 origin、协议不一致、前缀匹配伪造、非法 enum/type、路径穿越）
 - 每个插件必须包含 `index.test.ts`，覆盖：Hook 注册、守卫分支、正常路径、拒绝路径、边界情况、配置验证
 
 ---
@@ -348,10 +366,14 @@ src/
 │   ├── theme.ts                     # 主题系统
 │   ├── context.ts                   # 请求上下文 + getClientIp
 │   ├── auth.ts                      # 密码哈希 + Session + CSRF
+│   ├── admin-auth.ts                # 管理后台认证中间件 + 安全重定向
 │   ├── options.ts                   # 站点配置 CRUD
-│   ├── cache.ts                     # 选项缓存
+│   ├── cache.ts                     # 选项缓存 + 边缘缓存清除
 │   ├── schema-sql.ts                # 建表 SQL 反射生成
-│   └── theme-props.ts               # 主题 Props 类型定义
+│   ├── sidebar.ts                   # 侧边栏/导航数据加载
+│   ├── theme-props.ts               # 主题 Props 类型定义
+│   ├── markdown.ts                  # Markdown 渲染 + HTML 净化
+│   └── url.ts                       # URL 规范化与校验
 ├── integrations/
 │   ├── plugin-loader.ts             # 构建时插件发现
 │   └── theme-loader.ts              # 构建时主题发现
@@ -367,10 +389,10 @@ src/
     └── README.md                    # 主题开发完整规范
 tests/
 ├── setup.ts                         # 全局测试 setup
-├── helpers.ts                       # 测试工具函数
-├── __mocks__/cloudflare-workers.ts  # cloudflare:workers stub
-├── unit/                            # 单元测试
-└── integration/                     # 集成测试
+├── helpers.ts                       # 测试工具函数 (createTestDb, seedAdmin, makeAuthCookie)
+├── __mocks__/cloudflare-workers.ts  # cloudflare:workers stub + caches mock
+├── unit/                            # 单元测试 (25 个文件)
+└── integration/                     # 集成测试 (17 个文件)
 scripts/
 ├── migrate.ts                       # PHP Typecho 数据迁移
 └── reset-password.ts                # 密码重置工具

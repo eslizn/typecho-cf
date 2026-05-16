@@ -9,6 +9,8 @@ import { schema } from '@/db';
 import { buildPermalink, buildCategoryLink, buildDateLink } from '@/lib/content';
 import { applyFilterSafely } from '@/lib/plugin';
 
+type SidebarDatabase = Pick<Database, 'batch' | 'select'>;
+
 export interface SidebarData {
   recentPosts: Array<{ title: string; permalink: string }>;
   recentComments: Array<{ author: string; excerpt: string; permalink: string }>;
@@ -16,7 +18,7 @@ export interface SidebarData {
   archives: Array<{ date: string; permalink: string }>;
 }
 
-export async function loadSidebarData(db: Database, siteUrl: string, permalinkPattern?: string | null, categoryPattern?: string | null): Promise<SidebarData> {
+export async function loadSidebarData(db: SidebarDatabase, siteUrl: string, permalinkPattern?: string | null, categoryPattern?: string | null): Promise<SidebarData> {
   // Execute all 4 queries in a single D1 round-trip
   const [recentPostRows, recentCommentRows, categoryRows, archiveRows] = await db.batch([
     // Recent posts
@@ -119,7 +121,7 @@ export async function loadSidebarData(db: Database, siteUrl: string, permalinkPa
 /**
  * Load navigation pages (published pages for header nav)
  */
-export async function loadNavPages(db: Database, siteUrl: string, pagePattern?: string | null) {
+export async function loadNavPages(db: SidebarDatabase, siteUrl: string, pagePattern?: string | null) {
   const rows = await db
     .select({
       cid: schema.contents.cid,

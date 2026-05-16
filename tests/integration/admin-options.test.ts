@@ -65,6 +65,7 @@ describe('POST /api/admin/options', () => {
   beforeEach(async () => {
     testDb = await createTestDb();
     await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE });
+    await testDb.insert(schema.options).values({ name: 'siteUrl', user: 0, value: 'https://example.com' });
   });
 
   // -- Access control --
@@ -273,6 +274,6 @@ describe('POST /api/admin/options', () => {
     );
     const res = await POST({ request: req, locals: {} } as any);
     expect(res.status).toBe(302);
-    expect(res.headers.get('location')).toBe('https://example.com/admin/options-general');
+    expect(res.headers.get('location')).toBe('/admin/options-general');
   });
 });

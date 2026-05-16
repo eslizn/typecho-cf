@@ -40,6 +40,10 @@ async function handler({ request, locals, url }: { request: Request; locals: App
   const description = formData.get('description')?.toString()?.trim() || '';
   const mids = formData.getAll('mid[]').map((v: any) => parseInt(v.toString(), 10)).filter(Boolean);
 
+  if (type !== 'category' && type !== 'tag') {
+    return new Response('Invalid meta type', { status: 400 });
+  }
+
   const redirectTo = type === 'tag' ? '/admin/manage-tags' : '/admin/manage-categories';
 
   if (action === 'create') {

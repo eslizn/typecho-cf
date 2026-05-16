@@ -71,4 +71,45 @@ describe('POST /api/admin/content', () => {
     expect(tags[0].count).toBe(1);
     expect(rels).toHaveLength(1);
   });
+
+  it('deduplicates slug when updating to another content slug', async () => {
+    await testDb.insert(schema.contents).values({
+      title: 'First',
+      slug: 'shared-slug',
+      type: 'post',
+      status: 'publish',
+      authorId: 1,
+    });
+    await testDb.insert(schema.contents).values({
+      title: 'Second',
+      slug: 'second',
+      type: 'post',
+      status: 'publish',
+      authorId: 1,
+    });
+    const second = await testDb.query.contents.findFirst({
+      where: eq(schema.contents.slug, 'second'),
+    });
+
+    const admin = await testDb.query.users.findFirst();
+    const cookie = await makeAuthCookie(testDb, admin!.uid, TEST_AUTH_CODE, TEST_SECRET);
+    const req = await makeContentRequest({
+      do: 'update',
+      cid: String(second!.cid),
+      type: 'post',
+      title: 'Second updated',
+      slug: 'shared-slug',
+      text: 'Body',
+      status: 'publish',
+      visibility: 'publish',
+    }, cookie);
+
+    const res = await POST({ request: req, locals: {} } as any);
+    expect(res.status).toBe(302);
+
+    const updated = await testDb.query.contents.findFirst({
+      where: eq(schema.contents.cid, second!.cid),
+    });
+    expect(updated?.slug).toBe(`shared-slug-${second!.cid}`);
+  });
 });

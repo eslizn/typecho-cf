@@ -264,6 +264,20 @@ describe('POST /api/comment', () => {
     expect(res.status).toBe(403);
   });
 
+  it('rejects prefix-matched attacker domains when commentsCheckReferer is enabled', async () => {
+    await seedOptions(testDb, {
+      commentsCheckReferer: '1',
+      siteUrl: 'https://example.com',
+    });
+    const content = await seedContent(testDb);
+    const req = makeCommentRequest(
+      { cid: String(content.cid), text: 'Prefix bypass attempt', author: 'Spammer' },
+      { referer: 'https://example.com.evil.test/page' },
+    );
+    const res = await POST({ request: req, locals: {} } as any);
+    expect(res.status).toBe(403);
+  });
+
   it('marks comment as waiting when commentsRequireModeration is enabled', async () => {
     await seedOptions(testDb, { commentsRequireModeration: '1' });
     const content = await seedContent(testDb);
@@ -409,6 +423,22 @@ describe('POST /api/comment', () => {
     expect(location).not.toContain('evil.com');
     // Should redirect to a safe path
     expect(location).toContain('#comments');
+  });
+
+  it('does not redirect to same-host referers on a different protocol', async () => {
+    await seedOptions(testDb, { siteUrl: 'https://example.com' });
+    const content = await seedContent(testDb);
+    const req = makeCommentRequest(
+      {
+        cid: String(content.cid),
+        text: 'Hello',
+        author: 'Alice',
+      },
+      { referer: 'http://example.com/archives/1/' },
+    );
+    const res = await POST({ request: req, locals: {} } as any);
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe(`/archives/${content.cid}/#comments`);
   });
 
   it('uses same-origin referer for redirect when valid', async () => {

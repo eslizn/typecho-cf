@@ -87,6 +87,21 @@ async function attachTags(db: any, cid: number, tags: string) {
   }
 }
 
+async function resolveUniqueContentSlug(db: any, desiredSlug: string, cid: number): Promise<string> {
+  const base = desiredSlug || String(cid);
+  let candidate = base;
+  let suffix = 0;
+
+  while (true) {
+    const existing = await db.query.contents.findFirst({
+      where: and(eq(schema.contents.slug, candidate), sql`${schema.contents.cid} != ${cid}`),
+    });
+    if (!existing) return candidate;
+    suffix += 1;
+    candidate = suffix === 1 ? `${base}-${cid}` : `${base}-${cid}-${suffix}`;
+  }
+}
+
 async function purgeContentAndRelatedCache(
   db: any,
   options: SiteOptions,
@@ -201,20 +216,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const newCid = result[0]?.cid;
     if (!newCid) return new Response('创建失败', { status: 500 });
 
-    // Backfill slug with cid if user didn't provide one (Typecho convention)
-    if (!slugInput) {
-      await db.update(schema.contents).set({ slug: String(newCid) }).where(eq(schema.contents.cid, newCid));
-    } else {
-      // Ensure unique slug — append cid if conflict
-      const existing = await db.query.contents.findFirst({
-        where: and(eq(schema.contents.slug, slugInput), sql`${schema.contents.cid} != ${newCid}`),
-      });
-      if (existing) {
-        await db.update(schema.contents).set({ slug: `${slugInput}-${newCid}` }).where(eq(schema.contents.cid, newCid));
-      } else {
-        await db.update(schema.contents).set({ slug: slugInput }).where(eq(schema.contents.cid, newCid));
-      }
-    }
+    const finalSlug = await resolveUniqueContentSlug(db, slugInput || String(newCid), newCid);
+    await db.update(schema.contents).set({ slug: finalSlug }).where(eq(schema.contents.cid, newCid));
 
     // Save custom fields
     await saveCustomFields(db, newCid, formData);
@@ -267,9 +270,11 @@ export const POST: APIRoute = async ({ request, locals }) => {
       return new Response('Forbidden', { status: 403 });
     }
 
+    const finalSlug = await resolveUniqueContentSlug(db, slugInput || String(cid), cid);
+
     await db.update(schema.contents).set({
       title,
-      slug: slugInput || String(cid),
+      slug: finalSlug,
       modified: now,
       text,
       order,

@@ -42,3 +42,16 @@ export async function requireAdminAction(
 export function isAdminActionResponse(value: AdminActionContext | Response): value is Response {
   return value instanceof Response;
 }
+
+export function safeAdminRedirectUrl(referer: string | null, siteUrl: string, fallback: string): string {
+  if (!referer) return fallback;
+  try {
+    const refUrl = new URL(referer);
+    const siteOrigin = new URL(siteUrl).origin;
+    if (refUrl.origin !== siteOrigin) return fallback;
+    if (refUrl.pathname !== '/admin' && !refUrl.pathname.startsWith('/admin/')) return fallback;
+    return `${refUrl.pathname}${refUrl.search}`;
+  } catch {
+    return fallback;
+  }
+}

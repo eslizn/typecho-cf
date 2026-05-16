@@ -14,7 +14,7 @@ A modern rewrite of [Typecho](https://typecho.org) in TypeScript, running on **A
 
 **Admin Dashboard**: Post & page editor, comment moderation, media manager (R2 drag-and-drop upload), user management (5 roles), theme switcher, plugin manager (enable/disable/configure), site settings, installation wizard
 
-**System**: Theme system (npm package distribution), plugin system (Hook mechanism, 50+ hook points), PHP Typecho data migration tool, SHA-256 + salt authentication
+**System**: Theme system (npm package distribution), plugin system (Hook mechanism, 50+ hook points), PHP Typecho data migration tool, PBKDF2-SHA256 authentication, CSRF protection, security headers, R2 upload type validation
 
 ---
 
@@ -84,6 +84,7 @@ After deployment, visit your Worker URL — first visit auto-redirects to the in
 | `pnpm run test` | Run all tests |
 | `pnpm run test:watch` | Watch mode |
 | `pnpm run test:coverage` | Generate coverage report |
+| `pnpm exec tsc --noEmit` | TypeScript type check |
 | `pnpm run db:generate` | Generate Drizzle migrations |
 | `pnpm run db:studio` | Launch Drizzle Studio |
 | `pnpm run db:migrate:local` | Migrate PHP Typecho data to local |
@@ -164,6 +165,15 @@ See [Theme Development Guide](src/themes/README.md).
 | File Storage | [Cloudflare R2](https://developers.cloudflare.com/r2/) |
 | Testing | [Vitest](https://vitest.dev) |
 | Package Manager | pnpm |
+
+---
+
+## Security & Test Rules
+
+- Admin APIs must use `requireAdminAction()` for authentication, authorization, and CSRF checks; admin redirects must be same-origin and limited to `/admin` paths.
+- Comment referer checks and post-comment redirects must trust sources by URL `origin`, not by string prefix or host-only comparison.
+- Frontend, admin, plugin route, and cache-hit responses are normalized by middleware with baseline security headers.
+- Every feature or bug fix needs matching regression coverage and must pass both `pnpm run test` and `pnpm exec tsc --noEmit`.
 
 ---
 

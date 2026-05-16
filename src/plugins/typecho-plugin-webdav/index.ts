@@ -217,14 +217,17 @@ export function resolveWebDavTarget(
 ): { mount: StorageMount; key: string; rootMount: boolean } | null {
   const rootMount = config.mounts.find(item => item.mount === '');
   if (rootMount) {
+    const segments = splitPath(relativePath);
+    if (hasPathTraversal(segments)) return null;
     return {
       mount: rootMount,
-      key: splitPath(relativePath).join('/'),
+      key: segments.join('/'),
       rootMount: true,
     };
   }
 
   const parts = splitPath(relativePath);
+  if (hasPathTraversal(parts)) return null;
   const mountName = parts.shift() || '';
   if (!mountName) return null;
 
@@ -388,6 +391,10 @@ function splitPath(path: string): string[] {
         return segment;
       }
     });
+}
+
+function hasPathTraversal(segments: string[]): boolean {
+  return segments.some(s => s === '..' || s === '.' || s.includes('\0'));
 }
 
 function withMountPrefix(mount: StorageMount, key: string): string {

@@ -1,7 +1,7 @@
 import type { APIRoute } from 'astro';
 import { schema } from '@/db';
 import { hasPermission } from '@/lib/auth';
-import { isAdminActionResponse, requireAdminAction } from '@/lib/admin-auth';
+import { isAdminActionResponse, requireAdminAction, safeAdminRedirectUrl } from '@/lib/admin-auth';
 import { eq } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 
@@ -23,7 +23,11 @@ async function handler({ request, locals, url }: { request: Request; locals: App
   }
 
   if (cids.length === 0) {
-    const referer = request.headers.get('referer') || '/admin/manage-medias';
+    const referer = safeAdminRedirectUrl(
+      request.headers.get('referer'),
+      auth.options.siteUrl || '',
+      '/admin/manage-medias',
+    );
     return new Response(null, { status: 302, headers: { Location: referer } });
   }
 
@@ -50,6 +54,10 @@ async function handler({ request, locals, url }: { request: Request; locals: App
     }
   }
 
-  const referer = request.headers.get('referer') || '/admin/manage-medias';
+  const referer = safeAdminRedirectUrl(
+    request.headers.get('referer'),
+    auth.options.siteUrl || '',
+    '/admin/manage-medias',
+  );
   return new Response(null, { status: 302, headers: { Location: referer } });
 }

@@ -226,26 +226,32 @@ export default function pluginLoaderIntegration(): AstroIntegration {
           console.log('[plugin-loader] No npm plugins found.');
         }
 
-        // Inject plugin registration + activation code
-        // This runs on every page SSR and registers all discovered plugins
+        // Inject plugin registration + lazy initializer table.
+        //
+        // G6-3: instead of eagerly executing every plugin's init() on
+        // every page SSR, we expose a __typechoPluginInits map keyed
+        // by plugin id. The runtime (context.ts via setActivatedPlugins)
+        // calls each entry once per isolate, so disabled plugins never
+        // touch hookRegistry and modules whose init has side effects
+        // (e.g. webdav's module-scope authFailureStates) never get
+        // constructed unless the plugin is actually activated.
         if (discoveredPlugins.length > 0) {
           const registrations = discoveredPlugins.map((plugin) => {
             const manifest = JSON.stringify(plugin.manifest);
             return `registerPlugin(${JSON.stringify(plugin.packageName)}, ${manifest});`;
           }).join('\n');
 
-          // Import and execute each plugin's entry (which calls addHook)
           const pluginImports = discoveredPlugins.map((plugin, idx) => {
             return `import pluginInit_${idx} from ${JSON.stringify(plugin.importPath)};`;
           }).join('\n');
 
-          const pluginInits = discoveredPlugins.map((plugin, idx) => {
-            return `try { pluginInit_${idx}({ addHook, HookPoints, pluginId: ${JSON.stringify(plugin.id)} }); } catch(e) { console.error('[plugin] Failed to init ${plugin.id}:', e); }`;
+          const pluginEntries = discoveredPlugins.map((plugin, idx) => {
+            return `  ${JSON.stringify(plugin.id)}: pluginInit_${idx},`;
           }).join('\n');
 
           injectScript(
             'page-ssr',
-            `import { registerPlugin, addHook, HookPoints } from '@/lib/plugin';\n${registrations}\n${pluginImports}\n${pluginInits}`
+            `import { registerPlugin, registerPluginInit, addHook, HookPoints } from '@/lib/plugin';\n${pluginImports}\n${registrations}\nregisterPluginInit({\n${pluginEntries}\n}, { addHook, HookPoints });`,
           );
         }
       },

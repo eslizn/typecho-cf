@@ -241,6 +241,31 @@ const hookRegistry = new Map<string, HookRegistration[]>();
  */
 let activatedPlugins = new Set<string>();
 
+// ── Lazy initialiser table (G6-3) ────────────────────────────────────────
+// Populated at module load by plugin-loader's injected `registerPluginInit`
+// call. The map maps plugin id → init fn. Initialisation is deferred to
+// `setActivatedPlugins` so we only ever touch the modules of plugins
+// the operator has actually enabled.
+
+type PluginInitFn = (ctx: PluginInitContext) => void;
+const pluginInits = new Map<string, PluginInitFn>();
+const initialisedPlugins = new Set<string>();
+let pluginInitContext: { addHook: typeof addHook; HookPoints: typeof HookPoints } | null = null;
+
+/**
+ * Called once at module load by plugin-loader injected code. Stores the
+ * init functions and the bound addHook reference for later replay.
+ */
+export function registerPluginInit(
+  inits: Record<string, PluginInitFn>,
+  ctx: { addHook: typeof addHook; HookPoints: typeof HookPoints },
+): void {
+  pluginInitContext = ctx;
+  for (const [id, fn] of Object.entries(inits)) {
+    pluginInits.set(id, fn);
+  }
+}
+
 // ==================== Plugin Management ====================
 
 /**
@@ -261,13 +286,30 @@ export function registerPlugin(
 }
 
 /**
- * Set the list of activated plugin IDs (loaded from DB)
+ * Set the list of activated plugin IDs (loaded from DB).
+ *
+ * G6-3: the first time we see a given plugin in the activated set, we
+ * call its init function so its hooks land in hookRegistry. Plugins
+ * that are never activated never have their init code run, which keeps
+ * the per-isolate startup cost proportional to active plugin count.
  */
 export function setActivatedPlugins(ids: string[]): void {
   activatedPlugins = new Set(ids);
   // Update isActive flag on all registered plugins
   for (const [id, info] of pluginRegistry) {
     info.isActive = activatedPlugins.has(id);
+  }
+  if (!pluginInitContext) return;
+  for (const id of ids) {
+    if (initialisedPlugins.has(id)) continue;
+    const init = pluginInits.get(id);
+    if (!init) continue;
+    initialisedPlugins.add(id);
+    try {
+      init({ addHook: pluginInitContext.addHook, HookPoints: pluginInitContext.HookPoints, pluginId: id });
+    } catch (err) {
+      console.error(`[plugin] Failed to init ${id}:`, err);
+    }
   }
 }
 
@@ -318,11 +360,15 @@ export function pluginExists(pluginId: string): boolean {
 /**
  * Register a hook handler for a specific hook point.
  * Only handlers from activated plugins will be executed.
- * 
+ *
  * @param hookPoint - The hook point name (use HookPoints constants)
  * @param pluginId - The plugin ID registering this handler
  * @param handler - The handler function
  * @param priority - Execution priority (lower = earlier, default 10)
+ *
+ * G6-1: dedupes (pluginId, handler-by-reference) so middleware
+ * bootstrap + plugin-loader injectScript registering the same plugin
+ * twice doesn't end up running the handler twice on every request.
  */
 export function addHook(
   hookPoint: string,
@@ -334,6 +380,9 @@ export function addHook(
     hookRegistry.set(hookPoint, []);
   }
   const handlers = hookRegistry.get(hookPoint)!;
+  if (handlers.some(h => h.pluginId === pluginId && h.handler === handler)) {
+    return;
+  }
   handlers.push({ pluginId, handler, priority });
   // Keep sorted by priority
   handlers.sort((a, b) => a.priority - b.priority);

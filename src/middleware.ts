@@ -153,7 +153,14 @@ export const onRequest = defineMiddleware(async (context, next) => {
     env,
   });
   if (pluginRoute?.handled && pluginRoute.response instanceof Response) {
-    return await applySecurityHeaders(pluginRoute.response, { request: context.request });
+    // G6-4: hard-block plugins from claiming reserved core paths.
+    // Even a buggy/malicious plugin that returns handled=true on /admin
+    // must not be able to intercept admin auth, install, or core API.
+    if (isReservedCorePath(path)) {
+      console.warn(`[middleware] plugin tried to claim reserved path ${path}; ignoring`);
+    } else {
+      return await applySecurityHeaders(pluginRoute.response, { request: context.request });
+    }
   }
 
   // ── Edge Cache Layer ──────────────────────────────────────────────────────
@@ -347,6 +354,19 @@ function mergeVary(existing: string | null, additions: string[]): string {
   }
   for (const tok of additions) tokens.add(tok);
   return Array.from(tokens).filter(Boolean).join(', ');
+}
+
+/**
+ * Paths that plugins MUST NOT be able to claim via route:request.
+ * Hard-coded so a misbehaving plugin can never shadow the install
+ * flow, login, or admin endpoints.
+ */
+function isReservedCorePath(path: string): boolean {
+  if (path === '/install' || path === '/api/install') return true;
+  if (path === '/admin' || path.startsWith('/admin/')) return true;
+  if (path === '/api/admin' || path.startsWith('/api/admin/')) return true;
+  if (path === '/api/users/login' || path === '/api/users/logout' || path === '/api/users/register') return true;
+  return false;
 }
 
 function withCacheVersion(requestUrl: string, cacheVersion?: number): string {

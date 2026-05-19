@@ -205,10 +205,17 @@ export const POST: APIRoute = async ({ request, locals }) => {
     }
   }
 
-  // Apply feedback:comment filter — plugins can modify/reject comment data before save
-  commentData = await applyFilter('feedback:comment', commentData, {
-    request, formData, db, options, isLoggedIn: !!userId,
-  });
+  // Apply feedback:comment filter — plugins can modify/reject comment data before save.
+  // G6-5: catch plugin failures and convert to a 403 reject reason
+  // rather than letting them surface as a 500 to the commenter.
+  try {
+    commentData = await applyFilter('feedback:comment', commentData, {
+      request, formData, db, options, isLoggedIn: !!userId,
+    });
+  } catch (err) {
+    console.error('[comment] feedback:comment filter threw:', err);
+    return new Response('插件处理评论时出错，请稍后重试', { status: 503 });
+  }
 
   // Check if any plugin rejected the comment (e.g. captcha verification failed)
   if (commentData._rejected) {

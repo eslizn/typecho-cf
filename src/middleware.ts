@@ -4,12 +4,13 @@ import { schema } from '@/db';
 import { loadOptions } from '@/lib/options';
 import { addHook, applyFilter, HookPoints, parseActivatedPlugins, setActivatedPlugins } from '@/lib/plugin';
 import { hasAuthCookies } from '@/lib/auth';
+import { applySecurityHeaders } from '@/lib/security-headers';
 import { eq, and } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 import initWebDavPlugin from 'typecho-plugin-webdav/index.ts';
 
-const redirectToInstall = () =>
-  withSecurityHeaders(new Response(null, { status: 302, headers: { Location: '/install' } }));
+const redirectToInstall = (request: Request) =>
+  applySecurityHeaders(new Response(null, { status: 302, headers: { Location: '/install' } }), { request });
 
 // ── Module-level caches (persist across requests within the same isolate) ──
 const regexCache = new Map<string, RegExp | null>();
@@ -73,7 +74,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
     path === '/install' ||
     path === '/api/install'
   ) {
-    return withSecurityHeaders(await next());
+    return await applySecurityHeaders(await next(), { request: context.request });
   }
 
   // ── Pagination URL Rewriting ──────────────────────────────────────────────
@@ -97,11 +98,11 @@ export const onRequest = defineMiddleware(async (context, next) => {
         .first<{ name: string }>();
 
       if (!tableCheck) {
-        return redirectToInstall();
+        return redirectToInstall(context.request);
       }
       tableCheckPassed = true;
     } catch {
-      return redirectToInstall();
+      return redirectToInstall(context.request);
     }
   }
 
@@ -111,10 +112,10 @@ export const onRequest = defineMiddleware(async (context, next) => {
   try {
     options = await loadOptions(db);
     if (!options.installed) {
-      return redirectToInstall();
+      return redirectToInstall(context.request);
     }
   } catch {
-    return redirectToInstall();
+    return redirectToInstall(context.request);
   }
 
   const activatedIds = parseActivatedPlugins(options.activatedPlugins as string | undefined);
@@ -130,7 +131,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
     env,
   });
   if (pluginRoute?.handled && pluginRoute.response instanceof Response) {
-    return withSecurityHeaders(pluginRoute.response);
+    return await applySecurityHeaders(pluginRoute.response, { request: context.request });
   }
 
   // ── Edge Cache Layer ──────────────────────────────────────────────────────
@@ -152,7 +153,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
   if (cacheKey) {
     const cached = await caches.default.match(cacheKey);
     if (cached) {
-      return withSecurityHeaders(cached);
+      return await applySecurityHeaders(cached, { request: context.request });
     }
   }
 
@@ -287,7 +288,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
   // Execute the route handler
   let response = await next();
 
-  response = withSecurityHeaders(response);
+  response = await applySecurityHeaders(response, { request: context.request });
 
   // ── Write response to edge cache ──────────────────────────────────────────
   if (cacheKey && response.status === 200) {
@@ -312,28 +313,4 @@ function withCacheVersion(requestUrl: string, cacheVersion?: number): string {
   const url = new URL(requestUrl);
   url.searchParams.set('__typecho_cache', String(cacheVersion || 0));
   return url.toString();
-}
-
-function withSecurityHeaders(response: Response): Response {
-  const resHeaders = response.headers;
-  if (
-    resHeaders.has('X-Content-Type-Options') &&
-    resHeaders.has('X-Frame-Options') &&
-    resHeaders.has('Referrer-Policy') &&
-    resHeaders.has('Strict-Transport-Security')
-  ) {
-    return response;
-  }
-
-  const headers = new Headers(resHeaders);
-  if (!headers.has('X-Content-Type-Options')) headers.set('X-Content-Type-Options', 'nosniff');
-  if (!headers.has('X-Frame-Options')) headers.set('X-Frame-Options', 'DENY');
-  if (!headers.has('Referrer-Policy')) headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
-  if (!headers.has('Strict-Transport-Security')) headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers,
-  });
 }

@@ -1,16 +1,13 @@
 import { marked } from 'marked';
 import sanitizeHtml from 'sanitize-html';
 import { applyFilter } from '@/lib/plugin';
+import { escapeHtml as escapeHtmlShared } from '@/lib/escape';
 
 // ─── HTML escape helper ─────────────────────────────────────────────────────
 
+/** @deprecated Import from '@/lib/escape' directly. */
 export function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
+  return escapeHtmlShared(str);
 }
 
 // ─── Shared sanitize config ──────────────────────────────────────────────────
@@ -186,18 +183,28 @@ export function generateExcerpt(text: string, maxLength = 200): string {
 }
 
 /**
- * Simple autop (auto paragraph) - converts line breaks to <p> tags
- * Used for non-markdown content
+ * Auto-paragraph helper. Splits on blank lines and wraps each paragraph
+ * in `<p>...</p>` unless it already starts with a recognised block-level
+ * element. Single newlines inside a paragraph become `<br />`.
+ *
+ * Wrapping a chunk that already contains `<p>` / `<div>` / `<h1>` etc
+ * produces invalid HTML (`<p><div>...</div></p>`); browsers tolerate it
+ * but the output then breaks downstream sanitizers and CSS selectors.
  */
+const BLOCK_OPEN_RE = /^\s*<(p|div|section|article|aside|header|footer|nav|figure|figcaption|blockquote|pre|ul|ol|li|dl|dt|dd|table|thead|tbody|tfoot|tr|th|td|h[1-6]|hr|details|summary|form|fieldset)\b/i;
+
 export function autop(text: string): string {
   if (!text) return '';
   text = text.replace(/\r\n|\r/g, '\n');
   text = text.replace(/\n\n+/g, '\n\n');
   const paragraphs = text.split('\n\n');
   return paragraphs
-    .map((p) => p.trim())
+    .map(p => p.trim())
     .filter(Boolean)
-    .map((p) => `<p>${p.replace(/\n/g, '<br />')}</p>`)
+    .map(p => {
+      if (BLOCK_OPEN_RE.test(p)) return p;
+      return `<p>${p.replace(/\n/g, '<br />')}</p>`;
+    })
     .join('\n');
 }
 
@@ -214,6 +221,8 @@ function buildCommentSanitizeOptions(htmlTagAllowed?: string | null, markdown = 
     return {
       allowedTags: parsed.allowedTags,
       allowedAttributes: parsed.allowedAttributes,
+      // Carry the default schemes through so links survive the sanitizer.
+      allowedSchemes: sanitizeHtml.defaults.allowedSchemes,
     };
   }
 
@@ -239,7 +248,10 @@ function parseAllowedHtmlTags(htmlTagAllowed?: string | null): {
     const tag = match[1].toLowerCase();
     allowedTags.push(tag);
 
-    const attrs = [...match[2].matchAll(/([a-zA-Z0-9:-]+)\s*=/g)].map(attr => attr[1].toLowerCase());
+    // Match either `name=` or a bare attribute name (e.g. `<a href>`).
+    const attrs = [...match[2].matchAll(/([a-zA-Z0-9:-]+)(?=\s*=|\s|\/?>|$)/g)]
+      .map(attr => attr[1].toLowerCase())
+      .filter(attr => isSafeAttributeName(tag, attr));
     if (attrs.length > 0) {
       allowedAttributes[tag] = [...new Set([...(allowedAttributes[tag] || []), ...attrs])];
     }
@@ -249,6 +261,33 @@ function parseAllowedHtmlTags(htmlTagAllowed?: string | null): {
     allowedTags: [...new Set(allowedTags)],
     allowedAttributes,
   };
+}
+
+/**
+ * Reject attribute names that are unsafe regardless of the tag they
+ * appear on. Even though sanitize-html itself would normally filter
+ * inline event handlers, the comment-form path lets administrators
+ * declare a custom HTML allowlist via options.commentsHTMLTagAllowed —
+ * a single typo there could otherwise re-enable XSS surface.
+ *
+ * The set deliberately leans towards over-rejection. Callers can
+ * restore broader sets through plugin filters if needed.
+ */
+const ATTRIBUTE_GLOBAL_DENYLIST = new Set([
+  'style', 'srcset', 'sandbox', 'allow', 'allowfullscreen',
+  'formaction', 'action', 'background', 'dynsrc', 'lowsrc', 'ping',
+  'poster', 'data',
+]);
+
+function isSafeAttributeName(tag: string, attr: string): boolean {
+  if (attr.startsWith('on')) return false;
+  if (attr.startsWith('xlink:') || attr.startsWith('xmlns')) return false;
+  if (ATTRIBUTE_GLOBAL_DENYLIST.has(attr)) return false;
+  // src is only meaningful on a small set of tags; reject elsewhere.
+  if (attr === 'src' && !['img', 'audio', 'video', 'source', 'iframe'].includes(tag)) return false;
+  // href is similarly restricted to anchors and (legacy) link tags.
+  if (attr === 'href' && !['a', 'link', 'area'].includes(tag)) return false;
+  return true;
 }
 
 function mergeAllowedAttributes(

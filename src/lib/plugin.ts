@@ -205,6 +205,9 @@ export const HookPoints = {
 
   // --- Sidebar / Widgets ---
   'widget:sidebar': 'widget:sidebar',                // Filter: sidebar data
+
+  // --- Security headers ---
+  'csp:directives': 'csp:directives',                // Filter: CSP directives map (G3-5)
 } as const;
 
 export type HookPoint = typeof HookPoints[keyof typeof HookPoints];
@@ -658,13 +661,7 @@ export function parsePluginOption(value: unknown, label?: string): Record<string
 /**
  * Escape a string for use in HTML attribute values.
  */
-export function escapeAttr(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/"/g, '&quot;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-}
+export { escapeAttr } from '@/lib/escape';
 
 /**
  * Extract client IP from a Request object.

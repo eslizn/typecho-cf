@@ -2,6 +2,7 @@
  * Feed generator - RSS 2.0, RSS 1.0, and Atom 1.0
  * Corresponds to Typecho's Feed.php
  */
+import { escapeXml, escapeCData } from '@/lib/escape';
 
 export interface FeedItem {
   title: string;
@@ -103,15 +104,4 @@ export function generateRss1(config: FeedConfig, items: FeedItem[]): string {
 </rdf:RDF>`;
 }
 
-function escapeCData(str: string): string {
-  return str.replace(/]]>/g, ']]]]><![CDATA[>');
-}
-
-function escapeXml(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
-}
+// escape helpers re-exported from src/lib/escape.ts

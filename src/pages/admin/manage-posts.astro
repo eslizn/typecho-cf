@@ -1,6 +1,6 @@
 ---
 import Admin from '@/layouts/Admin.astro';
-import { createContext, requireAuth } from '@/lib/context';
+import { createContext, requirePermission } from '@/lib/context';
 import { hasPermission } from '@/lib/auth';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { schema } from '@/db';
@@ -8,7 +8,10 @@ import { formatDate, buildPermalink } from '@/lib/content';
 import { applyFilterSafely } from '@/lib/plugin';
 
 const ctx = await createContext(Astro.locals, Astro.request);
-const authCheck = requireAuth(ctx);
+// Posts management exposes other authors' content — contributor and
+// above only (G2-3). Non-admin contributors are still scoped to their
+// own posts via the WHERE clause below.
+const authCheck = requirePermission(ctx, 'contributor');
 if (authCheck) return authCheck;
 
 const { db, options, urls, user, csrfToken } = ctx;

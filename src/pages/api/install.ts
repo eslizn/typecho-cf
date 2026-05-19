@@ -15,7 +15,27 @@ async function ensureTables(d1: D1Database): Promise<void> {
   await d1.batch(statements.map(sql => d1.prepare(sql)));
 }
 
-export const POST: APIRoute = async ({ request, locals }) => {
+/**
+ * The install window is open from "tables don't exist" until installed=1.
+ * If `INSTALL_TOKEN` is configured as a Cloudflare secret, the form must
+ * present it to proceed — this closes the race where the very first
+ * visitor of a freshly-deployed worker becomes admin. When unset (most
+ * deployments today), we keep the legacy "first visitor wins" behaviour
+ * but log a warning to nudge operators toward setting the secret.
+ */
+function expectedInstallToken(): string {
+  const e = env as unknown as { INSTALL_TOKEN?: string };
+  return typeof e.INSTALL_TOKEN === 'string' ? e.INSTALL_TOKEN : '';
+}
+
+function timingSafeEqualString(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+export const POST: APIRoute = async ({ request }) => {
   const d1 = env.DB;
   const db = getDb(d1);
 
@@ -25,6 +45,17 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const userName = formData.get('userName')?.toString()?.trim() || '';
   const userPassword = formData.get('userPassword')?.toString() || '';
   const userMail = formData.get('userMail')?.toString()?.trim() || '';
+  const installToken = formData.get('installToken')?.toString() || '';
+
+  // Gate the install window with a deploy-time secret if configured.
+  const expected = expectedInstallToken();
+  if (expected) {
+    if (!timingSafeEqualString(installToken, expected)) {
+      return new Response('安装令牌无效', { status: 403 });
+    }
+  } else {
+    console.warn('[install] INSTALL_TOKEN secret not set; the install form is open to the first caller until setup completes. Set `wrangler secret put INSTALL_TOKEN` to lock down the install window.');
+  }
 
   if (!userName || !userPassword || !userMail) {
     return new Response('请填写完整信息', { status: 400 });

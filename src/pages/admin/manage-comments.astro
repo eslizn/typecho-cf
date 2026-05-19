@@ -1,6 +1,6 @@
 ---
 import Admin from '@/layouts/Admin.astro';
-import { createContext, requireAuth } from '@/lib/context';
+import { createContext, requirePermission } from '@/lib/context';
 import { hasPermission } from '@/lib/auth';
 import { buildGravatarUrl } from '@/lib/gravatar';
 import { eq, and, desc, sql } from 'drizzle-orm';
@@ -8,7 +8,10 @@ import { schema } from '@/db';
 import { formatDate } from '@/lib/content';
 
 const ctx = await createContext(Astro.locals, Astro.request);
-const authCheck = requireAuth(ctx);
+// Comment moderation page exposes commenter mail + IP — gate behind
+// contributor or above so that subscribers/visitors who somehow have
+// session cookies cannot harvest reader PII (G2-3).
+const authCheck = requirePermission(ctx, 'contributor');
 if (authCheck) return authCheck;
 
 const { db, options, urls, user, csrfToken } = ctx;

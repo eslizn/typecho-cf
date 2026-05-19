@@ -18,6 +18,11 @@ if (installed) {
   return Astro.redirect('/');
 }
 
+// Show a deployment-warning banner if INSTALL_TOKEN is not configured.
+// This nudges operators to lock the install window before someone else
+// races them to it.
+const installTokenConfigured = typeof (env as any).INSTALL_TOKEN === 'string' && (env as any).INSTALL_TOKEN.length > 0;
+
 const defaultOptions = {
   title: 'Blog', charset: 'UTF-8', lang: 'zh_CN', description: '',
   siteUrl: new URL(Astro.request.url).origin,
@@ -37,6 +42,8 @@ const urls = { siteUrl: defaultOptions.siteUrl };
       .install-container .submit { display: block; width: 100%; padding: 12px; border: none; background: #467b96; color: #fff; border-radius: 4px; cursor: pointer; font-size: 1em; }
       .install-container .submit:hover { background: #3a6880; }
       .install-container .note { font-size: 0.85em; color: #888; margin-top: -0.5em; margin-bottom: 1em; }
+      .install-container .warning { background: #fff3cd; border: 1px solid #ffc107; color: #856404; padding: 12px; border-radius: 4px; margin-bottom: 1.5em; font-size: 0.9em; }
+      .install-container .warning strong { display: block; margin-bottom: 0.3em; }
     </style>
   </Fragment>
 
@@ -44,7 +51,22 @@ const urls = { siteUrl: defaultOptions.siteUrl };
     <h1>Typecho</h1>
     <p class="subtitle">一个基于 Astro + Cloudflare Workers 的博客系统</p>
 
+    {!installTokenConfigured && (
+      <div class="warning">
+        <strong>⚠ 安装窗口未受保护</strong>
+        建议先停止当前进程，运行 <code>wrangler secret put INSTALL_TOKEN</code> 设置安装令牌后再访问，
+        以防被他人抢先注册管理员账号。如果当前网络环境可信，可继续安装。
+      </div>
+    )}
+
     <form method="post" action="/api/install">
+      {installTokenConfigured && (
+        <p>
+          <label for="installToken">安装令牌</label>
+          <input type="password" id="installToken" name="installToken" class="text" required />
+          <span class="note">部署时通过 wrangler secret 配置的 INSTALL_TOKEN 值</span>
+        </p>
+      )}
       <p>
         <label for="siteTitle">站点名称</label>
         <input type="text" id="siteTitle" name="siteTitle" class="text" value="Hello World" required />

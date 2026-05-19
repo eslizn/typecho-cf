@@ -36,6 +36,8 @@ async function makeContentRequest(fields: Record<string, string>, cookie: string
     headers: {
       'content-type': 'application/x-www-form-urlencoded',
       cookie,
+      // G2-1: requireAdminAction enforces same-origin via Origin/Referer.
+      origin: 'https://example.com',
     },
     body: body.toString(),
   });

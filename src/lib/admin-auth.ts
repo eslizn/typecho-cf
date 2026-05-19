@@ -14,6 +14,33 @@ interface RequireAdminActionOptions {
   csrf?: boolean;
 }
 
+/**
+ * Returns true when the request's Origin/Referer matches the configured
+ * site origin. Missing both headers is treated as untrusted, so naive
+ * `<form enctype=text/plain>`-style cross-site POSTs are rejected even
+ * if the attacker somehow guesses a CSRF token.
+ *
+ * If siteUrl is not yet configured (fresh install / test fixtures), we
+ * fall back to permissive — there is no trust anchor to compare against.
+ */
+export function isSameOriginRequest(request: Request, siteUrl: string): boolean {
+  if (!siteUrl) return true;
+  let expected = '';
+  try { expected = new URL(siteUrl).origin; } catch { return true; }
+  if (!expected) return true;
+
+  const headerCheck = (raw: string | null): boolean | null => {
+    if (!raw) return null;
+    try { return new URL(raw).origin === expected; } catch { return false; }
+  };
+
+  const origin = headerCheck(request.headers.get('origin'));
+  if (origin !== null) return origin;
+  const referer = headerCheck(request.headers.get('referer'));
+  if (referer !== null) return referer;
+  return false;
+}
+
 export async function requireAdminAction(
   request: Request,
   requiredGroup: string,
@@ -32,6 +59,12 @@ export async function requireAdminAction(
   }
 
   if (csrf) {
+    // Belt-and-braces: enforce same-origin Origin/Referer in addition to
+    // the CSRF token. Even if a token is leaked, cross-site POSTs are
+    // rejected at the request boundary.
+    if (!isSameOriginRequest(request, options.siteUrl || '')) {
+      return new Response('Forbidden', { status: 403 });
+    }
     const csrfError = await requireAdminCSRF(request, options.secret as string, auth.user.authCode!, auth.uid);
     if (csrfError) return csrfError;
   }

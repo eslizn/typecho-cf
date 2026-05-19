@@ -16,6 +16,8 @@ export const users = sqliteTable('typecho_users', {
 }, (table) => [
   uniqueIndex('typecho_users_name').on(table.name),
   uniqueIndex('typecho_users_mail').on(table.mail),
+  // G4-1: scan-by-role for "list administrators" / permission counts.
+  index('typecho_users_group').on(table.group),
 ]);
 
 // ==================== Contents ====================
@@ -40,6 +42,12 @@ export const contents = sqliteTable('typecho_contents', {
 }, (table) => [
   uniqueIndex('typecho_contents_slug').on(table.slug),
   index('typecho_contents_created').on(table.created),
+  // G4-1: archive lookups (type='post' AND status='publish') and
+  // author archives are the dominant front-end queries.
+  index('typecho_contents_type_status').on(table.type, table.status),
+  index('typecho_contents_authorId').on(table.authorId),
+  // attachment.parent points back at the owning content row.
+  index('typecho_contents_parent').on(table.parent),
 ]);
 
 // ==================== Comments ====================
@@ -61,6 +69,8 @@ export const comments = sqliteTable('typecho_comments', {
 }, (table) => [
   index('typecho_comments_cid').on(table.cid),
   index('typecho_comments_created').on(table.created),
+  // G4-1: moderation queries filter by status (and ownerId for editors).
+  index('typecho_comments_status_owner').on(table.status, table.ownerId),
 ]);
 
 // ==================== Metas (Categories & Tags) ====================
@@ -75,6 +85,9 @@ export const metas = sqliteTable('typecho_metas', {
   parent: integer('parent').default(0),
 }, (table) => [
   index('typecho_metas_slug').on(table.slug),
+  // G4-1: most reads filter by both (type='category' AND slug=?) so a
+  // composite index avoids the secondary single-column scan.
+  index('typecho_metas_type_slug').on(table.type, table.slug),
 ]);
 
 // ==================== Relationships (Content <-> Meta) ====================
@@ -83,6 +96,8 @@ export const relationships = sqliteTable('typecho_relationships', {
   mid: integer('mid').notNull(),
 }, (table) => [
   uniqueIndex('typecho_relationships_cid_mid').on(table.cid, table.mid),
+  // G4-1: "posts in this category/tag" walks by mid.
+  index('typecho_relationships_mid').on(table.mid),
 ]);
 
 // ==================== Options ====================

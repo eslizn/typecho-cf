@@ -43,7 +43,25 @@ const countResult = await db.select({ count: sql<number>`count(*)` }).from(schem
 const totalComments = countResult[0]?.count || 0;
 const totalPages = Math.max(1, Math.ceil(totalComments / pageSize));
 
-const commentsList = await db.select().from(schema.comments)
+// G4-4: only fetch a 500-char preview of comment.text — the table only
+// renders the first 200 chars and full bodies make every page render
+// pull megabytes of payload from D1 on busy sites.
+const commentsList = await db.select({
+  coid: schema.comments.coid,
+  cid: schema.comments.cid,
+  author: schema.comments.author,
+  authorId: schema.comments.authorId,
+  ownerId: schema.comments.ownerId,
+  mail: schema.comments.mail,
+  url: schema.comments.url,
+  ip: schema.comments.ip,
+  agent: schema.comments.agent,
+  text: sql<string>`substr(${schema.comments.text}, 1, 500)`,
+  type: schema.comments.type,
+  status: schema.comments.status,
+  parent: schema.comments.parent,
+  created: schema.comments.created,
+}).from(schema.comments)
   .where(where)
   .orderBy(desc(schema.comments.created))
   .limit(pageSize)

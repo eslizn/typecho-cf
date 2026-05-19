@@ -40,13 +40,13 @@ export async function loadSidebarData(db: SidebarDatabase, siteUrl: string, perm
       .orderBy(desc(schema.contents.created))
       .limit(10),
 
-    // Recent comments
+    // Recent comments — only need a short preview, not the whole body.
     db
       .select({
         coid: schema.comments.coid,
         cid: schema.comments.cid,
         author: schema.comments.author,
-        text: schema.comments.text,
+        text: sql<string>`substr(${schema.comments.text}, 1, 200)`,
       })
       .from(schema.comments)
       .where(eq(schema.comments.status, 'approved'))

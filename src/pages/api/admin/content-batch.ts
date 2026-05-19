@@ -44,33 +44,66 @@ async function handler({ request, locals, url }: { request: Request; locals: App
   }
 
   if (action === 'delete') {
-    for (const cid of cids) {
-      const content = await auth.db.query.contents.findFirst({
-        where: eq(schema.contents.cid, cid),
-      });
-      if (!content) continue;
+    // G4-2: fetch all targeted contents in one query rather than per-cid
+    // findFirst, then trigger plugin hooks and emit one big delete batch.
+    const contents = await auth.db.select().from(schema.contents)
+      .where(sql`${schema.contents.cid} IN (${sql.join(cids.map(id => sql`${id}`), sql`, `)})`);
 
-      // Check permission
-      if (!isAdmin && content.authorId !== auth.uid) continue;
+    const allowedContents = contents.filter(c => isAdmin || c.authorId === auth.uid);
+    if (allowedContents.length === 0) {
+      return new Response(null, { status: 302, headers: {
+        Location: type === 'page' ? '/admin/manage-pages' : '/admin/manage-posts',
+      } });
+    }
 
+    const allowedCids = allowedContents.map(c => c.cid);
+
+    // Pre-delete hooks (must run sequentially: plugins may rely on
+    // ordering and on the row still being present).
+    for (const content of allowedContents) {
       const isPage = content.type?.startsWith('page');
       await doHook(isPage ? 'page:delete' : 'post:delete', content);
+    }
 
-      // Decrement meta counts
-      const rels = await auth.db.select({ mid: schema.relationships.mid })
-        .from(schema.relationships)
-        .where(eq(schema.relationships.cid, cid));
-      for (const rel of rels) {
-        await auth.db.update(schema.metas)
-          .set({ count: sql`MAX(0, ${schema.metas.count} - 1)` })
-          .where(eq(schema.metas.mid, rel.mid));
+    // Decrement meta counts in one pass: collect all (cid -> [mid]) and
+    // run a single relationship lookup, then update each meta once with
+    // the actual decrement count.
+    const rels = await auth.db.select({ cid: schema.relationships.cid, mid: schema.relationships.mid })
+      .from(schema.relationships)
+      .where(sql`${schema.relationships.cid} IN (${sql.join(allowedCids.map(id => sql`${id}`), sql`, `)})`);
+    const decrementByMid = new Map<number, number>();
+    for (const rel of rels) {
+      decrementByMid.set(rel.mid, (decrementByMid.get(rel.mid) || 0) + 1);
+    }
+
+    // Now stream the writes through D1 batch — atomic and single-round-trip.
+    const decrementStmts = Array.from(decrementByMid.entries()).map(([mid, n]) =>
+      auth.db.update(schema.metas)
+        .set({ count: sql`MAX(0, ${schema.metas.count} - ${n})` })
+        .where(eq(schema.metas.mid, mid))
+    );
+    const cidList = sql.join(allowedCids.map(id => sql`${id}`), sql`, `);
+    const deleteStmts = [
+      auth.db.delete(schema.relationships).where(sql`${schema.relationships.cid} IN (${cidList})`),
+      auth.db.delete(schema.comments).where(sql`${schema.comments.cid} IN (${cidList})`),
+      auth.db.delete(schema.fields).where(sql`${schema.fields.cid} IN (${cidList})`),
+      auth.db.delete(schema.contents).where(sql`${schema.contents.cid} IN (${cidList})`),
+    ];
+    const all = [...decrementStmts, ...deleteStmts];
+    if (all.length > 0) {
+      // drizzle-orm/d1 exposes `batch()` — fall back to sequential
+      // execution for environments (libsql tests) that don't.
+      const batchFn = (auth.db as any).batch;
+      if (typeof batchFn === 'function') {
+        await batchFn.call(auth.db, all as any);
+      } else {
+        for (const stmt of all) await stmt;
       }
-      // Delete relationships, comments, fields, content
-      await auth.db.delete(schema.relationships).where(eq(schema.relationships.cid, cid));
-      await auth.db.delete(schema.comments).where(eq(schema.comments.cid, cid));
-      await auth.db.delete(schema.fields).where(eq(schema.fields.cid, cid));
-      await auth.db.delete(schema.contents).where(eq(schema.contents.cid, cid));
+    }
 
+    // Post-delete hooks
+    for (const content of allowedContents) {
+      const isPage = content.type?.startsWith('page');
       await doHook(isPage ? 'page:finishDelete' : 'post:finishDelete', content);
     }
   } else if (action === 'mark' && markStatus) {
@@ -78,16 +111,15 @@ async function handler({ request, locals, url }: { request: Request; locals: App
       return new Response('Forbidden', { status: 403 });
     }
 
-    for (const cid of cids) {
-      const content = await auth.db.query.contents.findFirst({
-        where: eq(schema.contents.cid, cid),
-      });
-      if (!content) continue;
-      if (!isAdmin && content.authorId !== auth.uid) continue;
-
-      await auth.db.update(schema.contents).set({
-        status: markStatus,
-      }).where(eq(schema.contents.cid, cid));
+    const contents = await auth.db.select().from(schema.contents)
+      .where(sql`${schema.contents.cid} IN (${sql.join(cids.map(id => sql`${id}`), sql`, `)})`);
+    const allowedCids = contents
+      .filter(c => isAdmin || c.authorId === auth.uid)
+      .map(c => c.cid);
+    if (allowedCids.length > 0) {
+      await auth.db.update(schema.contents)
+        .set({ status: markStatus })
+        .where(sql`${schema.contents.cid} IN (${sql.join(allowedCids.map(id => sql`${id}`), sql`, `)})`);
     }
   }
 

@@ -105,8 +105,8 @@ async function handler({ request, locals, url }: { request: Request; locals: App
   }
 
   if (action === 'refresh') {
-    // Refresh meta counts by recalculating from relationships
-    // If specific mids are provided (batch), only refresh those; otherwise refresh all of the type
+    // G4-2: refresh meta counts using GROUP BY relationships in one query
+    // rather than N+1 SELECT count(*) calls per meta row.
     let metas;
     const refreshIds = mids.length > 0 ? mids : [];
     if (refreshIds.length > 0) {
@@ -118,15 +118,23 @@ async function handler({ request, locals, url }: { request: Request; locals: App
       metas = await db.select().from(schema.metas);
     }
 
-    for (const meta of metas) {
-      const countResult = await db.select({ count: sql<number>`count(*)` })
+    if (metas.length > 0) {
+      const midList = sql.join(metas.map(m => sql`${m.mid}`), sql`, `);
+      const counts = await db
+        .select({ mid: schema.relationships.mid, count: sql<number>`count(*)` })
         .from(schema.relationships)
-        .where(eq(schema.relationships.mid, meta.mid));
-      const realCount = countResult[0]?.count || 0;
+        .where(sql`${schema.relationships.mid} IN (${midList})`)
+        .groupBy(schema.relationships.mid);
 
-      await db.update(schema.metas)
-        .set({ count: realCount })
-        .where(eq(schema.metas.mid, meta.mid));
+      const countMap = new Map<number, number>();
+      for (const row of counts) countMap.set(row.mid, row.count);
+
+      for (const meta of metas) {
+        const realCount = countMap.get(meta.mid) || 0;
+        await db.update(schema.metas)
+          .set({ count: realCount })
+          .where(eq(schema.metas.mid, meta.mid));
+      }
     }
 
     await bumpCacheVersion(db);

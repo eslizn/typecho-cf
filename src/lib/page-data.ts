@@ -560,13 +560,18 @@ export async function prepareSearchData(
   locals: Record<string, unknown>,
   url: URL,
 ): Promise<ThemeArchiveProps> {
-  const searchTerm = `%${keywords}%`;
+  // G4-5: bound keyword length both as a UX guard (single chars match
+  // huge swaths of LIKE) and as a cheap rate-limit on D1 LIKE scans.
+  const trimmed = keywords.trim().slice(0, 50);
+  const isUsefulKeyword = trimmed.length >= 2;
 
   return prepareArchiveData(ctx, requestUrl, locals, url, {
-    archiveTitle: `包含关键字 ${keywords} 的文章`,
+    archiveTitle: `包含关键字 ${trimmed} 的文章`,
     archiveType: 'search',
-    baseUrl: buildSearchLink(keywords, ctx.urls.siteUrl),
-    extraWhere: sql`(${schema.contents.title} LIKE ${searchTerm} OR ${schema.contents.text} LIKE ${searchTerm})`,
+    baseUrl: buildSearchLink(trimmed, ctx.urls.siteUrl),
+    extraWhere: isUsefulKeyword
+      ? sql`(${schema.contents.title} LIKE ${`%${trimmed}%`} OR ${schema.contents.text} LIKE ${`%${trimmed}%`})`
+      : sql`1 = 0`, // empty/too-short keyword → no results, never N+1 LIKE
   });
 }
 

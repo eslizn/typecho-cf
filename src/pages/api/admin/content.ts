@@ -6,7 +6,6 @@ import { isAdminActionResponse, requireAdminAction } from '@/lib/admin-auth';
 import { buildAuthorLink, buildCategoryLink, buildPermalink, buildTagLink, generateSlug } from '@/lib/content';
 import { setActivatedPlugins, parseActivatedPlugins, applyFilter, doHook } from '@/lib/plugin';
 import { bumpCacheVersion, purgeContentCache } from '@/lib/cache';
-import { withWriteTransaction } from '@/lib/db-transaction';
 import { eq, and, sql } from 'drizzle-orm';
 
 // Typecho convention: visibility dropdown maps to db status column.
@@ -188,7 +187,6 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const contentType = isDraft ? `${type}_draft` : type;
 
   if (action === 'create') {
-    return await withWriteTransaction(db, async (db) => {
     // Build content data — slug will be backfilled with cid if empty
     let contentData: Record<string, unknown> = {
       title,
@@ -254,11 +252,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
       status: 302,
       headers: { Location: editUrl },
     });
-    });
   }
 
   if (action === 'update' && cid) {
-    return await withWriteTransaction(db, async (db) => {
     // Check ownership
     const existing = await db.query.contents.findFirst({
       where: eq(schema.contents.cid, cid),
@@ -333,11 +329,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
       status: 302,
       headers: { Location: editUrl },
     });
-    });
   }
 
   if (action === 'delete' && cid) {
-    return await withWriteTransaction(db, async (db) => {
     const existing = await db.query.contents.findFirst({
       where: eq(schema.contents.cid, cid),
     });
@@ -375,7 +369,6 @@ export const POST: APIRoute = async ({ request, locals }) => {
     return new Response(null, {
       status: 302,
       headers: { Location: redirectTo },
-    });
     });
   }
 

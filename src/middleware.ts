@@ -5,6 +5,7 @@ import { loadOptions } from '@/lib/options';
 import { addHook, applyFilter, HookPoints, parseActivatedPlugins, setActivatedPlugins } from '@/lib/plugin';
 import { hasAuthCookies } from '@/lib/auth';
 import { applySecurityHeaders } from '@/lib/security-headers';
+import { generateIndexSQL } from '@/lib/schema-sql';
 import { eq, and } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 import initWebDavPlugin from 'typecho-plugin-webdav/index.ts';
@@ -19,6 +20,12 @@ const regexCache = new Map<string, RegExp | null>();
 // Negative results are NOT cached — each request retries until installation succeeds.
 let tableCheckPassed = false;
 let webDavRouteHookReady = false;
+// G4-1: brand-new indexes need to be backfilled into already-deployed D1
+// instances. We try once per isolate using CREATE INDEX IF NOT EXISTS so
+// the upgrade is automatic and idempotent. Failure (e.g. an index that
+// references a column that doesn't exist on a half-migrated DB) is
+// logged but non-fatal.
+let indexEnsurePassed = false;
 
 function ensureMiddlewareRouteHooks(): void {
   if (webDavRouteHookReady) return;
@@ -103,6 +110,21 @@ export const onRequest = defineMiddleware(async (context, next) => {
       tableCheckPassed = true;
     } catch {
       return redirectToInstall(context.request);
+    }
+  }
+
+  // G4-1: backfill any newly added indexes once per isolate. The
+  // statements are CREATE INDEX IF NOT EXISTS so this is a no-op for
+  // already-up-to-date schemas.
+  if (!indexEnsurePassed) {
+    indexEnsurePassed = true;
+    try {
+      const indexStatements = generateIndexSQL();
+      if (indexStatements.length > 0) {
+        await d1.batch(indexStatements.map(sql => d1.prepare(sql)));
+      }
+    } catch (err) {
+      console.warn('[middleware] ensureIndexes failed:', err);
     }
   }
 

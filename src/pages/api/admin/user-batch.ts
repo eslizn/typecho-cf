@@ -29,31 +29,35 @@ async function handler({ request, locals, url }: { request: Request; locals: App
   }
 
   if (action === 'delete') {
-    for (const uid of uids) {
-      // Never allow deleting self
-      if (uid === auth.uid) continue;
+    // G4-2: collect all candidate users in one query, plus a single
+    // administrator-count check; only then run the writes.
+    const candidates = await auth.db.select().from(schema.users)
+      .where(sql`${schema.users.uid} IN (${sql.join(uids.map(id => sql`${id}`), sql`, `)})`);
 
-      const targetUser = await auth.db.query.users.findFirst({
-        where: eq(schema.users.uid, uid),
-      });
-      if (!targetUser) continue;
+    const adminCountResult = await auth.db.select({ count: sql<number>`count(*)` })
+      .from(schema.users)
+      .where(eq(schema.users.group, 'administrator'));
+    let remainingAdmins = adminCountResult[0]?.count || 0;
+
+    const targets: number[] = [];
+    for (const targetUser of candidates) {
+      if (targetUser.uid === auth.uid) continue; // never delete self
       if (targetUser.group === 'administrator') {
-        const adminCount = await auth.db.select({ count: sql<number>`count(*)` })
-          .from(schema.users)
-          .where(eq(schema.users.group, 'administrator'));
-        if ((adminCount[0]?.count || 0) <= 1) continue;
+        if (remainingAdmins <= 1) continue;
+        remainingAdmins -= 1;
       }
+      targets.push(targetUser.uid);
+    }
 
-      // Re-assign content and comments to current admin user
+    if (targets.length > 0) {
+      const idList = sql.join(targets.map(id => sql`${id}`), sql`, `);
       await auth.db.update(schema.contents)
         .set({ authorId: auth.uid })
-        .where(eq(schema.contents.authorId, uid));
+        .where(sql`${schema.contents.authorId} IN (${idList})`);
       await auth.db.update(schema.comments)
         .set({ authorId: auth.uid })
-        .where(eq(schema.comments.authorId, uid));
-
-      // Delete user
-      await auth.db.delete(schema.users).where(eq(schema.users.uid, uid));
+        .where(sql`${schema.comments.authorId} IN (${idList})`);
+      await auth.db.delete(schema.users).where(sql`${schema.users.uid} IN (${idList})`);
     }
   }
 

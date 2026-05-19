@@ -110,3 +110,16 @@ export function generateCreateSQL(): string[] {
   }
   return statements;
 }
+
+/**
+ * Generate just the CREATE INDEX IF NOT EXISTS statements. Used by the
+ * middleware bootstrap path (G4-1) to backfill new indexes onto
+ * already-installed D1 instances without forcing a manual migration.
+ */
+export function generateIndexSQL(): string[] {
+  const statements: string[] = [];
+  for (const table of allTables) {
+    statements.push(...buildCreateIndexes(table));
+  }
+  return statements;
+}

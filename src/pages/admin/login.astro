@@ -1,7 +1,8 @@
 ---
 import { createContext } from '@/lib/context';
-import { LOGIN_ERROR_FLASH_COOKIE, clearFlashCookieHeader, getFlashCookieValue } from '@/lib/flash';
+import { LOGIN_ERROR_FLASH_COOKIE, REGISTER_NOTICE_FLASH_COOKIE, clearFlashCookieHeader, getFlashCookieValue } from '@/lib/flash';
 import { applyFilterSafely } from '@/lib/plugin';
+import { safeAdminRedirectUrl } from '@/lib/admin-auth';
 
 let options: any = { title: 'Blog', charset: 'UTF-8', lang: 'zh_CN', description: '' };
 let urls: any = { siteUrl: '' };
@@ -20,10 +21,24 @@ try {
   return Astro.redirect('/install');
 }
 
-const error = getFlashCookieValue(Astro.request.headers.get('cookie'), LOGIN_ERROR_FLASH_COOKIE);
+const cookieHeader = Astro.request.headers.get('cookie');
+const error = getFlashCookieValue(cookieHeader, LOGIN_ERROR_FLASH_COOKIE);
 if (error) {
-  Astro.response.headers.append('Set-Cookie', clearFlashCookieHeader(LOGIN_ERROR_FLASH_COOKIE, { path: '/admin/login' }));
+  Astro.response.headers.append('Set-Cookie', clearFlashCookieHeader(LOGIN_ERROR_FLASH_COOKIE, { path: '/admin/login', request: Astro.request }));
 }
+const notice = getFlashCookieValue(cookieHeader, REGISTER_NOTICE_FLASH_COOKIE);
+if (notice) {
+  Astro.response.headers.append('Set-Cookie', clearFlashCookieHeader(REGISTER_NOTICE_FLASH_COOKIE, { path: '/admin/login', request: Astro.request }));
+}
+
+// Preserve a ?redirect=/admin/... query so users can be returned to
+// where they came from after login. The same allow-list logic used by
+// admin POST handlers applies here.
+const redirectInput = Astro.url.searchParams.get('redirect') || '/admin/';
+const refererAbsolute = (() => {
+  try { return new URL(redirectInput, urls.siteUrl || Astro.url.origin).toString(); } catch { return urls.siteUrl || '/admin/'; }
+})();
+const refererValue = safeAdminRedirectUrl(refererAbsolute, urls.siteUrl || Astro.url.origin, '/admin/');
 
 const [loginHeadHtml, loginFormHtml] = await Promise.all([
   applyFilterSafely('admin:loginHead', '', { options }),
@@ -53,6 +68,12 @@ const [loginHeadHtml, loginFormHtml] = await Promise.all([
           <button type="button" class="typecho-notice-close" aria-label="关闭提示">&times;</button>
         </p>
       )}
+      {notice && (
+        <p class="message success typecho-dismissible">
+          {notice}
+          <button type="button" class="typecho-notice-close" aria-label="关闭提示">&times;</button>
+        </p>
+      )}
       <form action="/api/users/login" method="post" name="login" id="login-form" role="form">
         <p>
           <label for="name" class="sr-only">用户名</label>
@@ -65,7 +86,7 @@ const [loginHeadHtml, loginFormHtml] = await Promise.all([
         {loginFormHtml && <Fragment set:html={loginFormHtml} />}
         <p class="submit">
           <button type="submit" class="btn btn-l w-100 primary">登录</button>
-          <input type="hidden" name="referer" value="/admin/" />
+          <input type="hidden" name="referer" value={refererValue} />
         </p>
         <p>
           <label for="remember">

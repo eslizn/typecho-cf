@@ -3,6 +3,7 @@ import { getDb } from '@/db';
 import { schema } from '@/db';
 import { loadOptions } from '@/lib/options';
 import { addHook, applyFilter, HookPoints, parseActivatedPlugins, setActivatedPlugins } from '@/lib/plugin';
+import { hasAuthCookies } from '@/lib/auth';
 import { eq, and } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 import initWebDavPlugin from 'typecho-plugin-webdav/index.ts';
@@ -134,7 +135,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
 
   // ── Edge Cache Layer ──────────────────────────────────────────────────────
   const isGetRequest = context.request.method === 'GET';
-  const hasAuth = context.request.headers.get('cookie')?.includes('__typecho_uid');
+  const hasAuth = hasAuthCookies(context.request.headers.get('cookie'));
   const isCacheable =
     options.cacheEnabled &&
     isGetRequest &&

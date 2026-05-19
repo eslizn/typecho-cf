@@ -64,6 +64,11 @@ export interface SiteOptions {
   permalinkPattern: string;
   pagePattern: string;
   categoryPattern: string;
+  loginFailBanEnabled: number;
+  loginFailBanWindowSeconds: number;
+  loginFailBanMaxFailures: number;
+  loginFailBanSeconds: number;
+  feedItems: number;
   [key: string]: string | number | null | undefined;
 }
 
@@ -121,6 +126,11 @@ const defaultOptions: Partial<SiteOptions> = {
   editorSize: 350,
   autoSave: 0,
   xmlrpcMarkdown: 0,
+  loginFailBanEnabled: 1,
+  loginFailBanWindowSeconds: 300,
+  loginFailBanMaxFailures: 5,
+  loginFailBanSeconds: 900,
+  feedItems: 10,
 };
 
 /**
@@ -156,6 +166,9 @@ export async function loadOptions(db: Database): Promise<SiteOptions> {
     'commentsPostInterval', 'commentsShowCommentOnly', 'commentsAvatar',
     'commentsAntiSpam', 'installed', 'allowXmlRpc', 'editorSize', 'autoSave',
     'xmlrpcMarkdown', 'gzip', 'cacheEnabled', 'cacheVersion',
+    'loginFailBanEnabled', 'loginFailBanWindowSeconds',
+    'loginFailBanMaxFailures', 'loginFailBanSeconds',
+    'feedItems',
   ];
 
   for (const key of numericKeys) {

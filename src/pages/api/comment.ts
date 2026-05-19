@@ -191,12 +191,14 @@ export const POST: APIRoute = async ({ request, locals }) => {
   };
 
   // Anti-spam: CSRF token check (matches Typecho's Security::protect())
-  // Token = SHA256(secret + '&' + requestUrl), embedded in comment form as <input name="_">
+  // Token is bound to the target cid so users coming from email/RSS without
+  // a referer can still post; legacy referer-bound tokens still verify
+  // until cached HTML rolls over.
   if (options.commentsAntiSpam && !userId) {
     const submittedToken = formData.get('_')?.toString() || '';
     const refererUrl = (request.headers.get('referer') || '').split('#')[0];
-    const valid = refererUrl
-      ? await validateCommentToken(submittedToken, options.secret as string, refererUrl)
+    const valid = submittedToken
+      ? await validateCommentToken(submittedToken, options.secret as string, cid, refererUrl || undefined)
       : false;
     if (!valid) {
       return new Response('评论来源验证失败', { status: 403 });

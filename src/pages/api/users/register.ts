@@ -1,16 +1,44 @@
 import type { APIRoute } from 'astro';
 import { getDb, schema } from '@/db';
 import { loadOptions } from '@/lib/options';
-import { hashPassword, generateRandomString, setAuthCookieHeaders, generateAuthToken } from '@/lib/auth';
+import { hashPassword, generateRandomString } from '@/lib/auth';
+import { REGISTER_NOTICE_FLASH_COOKIE, createFlashRedirectHeaders } from '@/lib/flash';
 import { eq } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 
-export const POST: APIRoute = async ({ request, locals }) => {
+/**
+ * Reject cross-origin POSTs. Tightening this beyond the global CSRF
+ * extraction (which only covers admin endpoints) ensures an attacker can
+ * never silently provision an account in a victim's browser session via
+ * a third-party page.
+ */
+function isSameOriginRequest(request: Request, siteUrl: string): boolean {
+  if (!siteUrl) return true;
+  const expected = (() => {
+    try { return new URL(siteUrl).origin; } catch { return ''; }
+  })();
+  if (!expected) return true;
+  const headerCheck = (raw: string | null) => {
+    if (!raw) return null;
+    try { return new URL(raw).origin === expected; } catch { return false; }
+  };
+  const origin = headerCheck(request.headers.get('origin'));
+  if (origin !== null) return origin;
+  const referer = headerCheck(request.headers.get('referer'));
+  if (referer !== null) return referer;
+  return false;
+}
+
+export const POST: APIRoute = async ({ request }) => {
   const db = getDb(env.DB);
   const options = await loadOptions(db);
 
   if (!options.allowRegister) {
     return new Response('注册已关闭', { status: 403 });
+  }
+
+  if (!isSameOriginRequest(request, options.siteUrl)) {
+    return new Response('Forbidden', { status: 403 });
   }
 
   const formData = await request.formData();
@@ -34,7 +62,6 @@ export const POST: APIRoute = async ({ request, locals }) => {
     return new Response('邮箱格式不正确', { status: 400 });
   }
 
-  // Check if name exists
   const existingName = await db.query.users.findFirst({
     where: eq(schema.users.name, name),
   });
@@ -42,7 +69,6 @@ export const POST: APIRoute = async ({ request, locals }) => {
     return new Response('用户名已被使用', { status: 409 });
   }
 
-  // Check if mail exists
   const existingMail = await db.query.users.findFirst({
     where: eq(schema.users.mail, mail),
   });
@@ -61,25 +87,21 @@ export const POST: APIRoute = async ({ request, locals }) => {
     screenName: name,
     created: now,
     activated: now,
-    logged: now,
+    logged: 0,
     group: 'subscriber',
     authCode,
   }).returning({ uid: schema.users.uid });
 
-  const uid = result[0]?.uid;
-  if (!uid) {
+  if (!result[0]?.uid) {
     return new Response('注册失败', { status: 500 });
   }
 
-  // Auto login
-  const hash = await generateAuthToken(uid, authCode, options.secret);
-  const token = hash.split(':')[1];
-  const cookieHeaders = setAuthCookieHeaders(uid, token);
-
-  const headers = new Headers();
-  headers.set('Location', '/');
-  for (const cookie of cookieHeaders) {
-    headers.append('Set-Cookie', cookie);
-  }
-  return new Response(null, { status: 302, headers });
+  // No auto-login: redirect to the login page with a success flash. This
+  // closes the cross-site session-fixation surface where a third-party
+  // page could provision an attacker-owned account into the victim's
+  // browser without their awareness.
+  return new Response(null, {
+    status: 302,
+    headers: createFlashRedirectHeaders('/admin/login', REGISTER_NOTICE_FLASH_COOKIE, '注册成功，请使用新账号登录', '/admin/login', request),
+  });
 };

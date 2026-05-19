@@ -375,9 +375,10 @@ export async function preparePostData(
 
   const common = await loadCommon(ctx, requestUrl);
 
-  // Generate CSRF token for comment form (empty when anti-spam is disabled)
+  // Generate CSRF token for comment form, bound to cid so that pages
+  // visited via email/RSS without a referer still validate.
   const securityToken = options.commentsAntiSpam
-    ? await generateCommentToken(options.secret as string, requestUrl)
+    ? await generateCommentToken(options.secret as string, contentRow.cid)
     : '';
 
   return {
@@ -462,9 +463,10 @@ export async function preparePageData(
 
   const common = await loadCommon(ctx, requestUrl);
 
-  // Generate CSRF token for comment form (empty when anti-spam is disabled)
+  // Generate CSRF token for comment form, bound to cid so that pages
+  // visited via email/RSS without a referer still validate.
   const securityToken = options.commentsAntiSpam
-    ? await generateCommentToken(options.secret as string, requestUrl)
+    ? await generateCommentToken(options.secret as string, pageRow.cid)
     : '';
 
   return {

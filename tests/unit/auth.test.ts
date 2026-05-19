@@ -19,6 +19,10 @@ import {
   getAuthCookies,
   setAuthCookieHeaders,
   clearAuthCookieHeaders,
+  hasAuthCookies,
+  shouldUseSecureCookie,
+  passwordHashNeedsRehash,
+  PBKDF2_ITERATIONS,
 } from '@/lib/auth';
 
 // ---------------------------------------------------------------------------
@@ -266,9 +270,37 @@ describe('PBKDF2 password hashing', () => {
     // ['', 'PBKDF2', iterations, salt, hash]
     expect(parts).toHaveLength(5);
     expect(parts[1]).toBe('PBKDF2');
-    expect(parseInt(parts[2], 10)).toBe(100000);
+    expect(parseInt(parts[2], 10)).toBe(600000);
     expect(parts[3].length).toBeGreaterThan(0); // hex salt
     expect(parts[4]).toMatch(/^[a-f0-9]{64}$/); // SHA-256 hash = 64 hex chars
+  });
+
+  it('verifies legacy 100k-iteration hashes against current 600k default', async () => {
+    // Legacy hashes embed their iteration count, so verify still works
+    // even after the default was raised (G1-6 forward compatibility).
+    const password = 'legacy-pw';
+    // Fixed legacy hash format with 100000 iterations.
+    const legacyIter = 100000;
+    // Recreate via the same crypto.subtle call shape: pretend we have a
+    // pre-existing $PBKDF2$100000$... hash. Easiest reliable way is to
+    // emit one ourselves with a small helper; here we instead just
+    // verify the round-trip behaviour by hashing then patching the iter.
+    const fresh = await hashPassword(password);
+    const parts = fresh.split('$');
+    parts[2] = String(legacyIter);
+    // Recompute the actual hash for legacy iteration count.
+    const enc = new TextEncoder();
+    const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveBits']);
+    const derived = await crypto.subtle.deriveBits(
+      { name: 'PBKDF2', salt: enc.encode(parts[3]), iterations: legacyIter, hash: 'SHA-256' },
+      keyMaterial,
+      256,
+    );
+    parts[4] = Array.from(new Uint8Array(derived)).map(b => b.toString(16).padStart(2, '0')).join('');
+    const legacyHash = parts.join('$');
+
+    expect(await verifyPassword(password, legacyHash)).toBe(true);
+    expect(await verifyPassword('wrong', legacyHash)).toBe('wrong_password');
   });
 
   it('legacy $SHA256$ hashes are rejected (force password reset)', async () => {
@@ -386,46 +418,161 @@ describe('generateRandomString() rejection sampling', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Comment CSRF token (anti-spam, matches Typecho Security::getToken)
+// Comment CSRF token (anti-spam) — bound to cid, with legacy referer fallback
 // ---------------------------------------------------------------------------
 describe('generateCommentToken() / validateCommentToken()', () => {
-  it('generates a 64-char hex string', async () => {
-    const token = await generateCommentToken('mysecret', 'https://example.com/post/');
+  it('generates a 64-char hex string for cid binding', async () => {
+    const token = await generateCommentToken('mysecret', 42);
     expect(token).toMatch(/^[a-f0-9]{64}$/);
   });
 
-  it('validates a correct token', async () => {
-    const token = await generateCommentToken('mysecret', 'https://example.com/post/');
-    expect(await validateCommentToken(token, 'mysecret', 'https://example.com/post/')).toBe(true);
+  it('validates a cid-bound token', async () => {
+    const token = await generateCommentToken('mysecret', 42);
+    expect(await validateCommentToken(token, 'mysecret', 42)).toBe(true);
+  });
+
+  it('rejects cid-bound token under a different cid', async () => {
+    const token = await generateCommentToken('mysecret', 42);
+    expect(await validateCommentToken(token, 'mysecret', 43)).toBe(false);
   });
 
   it('rejects token with wrong secret', async () => {
-    const token = await generateCommentToken('mysecret', 'https://example.com/post/');
-    expect(await validateCommentToken(token, 'wrong-secret', 'https://example.com/post/')).toBe(false);
-  });
-
-  it('rejects token with wrong URL', async () => {
-    const token = await generateCommentToken('mysecret', 'https://example.com/post/');
-    expect(await validateCommentToken(token, 'mysecret', 'https://example.com/other/')).toBe(false);
+    const token = await generateCommentToken('mysecret', 42);
+    expect(await validateCommentToken(token, 'wrong-secret', 42)).toBe(false);
   });
 
   it('rejects an empty token', async () => {
-    expect(await validateCommentToken('', 'mysecret', 'https://example.com/post/')).toBe(false);
+    expect(await validateCommentToken('', 'mysecret', 42)).toBe(false);
   });
 
   it('rejects a completely invalid token string', async () => {
-    expect(await validateCommentToken('not-a-token', 'mysecret', 'https://example.com/')).toBe(false);
+    expect(await validateCommentToken('not-a-token', 'mysecret', 42)).toBe(false);
   });
 
-  it('different URLs produce different tokens', async () => {
-    const t1 = await generateCommentToken('secret', 'https://example.com/a/');
-    const t2 = await generateCommentToken('secret', 'https://example.com/b/');
-    expect(t1).not.toBe(t2);
+  it('accepts legacy referer-bound token via fallback', async () => {
+    // Backwards compatibility for HTML cached before the upgrade.
+    const legacyToken = await generateCommentToken('mysecret', 'https://example.com/post/');
+    expect(await validateCommentToken(legacyToken, 'mysecret', 42, 'https://example.com/post/')).toBe(true);
   });
 
-  it('different secrets produce different tokens for same URL', async () => {
-    const t1 = await generateCommentToken('secret1', 'https://example.com/');
-    const t2 = await generateCommentToken('secret2', 'https://example.com/');
+  it('rejects legacy referer-bound token if referer is missing', async () => {
+    const legacyToken = await generateCommentToken('mysecret', 'https://example.com/post/');
+    expect(await validateCommentToken(legacyToken, 'mysecret', 42)).toBe(false);
+  });
+
+  it('different cids produce different tokens', async () => {
+    const t1 = await generateCommentToken('secret', 1);
+    const t2 = await generateCommentToken('secret', 2);
     expect(t1).not.toBe(t2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// G1-2 hasAuthCookies — middleware cache gate
+// ---------------------------------------------------------------------------
+describe('hasAuthCookies()', () => {
+  it('returns true when both cookies are present and valid', () => {
+    expect(hasAuthCookies('__typecho_uid=42; __typecho_authCode=abc')).toBe(true);
+  });
+
+  it('returns false when only uid is set', () => {
+    expect(hasAuthCookies('__typecho_uid=42')).toBe(false);
+  });
+
+  it('returns false when uid is non-numeric (substring poisoning)', () => {
+    // "lookalike__typecho_uid_x=1" should not match.
+    expect(hasAuthCookies('lookalike__typecho_uid_x=1; foo=bar')).toBe(false);
+  });
+
+  it('returns false when authCode is empty', () => {
+    expect(hasAuthCookies('__typecho_uid=42; __typecho_authCode=')).toBe(false);
+  });
+
+  it('returns false for null cookie header', () => {
+    expect(hasAuthCookies(null)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// G1-7 CSRF token bucket rotation
+// ---------------------------------------------------------------------------
+describe('CSRF token bucket rotation', () => {
+  it('current bucket validates immediately', async () => {
+    const token = await generateSecurityToken('s', 'a', 1);
+    expect(await validateSecurityToken(token, 's', 'a', 1)).toBe(true);
+  });
+
+  it('previous bucket still validates within 1-2 hours', async () => {
+    // Generate a token in the previous bucket explicitly.
+    const prevBucket = Math.floor(Date.now() / 1000 / 3600) - 1;
+    const token = await generateSecurityToken('s', 'a', 1, prevBucket);
+    expect(await validateSecurityToken(token, 's', 'a', 1)).toBe(true);
+  });
+
+  it('older buckets are rejected', async () => {
+    const old = Math.floor(Date.now() / 1000 / 3600) - 5;
+    const token = await generateSecurityToken('s', 'a', 1, old);
+    expect(await validateSecurityToken(token, 's', 'a', 1)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// G1-8 shouldUseSecureCookie — protocol-based Secure flag
+// ---------------------------------------------------------------------------
+describe('shouldUseSecureCookie()', () => {
+  it('returns true when no request is supplied (production-safe default)', () => {
+    expect(shouldUseSecureCookie()).toBe(true);
+  });
+
+  it('returns true for https requests', () => {
+    expect(shouldUseSecureCookie(new Request('https://example.com/'))).toBe(true);
+  });
+
+  it('returns false for plain http (dev mode)', () => {
+    expect(shouldUseSecureCookie(new Request('http://localhost:4321/'))).toBe(false);
+  });
+
+  it('omits Secure on dev cookies', () => {
+    const headers = setAuthCookieHeaders(1, 'hash', 3600, new Request('http://localhost:4321/'));
+    expect(headers[0]).not.toContain('Secure');
+    expect(headers[1]).not.toContain('Secure');
+  });
+
+  it('emits Secure on https cookies', () => {
+    const headers = setAuthCookieHeaders(1, 'hash', 3600, new Request('https://example.com/'));
+    expect(headers[0]).toContain('Secure');
+    expect(headers[1]).toContain('Secure');
+  });
+
+  it('clearAuthCookieHeaders honours protocol', () => {
+    const httpHeaders = clearAuthCookieHeaders(new Request('http://localhost/'));
+    expect(httpHeaders[0]).not.toContain('Secure');
+    const httpsHeaders = clearAuthCookieHeaders(new Request('https://example.com/'));
+    expect(httpsHeaders[0]).toContain('Secure');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// G1-6 PBKDF2 600k + opportunistic upgrade
+// ---------------------------------------------------------------------------
+describe('passwordHashNeedsRehash()', () => {
+  it('flags hashes with iterations below current default', () => {
+    const legacy = `$PBKDF2$100000$salt$${'a'.repeat(64)}`;
+    expect(passwordHashNeedsRehash(legacy)).toBe(true);
+  });
+
+  it('does not flag hashes at the current default', () => {
+    const current = `$PBKDF2$${PBKDF2_ITERATIONS}$salt$${'a'.repeat(64)}`;
+    expect(passwordHashNeedsRehash(current)).toBe(false);
+  });
+
+  it('does not flag malformed hashes', () => {
+    expect(passwordHashNeedsRehash('$PBKDF2$bogus')).toBe(false);
+    expect(passwordHashNeedsRehash('not-a-hash')).toBe(false);
+  });
+
+  it('does not flag legacy formats (those force a reset instead)', () => {
+    expect(passwordHashNeedsRehash('$SHA256$abc$def')).toBe(false);
+    expect(passwordHashNeedsRehash('$LEGACY$xyz')).toBe(false);
   });
 });

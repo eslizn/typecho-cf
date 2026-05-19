@@ -32,14 +32,37 @@ export function hasPermission(userGroup: string, requiredGroup: string, strict =
 }
 
 /**
+ * Recommended PBKDF2 iteration count (OWASP 2024+).
+ * `verifyPassword` honours whatever count is embedded in the stored hash, so
+ * raising this value is fully backwards compatible — older hashes still
+ * verify, and `passwordHashNeedsRehash` flags them for transparent upgrade
+ * after the next successful login.
+ */
+export const PBKDF2_ITERATIONS = 600_000;
+
+/**
  * Hash a password using PBKDF2 with a random salt (Cloudflare Workers compatible).
  * Output format: $PBKDF2$iterations$salt$hash
  */
 export async function hashPassword(password: string): Promise<string> {
-  const iterations = 100000;
+  const iterations = PBKDF2_ITERATIONS;
   const salt = generateSalt(16);
   const hash = await pbkdf2Hash(password, salt, iterations);
   return `$PBKDF2$${iterations}$${salt}$${hash}`;
+}
+
+/**
+ * Detect whether a stored PBKDF2 hash uses fewer iterations than the current
+ * recommendation. The login route uses this to opportunistically upgrade
+ * legacy hashes to the new strength without forcing a password reset.
+ */
+export function passwordHashNeedsRehash(storedHash: string): boolean {
+  if (!storedHash.startsWith('$PBKDF2$')) return false;
+  const parts = storedHash.split('$');
+  if (parts.length !== 5) return false;
+  const iter = parseInt(parts[2], 10);
+  if (!Number.isFinite(iter)) return false;
+  return iter < PBKDF2_ITERATIONS;
 }
 
 /**
@@ -111,23 +134,37 @@ export async function validateAuthToken(
 }
 
 /**
- * Generate a CSRF security token (matches Typecho's Security widget)
+ * Generate a CSRF security token (matches Typecho's Security widget),
+ * salted with the current 1-hour bucket so tokens auto-rotate. Validation
+ * accepts the current bucket plus the previous bucket to absorb cached HTML
+ * straddling the boundary, capping useful lifetime at ~2 hours.
  */
-export async function generateSecurityToken(secret: string, authCode: string, uid: number): Promise<string> {
-  return await sha256(`${secret}${authCode}${uid}`);
+const CSRF_BUCKET_SECONDS = 3600;
+
+function currentCsrfBucket(now = Date.now()): number {
+  return Math.floor(now / 1000 / CSRF_BUCKET_SECONDS);
+}
+
+export async function generateSecurityToken(secret: string, authCode: string, uid: number, bucket?: number): Promise<string> {
+  const b = bucket ?? currentCsrfBucket();
+  return await sha256(`${secret}${authCode}${uid}|${b}`);
 }
 
 /**
- * Validate CSRF token
+ * Validate CSRF token (accepts current or previous bucket).
  */
 export async function validateSecurityToken(
   token: string,
   secret: string,
   authCode: string,
-  uid: number
+  uid: number,
+  now = Date.now(),
 ): Promise<boolean> {
-  const expected = await generateSecurityToken(secret, authCode, uid);
-  return timeSafeEqual(token, expected);
+  const bucket = currentCsrfBucket(now);
+  const expectedCurrent = await generateSecurityToken(secret, authCode, uid, bucket);
+  if (timeSafeEqual(token, expectedCurrent)) return true;
+  const expectedPrev = await generateSecurityToken(secret, authCode, uid, bucket - 1);
+  return timeSafeEqual(token, expectedPrev);
 }
 
 /**
@@ -191,24 +228,41 @@ async function extractAdminCSRFToken(request: Request): Promise<string | null> {
 }
 
 /**
- * Generate a comment form CSRF token for anonymous users.
- * Matches Typecho's Security::getToken(referer): md5(secret + '&' + referer)
- * We use SHA-256 instead of MD5 for stronger security.
+ * Generate a comment-form CSRF token bound to the target content ID rather
+ * than the (often missing) referer URL. This lets the form survive being
+ * rendered in cached HTML and lets users coming from email/RSS still post
+ * comments. Token = sha256(secret + '&cid=' + cid).
+ *
+ * The legacy referer-based form is preserved on the verify path for
+ * cached pages still in the wild.
  */
-export async function generateCommentToken(secret: string, refererUrl: string): Promise<string> {
-  return await sha256(`${secret}&${refererUrl}`);
+export async function generateCommentToken(secret: string, cidOrRefererUrl: string | number): Promise<string> {
+  const subject = typeof cidOrRefererUrl === 'number'
+    ? `&cid=${cidOrRefererUrl}`
+    : `&${cidOrRefererUrl}`;
+  return await sha256(`${secret}${subject}`);
 }
 
 /**
  * Validate a comment form CSRF token.
+ *
+ * Accepts either the new cid-bound token or, for short-term backwards
+ * compatibility, the legacy referer-bound token. Pages cached before the
+ * upgrade still validate; new pages always emit cid-bound tokens.
  */
 export async function validateCommentToken(
   token: string,
   secret: string,
-  refererUrl: string,
+  cid: number,
+  refererUrl?: string,
 ): Promise<boolean> {
-  const expected = await generateCommentToken(secret, refererUrl);
-  return timeSafeEqual(token, expected);
+  const expectedCid = await generateCommentToken(secret, cid);
+  if (timeSafeEqual(token, expectedCid)) return true;
+  if (refererUrl) {
+    const expectedReferer = await generateCommentToken(secret, refererUrl);
+    if (timeSafeEqual(token, expectedReferer)) return true;
+  }
+  return false;
 }
 
 // ---- Utilities ----
@@ -304,24 +358,52 @@ export function generateRandomString(length: number): string {
 const AUTH_COOKIE_NAME = '__typecho_uid';
 const AUTH_CODE_COOKIE_NAME = '__typecho_authCode';
 
-export function getAuthCookies(cookieHeader: string | null): { token: string | null } {
-  if (!cookieHeader) return { token: null };
+/**
+ * Decide whether to emit the `Secure` cookie attribute. Production deploys
+ * always run on HTTPS via Cloudflare, but `pnpm run dev` exposes the worker
+ * over plain http://localhost. Marking cookies Secure on http drops them.
+ */
+export function shouldUseSecureCookie(request?: Request): boolean {
+  if (!request) return true;
+  try {
+    return new URL(request.url).protocol === 'https:';
+  } catch {
+    return true;
+  }
+}
+
+export function getAuthCookies(cookieHeader: string | null): { token: string | null; uid: string | null; code: string | null } {
+  if (!cookieHeader) return { token: null, uid: null, code: null };
   const cookies = Object.fromEntries(
     cookieHeader.split(';').map((c) => {
       const [key, ...vals] = c.trim().split('=');
       return [key, vals.join('=')];
     })
   );
-  const uid = cookies[AUTH_COOKIE_NAME];
-  const code = cookies[AUTH_CODE_COOKIE_NAME];
+  const uid = cookies[AUTH_COOKIE_NAME] || null;
+  const code = cookies[AUTH_CODE_COOKIE_NAME] || null;
   if (uid && code) {
-    return { token: `${uid}:${code}` };
+    return { token: `${uid}:${code}`, uid, code };
   }
-  return { token: null };
+  return { token: null, uid: null, code: null };
 }
 
-export function setAuthCookieHeaders(uid: number, hash: string, maxAge = 30 * 24 * 3600): string[] {
-  const base = 'Path=/; HttpOnly; Secure; SameSite=Lax';
+/**
+ * Lightweight check used by the edge cache layer: returns true only when
+ * both auth cookies are present and look syntactically valid (uid is a
+ * number, code is non-empty). substring matching against the cookie header
+ * is unsafe because attackers can name unrelated cookies similarly and
+ * stale cookies linger after logout.
+ */
+export function hasAuthCookies(cookieHeader: string | null): boolean {
+  const { uid, code } = getAuthCookies(cookieHeader);
+  if (!uid || !code) return false;
+  return /^\d+$/.test(uid) && code.length > 0;
+}
+
+export function setAuthCookieHeaders(uid: number, hash: string, maxAge = 30 * 24 * 3600, request?: Request): string[] {
+  const secureFlag = shouldUseSecureCookie(request) ? '; Secure' : '';
+  const base = `Path=/; HttpOnly${secureFlag}; SameSite=Lax`;
   const opts = maxAge > 0 ? `${base}; Max-Age=${maxAge}` : base;
   return [
     `${AUTH_COOKIE_NAME}=${uid}; ${opts}`,
@@ -329,8 +411,9 @@ export function setAuthCookieHeaders(uid: number, hash: string, maxAge = 30 * 24
   ];
 }
 
-export function clearAuthCookieHeaders(): string[] {
-  const opts = 'Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0';
+export function clearAuthCookieHeaders(request?: Request): string[] {
+  const secureFlag = shouldUseSecureCookie(request) ? '; Secure' : '';
+  const opts = `Path=/; HttpOnly${secureFlag}; SameSite=Lax; Max-Age=0`;
   return [
     `${AUTH_COOKIE_NAME}=; ${opts}`,
     `${AUTH_CODE_COOKIE_NAME}=; ${opts}`,

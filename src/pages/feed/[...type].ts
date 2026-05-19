@@ -3,10 +3,14 @@ import { getDb, schema } from '@/db';
 import { loadOptions, computeUrls } from '@/lib/options';
 import { buildPermalink } from '@/lib/content';
 import { renderMarkdown, generateExcerpt } from '@/lib/markdown';
-import { generateRss2, generateAtom, generateRss1 } from '@/lib/feed';
+import { generateRss2, generateAtom, generateRss1, type FeedItem } from '@/lib/feed';
 import { setActivatedPlugins, parseActivatedPlugins, applyFilterSafely } from '@/lib/plugin';
 import { eq, and, desc, sql, or } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
+
+const FEED_ITEMS_DEFAULT = 10;
+const FEED_ITEMS_MIN = 5;
+const FEED_ITEMS_MAX = 50;
 
 export const GET: APIRoute = async ({ locals, params }) => {
   const db = getDb(env.DB);
@@ -30,7 +34,13 @@ export const GET: APIRoute = async ({ locals, params }) => {
   // G7-7: feed limit is configurable via options.feedItems with
   // sensible bounds so admins can tune for slow clients without
   // letting a typo blow the response into the megabytes.
-  const feedLimit = Math.min(50, Math.max(5, parseInt(String(options.feedItems ?? 10), 10) || 10));
+  const feedLimit = Math.min(
+    FEED_ITEMS_MAX,
+    Math.max(
+      FEED_ITEMS_MIN,
+      parseInt(String(options.feedItems ?? FEED_ITEMS_DEFAULT), 10) || FEED_ITEMS_DEFAULT,
+    ),
+  );
   const posts = await db
     .select()
     .from(schema.contents)
@@ -81,7 +91,7 @@ export const GET: APIRoute = async ({ locals, params }) => {
     lastBuildDate: posts[0] ? new Date((posts[0].created || 0) * 1000) : new Date(),
   };
 
-  const items = [];
+  const items: FeedItem[] = [];
   for (const post of posts) {
     const author = authorMap.get(post.authorId || 0);
     // G7-6: distinguish description (always the excerpt) from
@@ -91,7 +101,7 @@ export const GET: APIRoute = async ({ locals, params }) => {
     const excerpt = generateExcerpt(post.text || '');
     const fullContent = options.feedFullText ? renderMarkdown(post.text || '') : '';
     const cats = postCats.get(post.cid) || [];
-    let item: any = {
+    let item: FeedItem = {
       title: post.title || '无标题',
       link: buildPermalink(
         { cid: post.cid, slug: post.slug, type: post.type, created: post.created },

@@ -27,7 +27,7 @@
 | 数据库 | Cloudflare D1 (SQLite) | — |
 | ORM | Drizzle ORM | 0.45.x |
 | 文件存储 | Cloudflare R2 | — |
-| 密码哈希 | PBKDF2-SHA256 | 100,000 迭代 + 16B salt |
+| 密码哈希 | PBKDF2-SHA256 | 600,000 迭代 + 16B salt（旧 100k hash 自动重哈希） |
 | 测试 | Vitest | 4.x |
 | 语言 | TypeScript | 6.x |
 
@@ -105,7 +105,9 @@ src/lib/schema-sql.ts   — 运行时从 Drizzle schema 反射生成建表 SQL
 - 列名必须与 PHP Typecho 保持一致
 - Schema 定义在 `src/db/schema.ts`，修改后必须运行 `pnpm run db:generate`
 - **禁止手动修改 `drizzle/` 目录下的迁移文件**
-- 建表 SQL 由 `src/lib/schema-sql.ts` 在运行时从 Drizzle schema 反射生成
+- 建表 SQL 由 `src/lib/schema-sql.ts` 在运行时从 Drizzle schema 反射生成（`generateCreateSQL()` 同时输出 CREATE TABLE 与 CREATE INDEX；中间件首次命中时会在后台幂等地补齐生产库索引）
+- D1 不支持真实事务（旧的 `db-transaction.ts` 已废弃）；批量改写应使用 `db.batch([...])` 单次往返
+- 评论的「能否审核」必须查 `contents.authorId`，禁止以 `comments.ownerId` 作为权限判定来源（ownerId 仅是历史快照，G7-4）
 
 ### 4.2 关键枚举
 
@@ -183,7 +185,14 @@ const ip = getClientIp(request);
 ```typescript
 addHook(hookPoint, pluginId, handler, priority = 10)
 // priority 越小越先执行
+// 同一 (pluginId, hookPoint, handler) 自动去重；重复 addHook 不会触发多次
 ```
+
+### 6.2.1 懒加载初始化
+
+- 插件 `init()` **不在 build 时直接执行**；`plugin-loader.ts` 改为调用 `registerPluginInit(pluginId, init)` 把初始化函数登记到表中
+- 真正的 `init({ addHook, pluginId })` 由 `setActivatedPlugins(activatedIds)` 在第一次激活时按需触发，未激活的插件不会注入任何 hook（G6）
+- 插件不要在模块顶层做副作用（数据库读写、外部请求、`addHook` 写入），所有注册逻辑必须放在导出的 `init()` 内
 
 ### 6.3 插件包约定
 
@@ -198,7 +207,7 @@ addHook(hookPoint, pluginId, handler, priority = 10)
 `system:begin`, `system:end`, `admin:header`, `admin:footer`, `admin:navBar`, `admin:begin`, `admin:end`, `admin:writePost:option`, `admin:writePost:advanceOption`, `admin:writePost:bottom`, `admin:writePage:option`, `admin:writePage:advanceOption`, `admin:writePage:bottom`, `admin:profile:bottom`, `post:finishPublish`, `post:finishSave`, `post:delete`, `post:finishDelete`, `page:finishPublish`, `page:finishSave`, `page:delete`, `page:finishDelete`, `feedback:finishComment`, `feedback:reply`, `comment:action`, `user:login`, `user:loginSucceed`, `user:loginFail`, `user:logout`, `user:finishRegister`, `upload:beforeUpload`, `upload:upload`, `upload:delete`
 
 **filter 类型**：
-`route:request`, `admin:loginHead`, `admin:loginForm`, `archive:select`, `archive:header`, `archive:footer`, `archive:indexHandle`, `archive:singleHandle`, `archive:categoryHandle`, `archive:tagHandle`, `archive:searchHandle`, `archive:handleInit`, `archive:beforeRender`, `archive:afterRender`, `content:filter`, `content:title`, `content:excerpt`, `content:markdown`, `content:content`, `comment:filter`, `comment:content`, `comment:markdown`, `post:write`, `page:write`, `feedback:comment`, `feed:item`, `feed:generate`, `widget:sidebar`, `user:register`, `plugin:config:beforeSave`
+`route:request`, `admin:loginHead`, `admin:loginForm`, `archive:select`, `archive:header`, `archive:footer`, `archive:indexHandle`, `archive:singleHandle`, `archive:categoryHandle`, `archive:tagHandle`, `archive:searchHandle`, `archive:handleInit`, `archive:beforeRender`, `archive:afterRender`, `content:filter`, `content:title`, `content:excerpt`, `content:markdown`, `content:content`, `comment:filter`, `comment:content`, `comment:markdown`, `post:write`, `page:write`, `feedback:comment`, `feed:item`, `feed:generate`, `widget:sidebar`, `user:register`, `plugin:config:beforeSave`, `csp:directives`
 
 ### 6.5 新增 Hook 点步骤
 
@@ -242,35 +251,68 @@ addHook(hookPoint, pluginId, handler, priority = 10)
 ### 8.1 密码哈希
 
 - 算法：PBKDF2-SHA256
-- 迭代次数：100,000
+- 迭代次数：600,000（G1，2024 年 OWASP 建议）
 - Salt 长度：16 字节
 - 存储格式：`$PBKDF2$iterations$salt$hash`
 - 位于 `src/lib/auth.ts`
+- `passwordHashNeedsRehash(hash)` 检测旧 100k hash；`/api/users/login` 命中时机会式重哈希为 600k
 
 ### 8.2 Session Token
 
 - 格式：`uid:sha256(secret+uid:authCode)`
 - 存储于 Cookie：`__typecho_uid` 和 `__typecho_authCode`
 - 每次请求由 `src/lib/context.ts` 的 `createContext()` 验证
+- Cookie 的 `Secure` 标志由 `shouldUseSecureCookie(request)` 决定（HTTPS / `x-forwarded-proto: https` 时设为 true）
+- 边缘缓存只对没有任一认证 Cookie 的请求生效（`hasAuthCookies` 闸门，避免登录态被缓存命中）
 
 ### 8.3 CSRF 保护
 
-- `generateSecurityToken(secret, authCode, uid)` 生成 token
-- 管理后台所有表单必须包含 CSRF token
-- 管理 API 端点必须校验 CSRF token
+- `generateSecurityToken(secret, authCode, uid)` 生成 token，使用 1 小时滑动桶轮换；`validateSecurityToken` 同时接受当前与上一桶 token
+- 评论 token 已绑定 `cid`：`generateCommentToken(secret, cid)` / `validateCommentToken(token, secret, cid, refererFallback?)`；旧的 referer 绑定路径仍兼容（用于已缓存页面）
+- 管理后台所有表单必须包含 CSRF token（`<input name="_">`）
+- 管理 API 端点必须校验 CSRF token；优先级：
+  1. `X-CSRF-Token` 请求头（G8-3，AJAX/JSON 客户端推荐）
+  2. POST `application/x-www-form-urlencoded` / `multipart/form-data` 中的 `_` 字段
+  3. POST `application/json` body 的 `_` 字段
+  4. URL 查询串 `?_=...`（保留兼容旧调用，状态变更类操作应避免）
+- `requireAdminAction(request, group, { csrf: true })` 在 CSRF 校验之外还会强制 Origin/Referer 同源（`isSameOriginRequest`）；纯读 GET 端点可传 `csrf: false`，但绝不允许 GET 触发副作用
 - `safeAdminRedirectUrl(referer, siteUrl, fallback)` 位于 `src/lib/admin-auth.ts`，安全构造管理后台重定向 URL；必须同时满足 `origin` 与 `siteUrl` 一致且路径为 `/admin` 或 `/admin/*`，防止 Open Redirect 与后台动作跳转到前台任意路径
 - 评论来源检查和评论提交后的回跳只允许用 `URL.origin` 判定可信来源，禁止使用 `startsWith(siteUrl)` 或仅比较 `host`
 
-### 8.4 安全响应头
+### 8.4 登录限速
 
-中间件 (`src/middleware.ts`) 在每次中间件托管响应中自动添加以下安全响应头，除非路由处理程序已设置同名 Header；包括普通路由、插件 `route:request` 响应、缓存命中响应、安装/静态资源早返回路径：
+- `src/lib/login-rate-limit.ts` 提供按 IP 的滑动窗口限流（仅在单 isolate 内存里，跨 isolate 不持久）
+- 由 `options.loginFailBan*` 配置（管理后台「登录设置」可调）：
+  - `loginFailBanEnabled`（默认 1）
+  - `loginFailBanWindowSeconds`（默认 300）
+  - `loginFailBanMaxFailures`（默认 5）
+  - `loginFailBanSeconds`（默认 900）
+- 上传端点 `src/pages/api/admin/upload.ts` 复用同一份 `trackSlidingWindow` 工具
+
+### 8.5 安全响应头
+
+中间件 (`src/middleware.ts`) 通过 `applySecurityHeaders()` 在每次中间件托管响应中自动添加以下安全响应头，除非路由处理程序已设置同名 Header；包括普通路由、插件 `route:request` 响应、缓存命中响应、安装/静态资源早返回路径：
 
 | Header | Value |
 |--------|-------|
 | `X-Content-Type-Options` | `nosniff` |
 | `X-Frame-Options` | `DENY` |
 | `Referrer-Policy` | `strict-origin-when-cross-origin` |
-| `Strict-Transport-Security` | `max-age=31536000; includeSubDomains` |
+| `Strict-Transport-Security` | `max-age=31536000; includeSubDomains`（仅 HTTPS） |
+| `Content-Security-Policy` | 宽型默认（允许 `'self'` + 内联样式 / 脚本 + Gravatar 图片 + R2/usr/uploads） |
+| `Permissions-Policy` | 默认禁用 camera/microphone/geolocation/payment/usb |
+| `Cross-Origin-Opener-Policy` | `same-origin` |
+| `Cross-Origin-Resource-Policy` | `same-origin`（上传响应使用 `cross-origin` 预设） |
+
+`csp:directives` filter hook 允许插件追加/调整 CSP directives；插件应只附加来源，不要清空默认 directive。
+
+### 8.6 安装窗口
+
+- `src/pages/api/install.ts` 的 install POST 在没有 `INSTALL_TOKEN` 密钥时输出 warning 并保留旧的「首位请求者获胜」语义（兼容现存部署）
+- 强烈建议运行 `wrangler secret put INSTALL_TOKEN` 之后再发起首次安装，避免抢注
+- 安装表单使用 `<input name="installToken">` 提交，服务端用 `timingSafeEqualString` 校验
+
+
 
 ---
 
@@ -279,11 +321,17 @@ addHook(hookPoint, pluginId, handler, priority = 10)
 ### 9.1 API 端点
 
 - 公开接口 → `src/pages/api/<name>.ts`
-- 管理接口 → `src/pages/api/admin/<name>.ts`（通过 context 验证登录态）
+- 管理接口 → `src/pages/api/admin/<name>.ts`（必须经过 `requireAdminAction(request, group)`，默认开启 CSRF + Origin 同源校验）
 - 文件格式：`.ts`，直接 `export const POST/PUT/DELETE = ...`，返回 `Response`
 - 路由由 Astro 文件系统路由自动生成
-- `src/pages/api/admin/meta.ts` 只能写入 `category` / `tag` 两类元数据，禁止接受任意 `type`
+- `src/pages/api/admin/meta.ts` 只能写入 `category` / `tag` 两类元数据，禁止接受任意 `type`；删除分类前必须拒绝默认分类与有文章关联的分类（G7-1）
 - `src/pages/api/admin/content.ts` 保存文章/页面时必须确保 `contents.slug` 唯一；更新为冲突 slug 时追加当前 `cid` 后缀，不允许把唯一索引错误暴露成 500
+- `src/pages/api/install.ts` 的 install handler 必须用 `.returning()` 拿真实自增主键，不准硬编码 `cid:1` / `mid:1`（G7-2）；slug 冲突要走 `resolveSlug` 后缀策略（G7-8）
+- 副作用类管理操作禁止响应 GET（`delete-spam` 等），统一走 POST + CSRF
+- 公共归档（首页/分类/标签/作者/搜索）必须过滤 `created > now()` 的将来贴（G7-5）
+- 评论 / 注册 / 登录 等公共 POST 必须做 Origin 同源校验（参考 `isSameOriginRequest`）
+- 搜索 LIKE 必须套 `[2,50]` 字符护栏：长度不在范围内时短路 `1=0`（G4-5）
+- Feed 路由的条数受 `options.feedItems` 控制并 clamp 到 `[5,50]`（G7-7）；description 始终走 excerpt，content:encoded 仅在 `feedFullText` 开启时才输出（G7-6）
 
 ### 9.2 管理后台页面
 
@@ -293,9 +341,10 @@ addHook(hookPoint, pluginId, handler, priority = 10)
 ### 9.3 模块级状态
 
 Cloudflare Workers 是单线程单 isolate，以下模块级变量是安全的：
-- `src/lib/plugin.ts`：`pluginRegistry`、`hookRegistry`（构建时写入，运行时只读）
+- `src/lib/plugin.ts`：`pluginRegistry`、`hookRegistry`（构建时写入，运行时只读；`pendingPluginInits` 用于懒初始化）
 - `src/lib/cache.ts`：options 查询缓存
-- `src/middleware.ts`：`regexCache`、`tableCheckPassed`
+- `src/lib/login-rate-limit.ts`：登录失败滑动窗口（仅本 isolate，跨 isolate 不持久）
+- `src/middleware.ts`：`regexCache`、`tableCheckPassed`、`indexCheckPassed`
 
 ### 9.4 插件配置表单类型
 

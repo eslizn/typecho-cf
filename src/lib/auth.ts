@@ -193,9 +193,19 @@ export async function requireAdminCSRF(
 
 /**
  * Extract admin CSRF token from request.
- * Priority: form data _ field > query string _ param > JSON body _ field
+ * Priority:
+ *   1. X-CSRF-Token header (G8-3) — works for any method/content-type
+ *      and avoids re-parsing the body. Preferred for fetch()/JSON clients.
+ *   2. POST form data `_` field (legacy server-rendered form posts).
+ *   3. POST JSON body `_` field.
+ *   4. Query string `_` param (state-changing GETs are rare; covered for
+ *      legacy callers).
  */
 async function extractAdminCSRFToken(request: Request): Promise<string | null> {
+  // 1. Header takes priority — covers fetch/AJAX clients without a body.
+  const headerToken = request.headers.get('x-csrf-token');
+  if (headerToken) return headerToken;
+
   const url = new URL(request.url);
   const method = request.method.toUpperCase();
 

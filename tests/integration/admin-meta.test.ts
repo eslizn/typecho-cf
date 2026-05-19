@@ -35,7 +35,7 @@ function makeAdminReq(path: string, formFields: Record<string, string>, cookie: 
   const formData = new URLSearchParams(formFields);
   return new Request(`https://example.com${path}`, {
     method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded', cookie },
+    headers: { 'content-type': 'application/x-www-form-urlencoded', cookie, origin: 'https://example.com' },
     body: formData.toString(),
   });
 }

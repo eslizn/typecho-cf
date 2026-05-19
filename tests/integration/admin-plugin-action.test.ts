@@ -56,7 +56,7 @@ describe('POST /api/admin/plugin-action', () => {
     const cookie = await makeAuthCookie(testDb, 1, AUTH_CODE, SECRET);
     const req = new Request('https://example.com/api/admin/plugin-action', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', cookie },
+      headers: { 'content-type': 'application/json', cookie, origin: 'https://example.com' },
       body: JSON.stringify({}),
     });
     const res = await POST({ request: req } as any);
@@ -67,7 +67,7 @@ describe('POST /api/admin/plugin-action', () => {
     const cookie = await makeAuthCookie(testDb, 1, AUTH_CODE, SECRET);
     const req = new Request('https://example.com/api/admin/plugin-action', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', cookie },
+      headers: { 'content-type': 'application/json', cookie, origin: 'https://example.com' },
       body: JSON.stringify({ plugin: 'invalid plugin name!', action: 'test' }),
     });
     const res = await POST({ request: req } as any);
@@ -78,7 +78,7 @@ describe('POST /api/admin/plugin-action', () => {
     const cookie = await makeAuthCookie(testDb, 1, AUTH_CODE, SECRET);
     const req = new Request('https://example.com/api/admin/plugin-action', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', cookie },
+      headers: { 'content-type': 'application/json', cookie, origin: 'https://example.com' },
       body: JSON.stringify({ plugin: 'typecho-plugin-inactive', action: 'test' }),
     });
     const res = await POST({ request: req } as any);
@@ -96,7 +96,7 @@ describe('POST /api/admin/plugin-action', () => {
     const cookie = await makeAuthCookie(testDb, 1, AUTH_CODE, SECRET);
     const req = new Request('https://example.com/api/admin/plugin-action', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', cookie },
+      headers: { 'content-type': 'application/json', cookie, origin: 'https://example.com' },
       body: JSON.stringify({ plugin: 'typecho-plugin-test', action: 'sync', payload: {} }),
     });
     const res = await POST({ request: req } as any);
@@ -111,7 +111,7 @@ describe('POST /api/admin/plugin-action', () => {
     const cookie = await makeAuthCookie(testDb, 1, AUTH_CODE, SECRET);
     const req = new Request('https://example.com/api/admin/plugin-action', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', cookie },
+      headers: { 'content-type': 'application/json', cookie, origin: 'https://example.com' },
       body: JSON.stringify({ plugin: 'typecho-plugin-test', action: 'unknown', payload: {} }),
     });
     const res = await POST({ request: req } as any);
@@ -122,7 +122,7 @@ describe('POST /api/admin/plugin-action', () => {
     const cookie = await makeAuthCookie(testDb, 1, AUTH_CODE, SECRET);
     const req = new Request('https://example.com/api/admin/plugin-action', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', cookie },
+      headers: { 'content-type': 'application/json', cookie, origin: 'https://example.com' },
       body: 'not json',
     });
     const res = await POST({ request: req } as any);

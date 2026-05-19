@@ -47,7 +47,7 @@ describe('POST /api/admin/theme', () => {
     const cookie = await makeAuthCookie(testDb, 1, AUTH_CODE, SECRET);
     const req = new Request('https://example.com/api/admin/theme', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', cookie },
+      headers: { 'content-type': 'application/json', cookie, origin: 'https://example.com' },
       body: JSON.stringify({}),
     });
     const res = await POST({ request: req, locals: {} } as any);
@@ -58,7 +58,7 @@ describe('POST /api/admin/theme', () => {
     const cookie = await makeAuthCookie(testDb, 1, AUTH_CODE, SECRET);
     const req = new Request('https://example.com/api/admin/theme', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', cookie },
+      headers: { 'content-type': 'application/json', cookie, origin: 'https://example.com' },
       body: JSON.stringify({ theme: 'nonexistent-theme' }),
     });
     const res = await POST({ request: req, locals: {} } as any);
@@ -69,7 +69,7 @@ describe('POST /api/admin/theme', () => {
     const cookie = await makeAuthCookie(testDb, 1, AUTH_CODE, SECRET);
     const req = new Request('https://example.com/api/admin/theme', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', cookie },
+      headers: { 'content-type': 'application/json', cookie, origin: 'https://example.com' },
       body: 'not json',
     });
     const res = await POST({ request: req, locals: {} } as any);

@@ -10,3 +10,5 @@
 wrangler.toml
 /.claude
 /.env
+/.pnpm-store
+

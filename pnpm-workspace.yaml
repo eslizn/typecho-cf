@@ -3,4 +3,8 @@ allowBuilds:
   esbuild: true
   sharp: true
   workerd: true
+minimumReleaseAgeExclude:
+  - '@astrojs/cloudflare@13.5.2'
+  - astro@6.3.5
+  - tsx@4.22.2
 nodeLinker: hoisted

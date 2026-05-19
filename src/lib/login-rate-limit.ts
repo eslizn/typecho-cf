@@ -96,3 +96,45 @@ export function clearLoginFailures(ip: string): void {
 export function resetLoginRateLimit(): void {
   failureStates.clear();
 }
+
+// ─── Per-actor sliding-window rate limiter ─────────────────────────────────
+// Reused by the upload endpoint (G5-4) to cap per-user request rate.
+
+interface SlidingWindowState {
+  count: number;
+  windowStartedAt: number;
+}
+
+const slidingWindows = new Map<string, SlidingWindowState>();
+
+export interface SlidingWindowConfig {
+  windowSeconds: number;
+  maxRequests: number;
+}
+
+/**
+ * Returns true if the request is allowed under the sliding window for
+ * the given key, false if rate-limited. Intentionally light — no Retry
+ * timestamps; callers should report 429 with a `Retry-After: <window>`
+ * header.
+ */
+export function trackSlidingWindow(
+  key: string,
+  config: SlidingWindowConfig,
+  now = Date.now(),
+): boolean {
+  const windowMs = config.windowSeconds * 1000;
+  const state = slidingWindows.get(key);
+  if (!state || now - state.windowStartedAt > windowMs) {
+    slidingWindows.set(key, { count: 1, windowStartedAt: now });
+    return true;
+  }
+  if (state.count >= config.maxRequests) return false;
+  state.count += 1;
+  return true;
+}
+
+/** For tests only. */
+export function resetSlidingWindow(): void {
+  slidingWindows.clear();
+}

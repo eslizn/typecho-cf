@@ -318,6 +318,14 @@ export const onRequest = defineMiddleware(async (context, next) => {
     if (!cacheHeaders.has('Cache-Control')) {
       cacheHeaders.set('Cache-Control', 'public, s-maxage=300');
     }
+    // G5-1: signal that cookies / encoding affect the cached response
+    // even though logged-in requests already bypass the cache. Belt-
+    // and-braces protects future readers who add cookie-bound state.
+    cacheHeaders.set('Vary', mergeVary(cacheHeaders.get('Vary'), ['Cookie', 'Accept-Encoding']));
+    // G5-2: never persist Set-Cookie (the Cache API ignores entries
+    // with cookies anyway, but stripping makes the intent explicit and
+    // avoids leaking auth tokens through future cache backends).
+    cacheHeaders.delete('Set-Cookie');
 
     const cacheable = new Response(response.clone().body, {
       status: response.status,
@@ -330,6 +338,16 @@ export const onRequest = defineMiddleware(async (context, next) => {
 
   return response;
 });
+
+/** Merge a comma-separated Vary header with additional fields, deduped. */
+function mergeVary(existing: string | null, additions: string[]): string {
+  const tokens = new Set<string>();
+  if (existing) {
+    for (const tok of existing.split(',')) tokens.add(tok.trim());
+  }
+  for (const tok of additions) tokens.add(tok);
+  return Array.from(tokens).filter(Boolean).join(', ');
+}
 
 function withCacheVersion(requestUrl: string, cacheVersion?: number): string {
   const url = new URL(requestUrl);

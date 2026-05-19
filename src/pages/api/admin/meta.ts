@@ -86,6 +86,26 @@ async function handler({ request, locals, url }: { request: Request; locals: App
       return new Response(null, { status: 302, headers: { Location: redirectTo } });
     }
 
+    // G7-1: refuse to delete the default category or any category that
+    // still has posts attached. Tags are unrestricted (no defaultTag,
+    // and dropping a tag merely orphans relationships).
+    if (type === 'category') {
+      const defaultMid = parseInt(String(options.defaultCategory ?? '0'), 10);
+      for (const id of deleteIds) {
+        if (id === defaultMid) {
+          return new Response('不能删除默认分类，请先指定其他分类为默认', { status: 400 });
+        }
+      }
+      const used = await db.select({ mid: schema.relationships.mid })
+        .from(schema.relationships)
+        .where(sql`${schema.relationships.mid} IN (${sql.join(deleteIds.map(id => sql`${id}`), sql`, `)})`);
+      if (used.length > 0) {
+        const inUseSet = new Set(used.map(r => r.mid));
+        const targets = deleteIds.filter(id => inUseSet.has(id));
+        return new Response(`分类 #${targets.join(', #')} 下仍有文章，请先迁移内容`, { status: 400 });
+      }
+    }
+
     for (const id of deleteIds) {
       await db.delete(schema.relationships).where(eq(schema.relationships.mid, id));
       await db.delete(schema.metas).where(eq(schema.metas.mid, id));

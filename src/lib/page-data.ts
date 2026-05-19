@@ -212,7 +212,16 @@ async function prepareArchiveData(
   const page = getPage(locals, url);
   const pageSize = options.pageSize || 5;
 
-  const baseConditions = [eq(schema.contents.type, 'post'), eq(schema.contents.status, 'publish')];
+  // G7-5: every archive (index, category, tag, author, search) hides
+  // posts whose `created` is in the future. The legacy code only
+  // filtered the index page, leaking scheduled posts via category/tag
+  // archives.
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const baseConditions = [
+    eq(schema.contents.type, 'post'),
+    eq(schema.contents.status, 'publish'),
+    sql`${schema.contents.created} <= ${nowSeconds}`,
+  ];
   if (params.extraWhere) baseConditions.push(params.extraWhere);
 
   const hasJoin = params.joinMid !== undefined;
@@ -273,7 +282,8 @@ export async function prepareIndexData(
     archiveTitle: '',
     archiveType: 'index',
     baseUrl: ctx.urls.siteUrl + '/',
-    extraWhere: sql`${schema.contents.created} < ${Math.floor(Date.now() / 1000)}`,
+    // G7-5: future-post filter is shared by prepareArchiveData now, no
+    // need to duplicate it here.
   });
 }
 

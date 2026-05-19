@@ -181,3 +181,53 @@ describe('generateRss1()', () => {
     expect(xml).toMatch(/<dc:date>\d{4}-\d{2}-\d{2}T/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// G7-6: description vs content:encoded distinction
+// ---------------------------------------------------------------------------
+describe('description vs content:encoded (G7-6)', () => {
+  it('RSS 2.0 uses excerpt for description even when full content is provided', () => {
+    const xml = generateRss2(baseConfig, [makeItem({
+      excerpt: 'Short summary',
+      content: '<p>Full body</p>',
+    })]);
+    expect(xml).toContain('<description>Short summary</description>');
+    expect(xml).toContain('<![CDATA[<p>Full body</p>]]>');
+  });
+
+  it('RSS 2.0 omits content:encoded when content is empty', () => {
+    const xml = generateRss2(baseConfig, [makeItem({
+      excerpt: 'Only excerpt',
+      content: '',
+    })]);
+    expect(xml).toContain('<description>Only excerpt</description>');
+    expect(xml).not.toContain('<content:encoded>');
+  });
+
+  it('Atom falls back to <summary> when content is empty', () => {
+    const xml = generateAtom(baseConfig, [makeItem({
+      excerpt: 'Just a summary',
+      content: '',
+    })]);
+    expect(xml).toContain('<summary>Just a summary</summary>');
+    expect(xml).not.toContain('<content type="html">');
+  });
+
+  it('Atom uses <content type="html"> when content is provided', () => {
+    const xml = generateAtom(baseConfig, [makeItem({
+      excerpt: 'Excerpt',
+      content: '<p>Body</p>',
+    })]);
+    expect(xml).toContain('<content type="html">');
+    expect(xml).not.toContain('<summary>');
+  });
+
+  it('RSS 1.0 omits content:encoded when content is empty', () => {
+    const xml = generateRss1(baseConfig, [makeItem({
+      excerpt: 'Just excerpt',
+      content: '',
+    })]);
+    expect(xml).toContain('<description>Just excerpt</description>');
+    expect(xml).not.toContain('<content:encoded>');
+  });
+});

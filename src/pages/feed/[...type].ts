@@ -27,6 +27,10 @@ export const GET: APIRoute = async ({ locals, params }) => {
   }
 
   // Posts feed
+  // G7-7: feed limit is configurable via options.feedItems with
+  // sensible bounds so admins can tune for slow clients without
+  // letting a typo blow the response into the megabytes.
+  const feedLimit = Math.min(50, Math.max(5, parseInt(String(options.feedItems ?? 10), 10) || 10));
   const posts = await db
     .select()
     .from(schema.contents)
@@ -35,11 +39,11 @@ export const GET: APIRoute = async ({ locals, params }) => {
         eq(schema.contents.type, 'post'),
         eq(schema.contents.status, 'publish'),
         eq(schema.contents.allowFeed, '1'),
-        sql`(${schema.contents.password} IS NULL OR ${schema.contents.password} = '')`
-      )
+        sql`(${schema.contents.password} IS NULL OR ${schema.contents.password} = '')`,
+      ),
     )
     .orderBy(desc(schema.contents.created))
-    .limit(10);
+    .limit(feedLimit);
 
   // Fetch authors
   const authorIds = [...new Set(posts.map((p) => p.authorId).filter(Boolean))];
@@ -80,17 +84,22 @@ export const GET: APIRoute = async ({ locals, params }) => {
   const items = [];
   for (const post of posts) {
     const author = authorMap.get(post.authorId || 0);
-    const content = options.feedFullText ? renderMarkdown(post.text || '') : generateExcerpt(post.text || '');
+    // G7-6: distinguish description (always the excerpt) from
+    // content:encoded (full body, only when feedFullText is on). The
+    // legacy code emitted the full body in both fields when feedFullText
+    // was enabled, doubling the payload.
+    const excerpt = generateExcerpt(post.text || '');
+    const fullContent = options.feedFullText ? renderMarkdown(post.text || '') : '';
     const cats = postCats.get(post.cid) || [];
-    let item = {
+    let item: any = {
       title: post.title || '无标题',
       link: buildPermalink(
         { cid: post.cid, slug: post.slug, type: post.type, created: post.created },
         urls.siteUrl,
         options.permalinkPattern as string | undefined,
       ),
-      content,
-      excerpt: generateExcerpt(post.text || ''),
+      content: fullContent,
+      excerpt,
       date: new Date((post.created || 0) * 1000),
       author: author?.screenName || author?.name || undefined,
       categories: cats,

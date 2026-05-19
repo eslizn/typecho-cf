@@ -4,6 +4,23 @@ import { setOption, getOption } from '@/lib/options';
 import { hashPassword, generateRandomString } from '@/lib/auth';
 import { env } from 'cloudflare:workers';
 import { generateCreateSQL } from '@/lib/schema-sql';
+import { eq } from 'drizzle-orm';
+
+/**
+ * Pick a slug that doesn't collide with an existing one. We append a
+ * counter rather than a random suffix so the resulting URL stays
+ * predictable for users who paste the install instructions verbatim.
+ */
+async function resolveSlug(db: ReturnType<typeof getDb>, base: string): Promise<string> {
+  let candidate = base;
+  let suffix = 1;
+  while (true) {
+    const existing = await db.query.contents.findFirst({ where: eq(schema.contents.slug, candidate) });
+    if (!existing) return candidate;
+    suffix += 1;
+    candidate = `${base}-${suffix}`;
+  }
+}
 
 /**
  * Create all tables and indexes from Drizzle schema definitions.
@@ -83,7 +100,7 @@ export const POST: APIRoute = async ({ request }) => {
     const authCode = generateRandomString(32);
     const now = Math.floor(Date.now() / 1000);
 
-    await db.insert(schema.users).values({
+    const insertedAdmin = await db.insert(schema.users).values({
       name: userName,
       password: hashedPassword,
       mail: userMail,
@@ -94,44 +111,53 @@ export const POST: APIRoute = async ({ request }) => {
       logged: now,
       group: 'administrator',
       authCode,
-    });
+    }).returning({ uid: schema.users.uid });
+    const adminUid = insertedAdmin[0]?.uid ?? 1;
 
     // Create default category
-    await db.insert(schema.metas).values({
+    const insertedCategory = await db.insert(schema.metas).values({
       name: '默认分类',
       slug: 'default',
       type: 'category',
       description: '只是一个默认分类',
       count: 1,
       order: 1,
-    });
+    }).returning({ mid: schema.metas.mid });
+    const categoryMid = insertedCategory[0]?.mid ?? 1;
+
+    // G7-8: probe slug uniqueness in case the worker reattached to an
+    // already-populated D1 instance (e.g. mid-rollback). resolveSlug
+    // appends a numeric suffix until no clash is found.
+    const helloSlug = await resolveSlug(db, 'hello-world');
+    const aboutSlug = await resolveSlug(db, 'about');
 
     // Create welcome post
-    await db.insert(schema.contents).values({
+    const insertedHello = await db.insert(schema.contents).values({
       title: '欢迎使用 Typecho',
-      slug: 'hello-world',
+      slug: helloSlug,
       created: now,
       modified: now,
       text: '<!--markdown-->欢迎使用 Typecho 博客系统。这是你的第一篇文章，你可以编辑或删除它，然后开始写作！\n\n## 关于 Typecho\n\nTypecho 是一个基于 **Astro + Cloudflare Workers + D1** 构建的现代博客系统。\n\n- 极速响应：基于 Cloudflare 边缘网络\n- Markdown 支持：使用 Markdown 撰写文章\n- 简洁高效：保持博客系统的简约之道',
-      authorId: 1,
+      authorId: adminUid,
       type: 'post',
       status: 'publish',
       allowComment: '1',
       allowPing: '1',
       allowFeed: '1',
-    });
+    }).returning({ cid: schema.contents.cid });
+    const helloCid = insertedHello[0]?.cid ?? 1;
 
-    // Link post to default category
-    await db.insert(schema.relationships).values({ cid: 1, mid: 1 });
+    // G7-2: link the welcome post to the default category by real ids.
+    await db.insert(schema.relationships).values({ cid: helloCid, mid: categoryMid });
 
     // Create about page
     await db.insert(schema.contents).values({
       title: '关于',
-      slug: 'about',
+      slug: aboutSlug,
       created: now,
       modified: now,
       text: '<!--markdown-->这是一个关于页面的示例。你可以在后台管理中编辑它。',
-      authorId: 1,
+      authorId: adminUid,
       type: 'page',
       status: 'publish',
       allowComment: '1',
@@ -161,7 +187,7 @@ export const POST: APIRoute = async ({ request }) => {
       commentsListSize: '10',
       postDateFormat: 'Y-m-d',
       commentDateFormat: 'Y-m-d H:i',
-      defaultCategory: '1',
+      defaultCategory: String(categoryMid),
       allowRegister: '0',
       defaultAllowComment: '1',
       defaultAllowPing: '1',

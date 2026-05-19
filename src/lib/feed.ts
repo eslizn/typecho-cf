@@ -46,7 +46,7 @@ export function generateRss2(config: FeedConfig, items: FeedItem[]): string {
       ${item.author ? `<dc:creator>${escapeXml(item.author)}</dc:creator>` : ''}
       ${(item.categories || []).map((c) => `<category>${escapeXml(c)}</category>`).join('\n      ')}
       <description>${escapeXml(item.excerpt || item.content)}</description>
-      <content:encoded><![CDATA[${escapeCData(item.content)}]]></content:encoded>
+      ${item.content ? `<content:encoded><![CDATA[${escapeCData(item.content)}]]></content:encoded>` : ''}
     </item>`).join('\n    ')}
   </channel>
 </rss>`;
@@ -72,7 +72,9 @@ export function generateAtom(config: FeedConfig, items: FeedItem[]): string {
     <updated>${item.date.toISOString()}</updated>
     ${item.author ? `<author><name>${escapeXml(item.author)}</name></author>` : ''}
     ${(item.categories || []).map((c) => `<category term="${escapeXml(c)}"/>`).join('\n    ')}
-    <content type="html"><![CDATA[${escapeCData(item.content)}]]></content>
+    ${item.content
+      ? `<content type="html"><![CDATA[${escapeCData(item.content)}]]></content>`
+      : `<summary>${escapeXml(item.excerpt || '')}</summary>`}
   </entry>`).join('\n  ')}
 </feed>`;
 }
@@ -99,7 +101,7 @@ export function generateRss1(config: FeedConfig, items: FeedItem[]): string {
     <dc:date>${item.date.toISOString()}</dc:date>
     ${item.author ? `<dc:creator>${escapeXml(item.author)}</dc:creator>` : ''}
     <description>${escapeXml(item.excerpt || item.content)}</description>
-    <content:encoded><![CDATA[${escapeCData(item.content)}]]></content:encoded>
+    ${item.content ? `<content:encoded><![CDATA[${escapeCData(item.content)}]]></content:encoded>` : ''}
   </item>`).join('\n  ')}
 </rdf:RDF>`;
 }

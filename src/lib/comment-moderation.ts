@@ -16,8 +16,26 @@ export function normalizeCommentAction(action: string): CommentAction | null {
   return COMMENT_ACTIONS.includes(action as CommentAction) ? action as CommentAction : null;
 }
 
-export function canModerateComment(user: UserRow, comment: CommentRow): boolean {
-  return hasPermission(user.group || 'visitor', 'administrator') || comment.ownerId === user.uid;
+/**
+ * Check whether `user` may moderate `comment`.
+ *
+ * G7-4: the legacy implementation checked `comment.ownerId === user.uid`,
+ * but ownerId is set at comment creation and never re-synced when a
+ * post's author changes. We now ask the live `contents.authorId` so
+ * permission tracks whoever currently owns the post.
+ */
+export async function canModerateComment(
+  db: Database,
+  user: UserRow,
+  comment: CommentRow,
+): Promise<boolean> {
+  if (hasPermission(user.group || 'visitor', 'administrator')) return true;
+  if (!comment.cid) return false;
+  const owner = await db.query.contents.findFirst({
+    columns: { authorId: true },
+    where: eq(schema.contents.cid, comment.cid),
+  });
+  return !!owner && owner.authorId === user.uid;
 }
 
 export async function getModeratableComment(
@@ -29,7 +47,7 @@ export async function getModeratableComment(
     where: eq(schema.comments.coid, coid),
   });
   if (!comment) return new Response('Not Found', { status: 404 });
-  if (!canModerateComment(user, comment)) return new Response('Forbidden', { status: 403 });
+  if (!(await canModerateComment(db, user, comment))) return new Response('Forbidden', { status: 403 });
   return comment;
 }
 
@@ -69,18 +87,39 @@ export async function deleteSpamCommentsForUser(
   user: UserRow,
 ): Promise<number> {
   const isAdmin = hasPermission(user.group || 'visitor', 'administrator');
-  const spamComments = await db
+  if (isAdmin) {
+    const before = await db
+      .select({ coid: schema.comments.coid })
+      .from(schema.comments)
+      .where(eq(schema.comments.status, 'spam'));
+    if (before.length === 0) return 0;
+    await db.delete(schema.comments).where(eq(schema.comments.status, 'spam'));
+    return before.length;
+  }
+
+  // Non-admin: clear spam attached to posts the user currently owns.
+  // G7-4: use the live contents.authorId rather than the historical
+  // comment.ownerId.
+  const ownedCids = await db
+    .select({ cid: schema.contents.cid })
+    .from(schema.contents)
+    .where(eq(schema.contents.authorId, user.uid));
+  if (ownedCids.length === 0) return 0;
+
+  const cidIn = sql.join(ownedCids.map(o => sql`${o.cid}`), sql`, `);
+  const before = await db
     .select({ coid: schema.comments.coid })
     .from(schema.comments)
-    .where(isAdmin
-      ? eq(schema.comments.status, 'spam')
-      : and(eq(schema.comments.status, 'spam'), eq(schema.comments.ownerId, user.uid))
-    );
-
-  for (const comment of spamComments) {
-    await db.delete(schema.comments).where(eq(schema.comments.coid, comment.coid));
-  }
-  return spamComments.length;
+    .where(and(
+      eq(schema.comments.status, 'spam'),
+      sql`${schema.comments.cid} IN (${cidIn})`,
+    ));
+  if (before.length === 0) return 0;
+  await db.delete(schema.comments).where(and(
+    eq(schema.comments.status, 'spam'),
+    sql`${schema.comments.cid} IN (${cidIn})`,
+  ));
+  return before.length;
 }
 
 export async function purgeCommentModerationCache(

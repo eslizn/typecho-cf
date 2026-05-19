@@ -17,6 +17,7 @@ vi.mock('@/lib/plugin', () => ({
   parseActivatedPlugins: () => [],
   setActivatedPlugins: () => {},
   applyFilter: async (_hook: string, data: any) => data,
+  applyFilterSafely: async (_hook: string, data: any) => data,
 }));
 
 import { GET } from '@/pages/feed/[...type]';
@@ -96,5 +97,80 @@ describe('GET /feed/comments', () => {
     expect(xml).not.toContain('no feed comment');
     expect(xml).not.toContain('attachment comment');
     expect(xml).not.toContain('waiting comment');
+  });
+});
+
+describe('GET /feed feedItems clamp (G7-7)', () => {
+  beforeEach(async () => {
+    testDb = await createTestDb();
+    await seedOptions();
+  });
+
+  async function seedManyPosts(n: number) {
+    for (let i = 0; i < n; i++) {
+      await seedContent(`post-${i}`, { created: 100 + i, modified: 100 + i });
+    }
+  }
+
+  it('honours options.feedItems within bounds', async () => {
+    await testDb.insert(schema.options).values({ name: 'feedItems', user: 0, value: '7' });
+    await seedManyPosts(15);
+    // Empty type = RSS 2.0 default. Per the route's startsWith('rss') check,
+    // 'rss' or 'rss2' would land on RSS 1.0 (RDF), which we don't want here.
+    const res = await GET({ locals: {}, params: { type: '' } } as any);
+    const xml = await res.text();
+    const items = (xml.match(/<item>/g) || []).length;
+    expect(items).toBe(7);
+  });
+
+  it('clamps oversized feedItems to 50', async () => {
+    await testDb.insert(schema.options).values({ name: 'feedItems', user: 0, value: '500' });
+    await seedManyPosts(60);
+    const res = await GET({ locals: {}, params: { type: '' } } as any);
+    const xml = await res.text();
+    const items = (xml.match(/<item>/g) || []).length;
+    expect(items).toBe(50);
+  });
+
+  it('clamps undersized feedItems to 5', async () => {
+    await testDb.insert(schema.options).values({ name: 'feedItems', user: 0, value: '1' });
+    await seedManyPosts(20);
+    const res = await GET({ locals: {}, params: { type: '' } } as any);
+    const xml = await res.text();
+    const items = (xml.match(/<item>/g) || []).length;
+    expect(items).toBe(5);
+  });
+
+  it('falls back to default 10 when feedItems is unset', async () => {
+    await seedManyPosts(20);
+    const res = await GET({ locals: {}, params: { type: '' } } as any);
+    const xml = await res.text();
+    const items = (xml.match(/<item>/g) || []).length;
+    expect(items).toBe(10);
+  });
+});
+
+describe('GET /feed description vs content (G7-6)', () => {
+  beforeEach(async () => {
+    testDb = await createTestDb();
+    await seedOptions();
+  });
+
+  it('emits content:encoded only when feedFullText is on', async () => {
+    await testDb.insert(schema.options).values({ name: 'feedFullText', user: 0, value: '1' });
+    await seedContent('full-text-post', { text: 'A long body that becomes the full content.' });
+    const res = await GET({ locals: {}, params: { type: '' } } as any);
+    const xml = await res.text();
+    expect(xml).toContain('<content:encoded>');
+    expect(xml).toContain('<description>');
+  });
+
+  it('omits content:encoded when feedFullText is off', async () => {
+    await testDb.insert(schema.options).values({ name: 'feedFullText', user: 0, value: '0' });
+    await seedContent('excerpt-only-post', { text: 'A long body that should only show as excerpt.' });
+    const res = await GET({ locals: {}, params: { type: '' } } as any);
+    const xml = await res.text();
+    expect(xml).not.toContain('<content:encoded>');
+    expect(xml).toContain('<description>');
   });
 });

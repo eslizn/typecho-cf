@@ -7,6 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import { generateRss2, generateAtom, generateRss1 } from '@/lib/feed';
 import type { FeedConfig, FeedItem } from '@/lib/feed';
+import { createI18n } from '@/lib/i18n';
 
 const baseConfig: FeedConfig = {
   title: 'Test Blog',
@@ -131,6 +132,15 @@ describe('generateRss2()', () => {
   it('uses excerpt for description if available', () => {
     const xml = generateRss2(baseConfig, [makeItem({ excerpt: 'Short summary' })]);
     expect(xml).toContain('<description>Short summary</description>');
+  });
+
+  it('uses the request translator for RSS language when no explicit language is supplied', () => {
+    const xml = generateRss2({
+      ...baseConfig,
+      language: undefined,
+      i18n: createI18n({ locale: 'en', catalogs: {} }),
+    }, []);
+    expect(xml).toContain('<language>en</language>');
   });
 });
 

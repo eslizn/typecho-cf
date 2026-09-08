@@ -11,6 +11,10 @@ export const DEFAULT_LOCALE = 'en';
 export const MAX_ACCEPT_LANGUAGE_LENGTH = 4096;
 export const MAX_ACCEPT_LANGUAGE_RANGES = 20;
 export const MAX_LOCALE_LENGTH = 128;
+export const MAX_MESSAGE_KEY_LENGTH = 200;
+export const MAX_MESSAGE_VARIABLES = 20;
+export const MAX_MESSAGE_VALUE_LENGTH = 2000;
+export const MAX_MESSAGE_FALLBACK_LENGTH = 5000;
 
 export type MessageVariable = string | number;
 export type MessageVariables = Record<string, MessageVariable>;
@@ -53,6 +57,67 @@ export interface CreateI18nOptions {
   catalogs: TranslationCatalogs;
   /** Optional theme-local catalogs. They are checked before global catalogs. */
   scopedCatalogs?: TranslationCatalogs;
+}
+
+export function i18nMessage(
+  key: string,
+  fallbackText?: string,
+  variables?: MessageVariables,
+): I18nMessage {
+  return {
+    key,
+    ...(variables ? { variables } : {}),
+    ...(fallbackText !== undefined ? { fallbackText } : {}),
+  };
+}
+
+/** Validate a message descriptor before it crosses a cookie/API boundary. */
+export function isI18nMessage(value: unknown): value is I18nMessage {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const candidate = value as Record<string, unknown>;
+  if (
+    typeof candidate.key !== 'string' ||
+    candidate.key.length === 0 ||
+    candidate.key.length > MAX_MESSAGE_KEY_LENGTH ||
+    !/^[A-Za-z0-9][A-Za-z0-9_.:-]*$/.test(candidate.key)
+  ) return false;
+
+  if (candidate.fallbackText !== undefined && (
+    typeof candidate.fallbackText !== 'string' ||
+    candidate.fallbackText.length > MAX_MESSAGE_FALLBACK_LENGTH
+  )) return false;
+
+  if (candidate.variables === undefined) return true;
+  if (!candidate.variables || typeof candidate.variables !== 'object' || Array.isArray(candidate.variables)) return false;
+  const variables = candidate.variables as Record<string, unknown>;
+  const entries = Object.entries(variables);
+  if (entries.length > MAX_MESSAGE_VARIABLES) return false;
+  return entries.every(([name, variable]) => (
+    /^[A-Za-z0-9_.-]{1,64}$/.test(name) &&
+    ((typeof variable === 'string' && variable.length <= MAX_MESSAGE_VALUE_LENGTH) ||
+      (typeof variable === 'number' && Number.isFinite(variable)))
+  ));
+}
+
+/** Copy a descriptor into a bounded plain object, dropping unknown fields. */
+export function normalizeI18nMessage(value: unknown): I18nMessage | null {
+  if (!isI18nMessage(value)) return null;
+  const candidate = value as I18nMessage;
+  return {
+    key: candidate.key,
+    ...(candidate.variables ? { variables: { ...candidate.variables } } : {}),
+    ...(candidate.fallbackText !== undefined ? { fallbackText: candidate.fallbackText } : {}),
+  };
+}
+
+/** Resolve a descriptor at the final presentation boundary. */
+export function resolveI18nMessage(message: string | I18nMessage, i18n?: I18n): string {
+  if (typeof message === 'string') return message;
+  const normalized = normalizeI18nMessage(message);
+  if (!normalized) return '';
+  return i18n
+    ? i18n.t(normalized.key, normalized.variables, normalized.fallbackText)
+    : interpolateMessage(normalized.fallbackText ?? normalized.key, normalized.variables);
 }
 
 /**

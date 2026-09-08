@@ -2,7 +2,8 @@ import type { APIRoute } from 'astro';
 import { getDb, schema } from '@/db';
 import { loadOptions, computeUrls } from '@/lib/options';
 import { generateResetToken, hashResetToken, RESET_TOKEN_EXPIRY_SEC } from '@/lib/auth';
-import { sendMail } from '@/lib/mail';
+import { createMailI18n, sendMail } from '@/lib/mail';
+import { escapeHtml } from '@/lib/escape';
 import { trackSlidingWindow } from '@/lib/login-rate-limit';
 import { getClientIp } from '@/lib/context';
 import { setActivatedPlugins, parseActivatedPlugins, type HookContext } from '@/lib/plugin';
@@ -91,12 +92,16 @@ export const POST: APIRoute = async ({ request }) => {
   await setActivatedPlugins(pluginCtx, parseActivatedPlugins(options.activatedPlugins as string | undefined));
 
   const resetUrl = `${urls.siteUrl}/admin/reset-password?token=${encodeURIComponent(token)}`;
+  const mailI18n = createMailI18n(options, pluginCtx.activatedPlugins);
+  const mailSiteTitle = String(options.title || 'Typecho');
+  const mailExpiry = mailI18n.t('mail.reset.expiry', {}, 'This link is valid for 1 hour.');
+  const mailIgnore = mailI18n.t('mail.reset.ignore', {}, 'If you did not request this, you can ignore this email.');
   const mailResult = await sendMail(pluginCtx, {
     to: email,
-    subject: `${options.title || 'Typecho'} - 密码重置`,
-    html: `<p>您好，</p><p>我们收到了重置密码的请求。请点击以下链接设置新密码（1小时内有效）：</p><p><a href="${resetUrl}">${resetUrl}</a></p><p>如果您未请求此操作，请忽略此邮件。</p>`,
-    text: `您好，\n\n请访问以下链接重置密码（1小时内有效）：\n${resetUrl}\n\n如果您未请求此操作，请忽略此邮件。`,
-  }, { request, options, reason: 'password-reset' });
+    subject: mailI18n.t('mail.reset.subject', { siteTitle: mailSiteTitle }, `${mailSiteTitle} - Password reset`),
+    html: `<p>${escapeHtml(mailI18n.t('mail.reset.greeting', {}, 'Hello,'))}</p><p>${escapeHtml(mailI18n.t('mail.reset.instructions', {}, 'We received a request to reset your password. Use the link below to set a new password:'))}</p><p><a href="${escapeHtml(resetUrl)}">${escapeHtml(resetUrl)}</a></p><p>${escapeHtml(mailExpiry)}</p><p>${escapeHtml(mailIgnore)}</p>`,
+    text: `${mailI18n.t('mail.reset.greeting', {}, 'Hello,')}\n\n${mailI18n.t('mail.reset.instructions', {}, 'We received a request to reset your password. Use the link below to set a new password:')}\n${resetUrl}\n\n${mailExpiry}\n${mailIgnore}`,
+  }, { request, options, reason: 'password-reset', i18n: mailI18n });
 
   if (!mailResult.sent && existingRequest) {
     await db.update(schema.passwordResetRequests).set({

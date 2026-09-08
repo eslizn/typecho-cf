@@ -7,12 +7,12 @@ import { publishedPostCondition } from '@/lib/content-visibility';
 
 export const GET: APIRoute = async ({ request, locals, params }) => {
   const slug = params.slug || '';
-  const { db, options, urls, pluginCtx } = await getFeedRuntime(locals);
+  const { db, options, urls, pluginCtx, i18n, autoLocale } = await getFeedRuntime(locals, request);
 
   const cat = await db.query.metas.findFirst({
     where: and(eq(schema.metas.type, 'category'), eq(schema.metas.slug, slug)),
   });
-  if (!cat) return new Response('Not Found', { status: 404 });
+  if (!cat) return new Response(i18n.t('core.error.notFound', {}, 'Not Found'), { status: 404 });
 
   const limit = clampFeedItems(options.feedItems);
   const rows = await db
@@ -32,17 +32,24 @@ export const GET: APIRoute = async ({ request, locals, params }) => {
   const items = [];
   for (const { contents: p } of rows) {
     items.push(
-      await buildFeedItem(p, urls.siteUrl, options.permalinkPattern as string | undefined, undefined, pluginCtx, !!(options.feedFullText)),
+      await buildFeedItem(p, urls.siteUrl, options.permalinkPattern as string | undefined, undefined, pluginCtx, !!(options.feedFullText), i18n),
     );
   }
 
   const isAtom = params.slug?.startsWith('atom-');
-  const config = { title: `${options.title} - 分类：${cat.name}`, link: `${urls.siteUrl}/category/${slug}/`, description: '', feedUrl: urls.siteUrl, language: 'zh-CN', lastBuildDate: items[0]?.date || new Date() };
+  const config = {
+    title: i18n.t('feed.category.title', { siteTitle: options.title, category: cat.name || '' }, `${options.title} - Category: ${cat.name || ''}`),
+    link: `${urls.siteUrl}/category/${slug}/`,
+    description: '',
+    feedUrl: urls.siteUrl,
+    i18n,
+    lastBuildDate: items[0]?.date || new Date(),
+  };
   const xml = isAtom ? generateAtom(config, items) : generateRss2(config, items);
   return renderFeedResponse(
     pluginCtx,
     xml,
     isAtom ? 'application/atom+xml; charset=utf-8' : 'application/rss+xml; charset=utf-8',
-    { requestUrl: new URL(request.url), type: params.slug || '', options, urls },
+    { requestUrl: new URL(request.url), type: params.slug || '', options, urls, i18n, autoLocale },
   );
 };

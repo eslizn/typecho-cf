@@ -6,6 +6,8 @@ import { env } from 'cloudflare:workers';
 import { getRequestCoreContext } from '@/lib/context';
 import { REQUEST_BODY_LIMITS } from '@/lib/constants';
 import { assertBoundedContentLength, InputError } from '@/lib/input';
+import { createRequestI18n } from '@/lib/i18n-runtime';
+import type { I18n } from '@/lib/i18n';
 
 export interface AdminActionContext {
   db: Database;
@@ -14,6 +16,8 @@ export interface AdminActionContext {
   user: typeof schema.users.$inferSelect;
   /** Activated plugin set for firing hooks from this request. */
   pluginCtx: HookContext;
+  /** Request-local translator for API and admin action messages. */
+  i18n: I18n;
 }
 
 interface RequireAdminActionOptions {
@@ -111,7 +115,12 @@ export async function requireAdminAction(
     await setActivatedPlugins(pluginCtx, parseActivatedPlugins(options.activatedPlugins as string | undefined));
   }
 
-  return { db, options, uid: auth.uid, user: auth.user, pluginCtx };
+  const i18n = requestCore?.i18n ?? createRequestI18n(
+    typeof options.lang === 'string' ? options.lang : 'zh_CN',
+    request,
+    pluginCtx.activatedPlugins,
+  ).i18n;
+  return { db, options, uid: auth.uid, user: auth.user, pluginCtx, i18n };
 }
 
 export function isAdminActionResponse(value: AdminActionContext | Response): value is Response {

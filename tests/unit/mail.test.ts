@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { sendMail, type MailPayload, type MailContext, type MailResult } from '@/lib/mail';
+import { createMailI18n, sendMail, type MailPayload, type MailContext, type MailResult } from '@/lib/mail';
 
 // mock the short-circuit plugin runner — the mail module delegates to it
 vi.mock('@/lib/plugin', () => ({
@@ -25,6 +25,16 @@ const payload: MailPayload = {
 };
 
 describe('sendMail', () => {
+  it('uses English for automatic site language and preserves fixed language', () => {
+    const automatic = createMailI18n({ lang: '' });
+    const chinese = createMailI18n({ lang: 'zh_CN' });
+
+    expect(automatic.locale).toBe('en');
+    expect(automatic.t('mail.reset.greeting')).toBe('Hello,');
+    expect(chinese.locale).toBe('zh-CN');
+    expect(chinese.t('mail.reset.greeting')).toBe('您好，');
+  });
+
   it('returns disabled when mailEnabled=0', async () => {
     const { pluginCtx, ctx } = makeCtx({ mailEnabled: false });
     const r = await sendMail(pluginCtx, payload, ctx);

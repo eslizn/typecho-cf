@@ -5,6 +5,7 @@ import {
   createFlashRedirectHeaders,
   getFlashCookieValue,
 } from '@/lib/flash';
+import { createI18n } from '@/lib/i18n';
 
 describe('flash cookie helpers', () => {
   it('stores non-ASCII messages in an HttpOnly short-lived cookie', () => {
@@ -41,5 +42,21 @@ describe('flash cookie helpers', () => {
     expect(headers.get('Location')).toBe('/admin/login');
     expect(headers.get('Location')).not.toContain('error=');
     expect(headers.get('Set-Cookie')).toContain('__flash=');
+  });
+
+  it('stores descriptors and resolves them only when the flash is read', () => {
+    const header = createFlashCookieHeader('__flash', {
+      key: 'flash.greeting',
+      variables: { name: 'Alice' },
+      fallbackText: 'Hello, {name}',
+    });
+    const cookie = header.split(';', 1)[0];
+    const i18n = createI18n({
+      locale: 'en',
+      catalogs: { en: { 'flash.greeting': 'Welcome, {name}' } },
+    });
+
+    expect(getFlashCookieValue(cookie, '__flash', i18n)).toBe('Welcome, Alice');
+    expect(getFlashCookieValue(cookie, '__flash')).toBe('Hello, Alice');
   });
 });

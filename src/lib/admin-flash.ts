@@ -2,6 +2,8 @@ import type { SiteOptions } from '@/lib/options';
 import { isRequestHttps, timeSafeEqual, validateAuthToken, getAuthCookies } from '@/lib/auth';
 import type { Database } from '@/db';
 import { safeAdminRedirectUrl } from '@/lib/admin-auth';
+import type { I18n, I18nMessage } from '@/lib/i18n';
+import { normalizeI18nMessage, resolveI18nMessage } from '@/lib/i18n';
 
 export const ADMIN_FLASH_COOKIE = '__typecho_admin_flash';
 const FLASH_TTL_SECONDS = 90;
@@ -9,7 +11,7 @@ const MAX_MESSAGE_LENGTH = 500;
 
 interface AdminFlashPayload {
   uid: number;
-  message: string;
+  message: string | I18nMessage;
   expiresAt: number;
 }
 
@@ -75,13 +77,13 @@ export async function createAdminErrorRedirect(
   request: Request,
   options: SiteOptions,
   uid: number,
-  message: string,
+  message: string | I18nMessage,
   fallback: string,
   status = 303,
 ): Promise<Response> {
   const payload: AdminFlashPayload = {
     uid,
-    message: message.trim().slice(0, MAX_MESSAGE_LENGTH) || '操作失败',
+    message: normalizeAdminFlashMessage(message),
     expiresAt: Math.floor(Date.now() / 1000) + FLASH_TTL_SECONDS,
   };
   const encoded = encode(JSON.stringify(payload));
@@ -100,6 +102,7 @@ export async function readAdminFlash(
   request: Request,
   options: SiteOptions,
   uid: number,
+  i18n?: I18n,
 ): Promise<string | null> {
   const value = cookieValue(request);
   if (!value) return null;
@@ -113,11 +116,21 @@ export async function readAdminFlash(
   if (!raw) return null;
   try {
     const payload = JSON.parse(raw) as AdminFlashPayload;
-    if (payload.uid !== uid || payload.expiresAt < Math.floor(Date.now() / 1000) || typeof payload.message !== 'string') return null;
-    return payload.message.slice(0, MAX_MESSAGE_LENGTH);
+    if (payload.uid !== uid || payload.expiresAt < Math.floor(Date.now() / 1000)) return null;
+    if (typeof payload.message === 'string') return payload.message.slice(0, MAX_MESSAGE_LENGTH);
+    const descriptor = normalizeI18nMessage(payload.message);
+    return descriptor ? resolveI18nMessage(descriptor, i18n) : null;
   } catch {
     return null;
   }
+}
+
+function normalizeAdminFlashMessage(message: string | I18nMessage): string | I18nMessage {
+  if (typeof message === 'string') return message.trim().slice(0, MAX_MESSAGE_LENGTH) || '操作失败';
+  const descriptor = normalizeI18nMessage(message);
+  if (!descriptor) return '操作失败';
+  if (JSON.stringify(descriptor).length <= MAX_MESSAGE_LENGTH) return descriptor;
+  return (descriptor.fallbackText || descriptor.key).slice(0, MAX_MESSAGE_LENGTH);
 }
 
 export function clearAdminFlash(request: Request): string {

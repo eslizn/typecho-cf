@@ -13,6 +13,8 @@ import { eq, and, inArray } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 import { isCacheablePublicPath } from '@/lib/cache';
 import { CONTENT_ROUTE_PATHS, isContentPathAllowed } from '@/lib/content-path';
+import type { I18nMessage } from '@/lib/i18n';
+import { normalizeI18nMessage } from '@/lib/i18n';
 
 // Plugin loader registration (generated at build time by plugin-loader.ts).
 // Statically imported so the lazy plugin loader table exists before the first
@@ -343,13 +345,22 @@ export const onRequest = defineMiddleware(async (context, next) => {
   if (isAdminHtmlFormRequest(context.request) && path.startsWith('/api/admin/') && response.status >= 400) {
     const uid = await getAdminUserForFlash(context.request, db, options);
     if (uid) {
-      let message = response.status >= 500 ? '操作失败，请稍后重试' : '操作失败';
+      let message: string | I18nMessage = response.status >= 500 ? '操作失败，请稍后重试' : '操作失败';
       try {
         const body = await response.clone().text();
         if (body.trim()) {
           try {
-            const parsed = JSON.parse(body) as { error?: unknown };
-            if (typeof parsed.error === 'string') message = parsed.error;
+            const parsed = JSON.parse(body) as { error?: unknown; code?: unknown; params?: unknown };
+            if (typeof parsed.code === 'string') {
+              const descriptor = normalizeI18nMessage({
+                key: parsed.code,
+                variables: parsed.params,
+                fallbackText: typeof parsed.error === 'string' ? parsed.error : undefined,
+              });
+              if (descriptor) message = descriptor;
+            } else if (typeof parsed.error === 'string') {
+              message = parsed.error;
+            }
           } catch {
             message = body.trim();
           }

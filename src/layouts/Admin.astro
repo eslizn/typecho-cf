@@ -154,7 +154,7 @@ const visibleGroups = safeMenuGroups.filter(g => g.show);
 const focusGroupIdx = visibleGroups.findIndex(g => g.children.some(c => c.active));
 const adminHeadHtml = await applyFilterSafely(_pluginCtx, 'admin:head', '', adminHookContext);
 const adminFooterHtml = await applyFilterSafely(_pluginCtx, 'admin:footer', '', { options, urls, user, activeMenu, title, i18n: pageI18n });
-const flashError = user ? await readAdminFlash(Astro.request, options, user.uid) : null;
+const flashError = user ? await readAdminFlash(Astro.request, options, user.uid, pageI18n) : null;
 if (flashError) Astro.response.headers.append('Set-Cookie', clearAdminFlash(Astro.request));
 await doHook(_pluginCtx, 'admin:end', { ...adminHookContext, menuGroups: safeMenuGroups });
 ---

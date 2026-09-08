@@ -4,6 +4,8 @@
  */
 
 import type { FeedItem } from '@/lib/feed';
+import type { I18n, ResolvedLocale } from '@/lib/i18n';
+import { createRequestI18n } from '@/lib/i18n-runtime';
 import { buildPermalink } from '@/lib/content';
 import { generateRss2, generateAtom, generateRss1 } from '@/lib/feed';
 import { renderContent } from '@/lib/markdown';
@@ -27,7 +29,7 @@ export function clampFeedItems(rawValue: unknown): number {
   return Math.min(FEED_ITEMS_MAX, Math.max(FEED_ITEMS_MIN, n));
 }
 
-export async function getFeedRuntime(locals: App.Locals) {
+export async function getFeedRuntime(locals: App.Locals, request?: Request) {
   const core = getRequestCoreContextFromLocals(locals);
   const db = core?.db ?? getDb(env.DB);
   const options = core?.options ?? await loadOptions(db);
@@ -38,7 +40,15 @@ export async function getFeedRuntime(locals: App.Locals) {
       parseActivatedPlugins(options.activatedPlugins as string | undefined),
     );
   }
-  return { db, options, urls: computeUrls(options), pluginCtx };
+  const urls = computeUrls(options);
+  const runtime = core?.i18n && core.resolvedLocale
+    ? { i18n: core.i18n, resolvedLocale: core.resolvedLocale, autoLocale: core.autoLocale }
+    : createRequestI18n(
+        typeof options.lang === 'string' ? options.lang : 'zh_CN',
+        request || new Request(urls.feedUrl || 'http://localhost/feed'),
+        pluginCtx.activatedPlugins,
+      );
+  return { db, options, urls, pluginCtx, ...runtime };
 }
 
 export async function buildFeedItem(
@@ -48,12 +58,13 @@ export async function buildFeedItem(
   pagePattern: string | undefined,
   pluginCtx: HookContext,
   feedFullText?: boolean,
+  i18n?: I18n,
 ): Promise<FeedItem> {
   const rendered = renderContent(post.text || '');
   const link = buildPermalink(post, siteUrl, permalinkPattern, pagePattern);
 
   let item: FeedItem = {
-    title: post.title || '无标题',
+    title: post.title || i18n?.t('feed.untitled', {}, 'Untitled') || 'Untitled',
     link,
     content: feedFullText ? rendered.html : '',
     excerpt: rendered.plainExcerpt,
@@ -76,7 +87,9 @@ export async function renderFeedResponse(
   extra: Record<string, unknown>,
 ): Promise<Response> {
   const filteredXml = await applyFilterSafely(pluginCtx, 'feed:render', xml, extra);
-  return xmlResponse(typeof filteredXml === 'string' ? filteredXml : xml, contentType);
+  const response = xmlResponse(typeof filteredXml === 'string' ? filteredXml : xml, contentType);
+  if (extra.autoLocale === true) response.headers.set('Vary', 'Accept-Language');
+  return response;
 }
 
 export function xmlResponse(xml: string, contentType: string): Response {

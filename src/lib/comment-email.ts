@@ -8,7 +8,7 @@
 
 import type { Database } from '@/db';
 import { schema } from '@/db';
-import { sendMail, isValidEmail, type MailResult } from '@/lib/mail';
+import { sendMail, isValidEmail, createMailI18n, type MailResult } from '@/lib/mail';
 import type { HookContext } from '@/lib/plugin';
 import { buildPermalink } from '@/lib/content';
 import { escapeHtml } from '@/lib/escape';
@@ -44,6 +44,11 @@ export interface NotifyCommentConfig {
 export async function notifyOnComment(cfg: NotifyCommentConfig): Promise<void> {
   if (!cfg.options.commentEmailEnabled) return;
 
+  const i18n = createMailI18n(cfg.options, cfg.pluginCtx.activatedPlugins);
+  const siteTitle = String(cfg.options.title || 'Typecho');
+  const contentTitle = cfg.content.title || i18n.t('mail.untitled', {}, 'Untitled');
+  const commentAuthor = cfg.comment.author || i18n.t('mail.anonymous', {}, 'Anonymous');
+
   const url = buildPermalink(cfg.content, cfg.siteUrl, cfg.permalinkPattern, cfg.pagePattern);
   const commentUrl = `${url}#comment-${cfg.comment.coid}`;
 
@@ -69,11 +74,11 @@ export async function notifyOnComment(cfg: NotifyCommentConfig): Promise<void> {
         cfg.pluginCtx,
         {
           to: author.mail,
-          subject: `[${cfg.options.title}] 新的评论 on 《${cfg.content.title}》`,
-          html: `<p>${cfg.comment.author || '匿名'} 在你的文章<a href="${commentUrl}">《${escapeHtml(cfg.content.title || '')}》</a>中发表了评论：</p><blockquote>${escapeHtml(cfg.comment.text || '')}</blockquote><p><a href="${commentUrl}">查看评论</a></p>`,
-          text: `${cfg.comment.author || '匿名'} 在你的文章《${cfg.content.title}》中发表了评论。\n\n${cfg.comment.text}\n\n查看：${commentUrl}`,
+          subject: i18n.t('mail.comment.subject', { siteTitle, contentTitle }, `[${siteTitle}] New comment on "${contentTitle}"`),
+          html: `<p>${escapeHtml(i18n.t('mail.comment.intro', { commentAuthor, contentTitle }, `${commentAuthor} commented on your post "${contentTitle}":`))}</p><blockquote>${escapeHtml(cfg.comment.text || '')}</blockquote><p><a href="${commentUrl}">${escapeHtml(i18n.t('mail.comment.view', {}, 'View comment'))}</a></p>`,
+          text: `${i18n.t('mail.comment.intro', { commentAuthor, contentTitle }, `${commentAuthor} commented on your post "${contentTitle}":`)}\n\n${cfg.comment.text || ''}\n\n${i18n.t('mail.comment.view', {}, 'View comment')}: ${commentUrl}`,
         },
-        { request: cfg.request, options: cfg.options, reason: 'comment' },
+        { request: cfg.request, options: cfg.options, reason: 'comment', i18n },
       ),
     );
   }
@@ -95,11 +100,11 @@ export async function notifyOnComment(cfg: NotifyCommentConfig): Promise<void> {
           cfg.pluginCtx,
           {
             to: parent.mail,
-            subject: `[${cfg.options.title}] 你的评论有新回复`,
-            html: `<p>${cfg.comment.author || '匿名'} 回复了你在<a href="${commentUrl}">《${escapeHtml(cfg.content.title || '')}》</a>中的评论：</p><blockquote>${escapeHtml(cfg.comment.text || '')}</blockquote><p><a href="${commentUrl}">查看回复</a></p>`,
-            text: `${cfg.comment.author || '匿名'} 回复了你在《${cfg.content.title}》中的评论。\n\n${cfg.comment.text}\n\n查看：${commentUrl}`,
+            subject: i18n.t('mail.comment.replySubject', { siteTitle, contentTitle }, `[${siteTitle}] New reply to your comment`),
+            html: `<p>${escapeHtml(i18n.t('mail.comment.replyIntro', { commentAuthor, contentTitle }, `${commentAuthor} replied to your comment on "${contentTitle}":`))}</p><blockquote>${escapeHtml(cfg.comment.text || '')}</blockquote><p><a href="${commentUrl}">${escapeHtml(i18n.t('mail.comment.view', {}, 'View reply'))}</a></p>`,
+            text: `${i18n.t('mail.comment.replyIntro', { commentAuthor, contentTitle }, `${commentAuthor} replied to your comment on "${contentTitle}":`)}\n\n${cfg.comment.text || ''}\n\n${i18n.t('mail.comment.view', {}, 'View reply')}: ${commentUrl}`,
           },
-          { request: cfg.request, options: cfg.options, reason: 'comment-reply' },
+          { request: cfg.request, options: cfg.options, reason: 'comment-reply', i18n },
         ),
       );
     }

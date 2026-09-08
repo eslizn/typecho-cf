@@ -13,7 +13,7 @@ const FEED_ITEMS_MIN = 5;
 const FEED_ITEMS_MAX = 50;
 
 export const GET: APIRoute = async ({ request, locals, params }) => {
-  const { db, options, urls, pluginCtx } = await getFeedRuntime(locals);
+  const { db, options, urls, pluginCtx, i18n, autoLocale } = await getFeedRuntime(locals, request);
 
   const type = params.type || '';
   const isComments = type.includes('comments');
@@ -21,7 +21,7 @@ export const GET: APIRoute = async ({ request, locals, params }) => {
   const isRss1 = type.startsWith('rss');
 
   if (isComments) {
-    return generateCommentsFeed(db, options, urls, pluginCtx, isAtom, isRss1);
+    return generateCommentsFeed(db, options, urls, pluginCtx, i18n, autoLocale, isAtom, isRss1);
   }
 
   // Posts feed
@@ -85,7 +85,7 @@ export const GET: APIRoute = async ({ request, locals, params }) => {
     description: options.description,
     link: urls.siteUrl,
     feedUrl: isAtom ? urls.feedAtomUrl : isRss1 ? urls.feedRssUrl : urls.feedUrl,
-    language: 'zh-CN',
+    i18n,
     lastBuildDate: posts[0] ? new Date((posts[0].created || 0) * 1000) : new Date(),
   };
 
@@ -135,6 +135,8 @@ export const GET: APIRoute = async ({ request, locals, params }) => {
     type,
     options,
     urls,
+    i18n,
+    autoLocale,
   });
 };
 
@@ -143,6 +145,8 @@ async function generateCommentsFeed(
   options: any,
   urls: any,
   pluginCtx: Parameters<typeof applyFilterSafely>[0],
+  i18n: import('@/lib/i18n').I18n,
+  autoLocale: boolean,
   isAtom: boolean,
   isRss1: boolean
 ) {
@@ -161,18 +165,18 @@ async function generateCommentsFeed(
     .limit(10);
 
   const config = {
-    title: `${options.title} - 最近的评论`,
-    description: `${options.title} 上的最近评论`,
+    title: i18n.t('feed.comments.title', { siteTitle: options.title }, `${options.title} - Recent comments`),
+    description: i18n.t('feed.comments.description', { siteTitle: options.title }, `Recent comments on ${options.title}`),
     link: urls.siteUrl,
     feedUrl: isAtom ? urls.commentsFeedAtomUrl : isRss1 ? urls.commentsFeedRssUrl : urls.commentsFeedUrl,
-    language: 'zh-CN',
+    i18n,
     lastBuildDate: recentRows[0] ? new Date((recentRows[0].comment.created || 0) * 1000) : new Date(),
   };
 
   const items: FeedItem[] = [];
   for (const { comment, content } of recentRows) {
     let item: FeedItem = {
-    title: `${comment.author || '匿名'} 的评论`,
+    title: i18n.t('feed.comment.title', { author: comment.author || i18n.t('feed.anonymous', {}, 'Anonymous') }, `${comment.author || 'Anonymous'}'s comment`),
     link: `${buildPermalink(
       { cid: content.cid, slug: content.slug, type: content.type, created: content.created },
       urls.siteUrl,
@@ -206,5 +210,7 @@ async function generateCommentsFeed(
     type: 'comments',
     options,
     urls,
+    i18n,
+    autoLocale,
   });
 }

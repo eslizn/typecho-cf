@@ -3,20 +3,21 @@ import { isAdminActionResponse, requireAdminAction } from '@/lib/admin-auth';
 import { REQUEST_BODY_LIMITS } from '@/lib/constants';
 import { InputError, readBoundedFormData, readBoundedJson } from '@/lib/input';
 import { jsonError, jsonOk } from '@/lib/http';
+import type { I18n } from '@/lib/i18n';
 import {
   getThemeConfigurationView,
   saveThemeConfiguration,
   ThemeConfigurationError,
 } from '@/lib/theme-config';
 
-function domainError(error: unknown, json: boolean): Response {
+function domainError(error: unknown, json: boolean, i18n: I18n): Response {
   if (error instanceof ThemeConfigurationError) {
-    return json ? jsonError(error.status, error.message) : new Response(error.message, { status: error.status });
+    return json ? jsonError(error.status, error.message, undefined, i18n) : new Response(error.message, { status: error.status });
   }
   if (error instanceof InputError) {
-    return json ? jsonError(error.status, error.message) : new Response(error.message, { status: error.status });
+    return json ? jsonError(error.status, error.message, undefined, i18n) : new Response(error.message, { status: error.status });
   }
-  return json ? jsonError(400, '主题配置保存失败') : new Response('主题配置保存失败', { status: 400 });
+  return json ? jsonError(400, '主题配置保存失败', undefined, i18n) : new Response('主题配置保存失败', { status: 400 });
 }
 
 export const GET: APIRoute = async ({ request, url }) => {
@@ -27,7 +28,7 @@ export const GET: APIRoute = async ({ request, url }) => {
   try {
     return jsonOk(getThemeConfigurationView(auth.options, url.searchParams.get('id') || ''));
   } catch (error) {
-    return domainError(error, true);
+    return domainError(error, true, auth.i18n);
   }
 };
 
@@ -66,6 +67,6 @@ export const POST: APIRoute = async ({ request }) => {
       headers: { Location: `/admin/theme-config?id=${encodeURIComponent(result.theme)}&saved=1` },
     });
   } catch (error) {
-    return domainError(error, isJson);
+    return domainError(error, isJson, auth.i18n);
   }
 };

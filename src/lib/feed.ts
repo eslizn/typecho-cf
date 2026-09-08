@@ -3,6 +3,7 @@
  * Corresponds to Typecho's Feed.php
  */
 import { escapeXml, escapeCData } from '@/lib/escape';
+import type { I18n } from '@/lib/i18n';
 
 export interface FeedItem {
   title: string;
@@ -21,6 +22,8 @@ export interface FeedConfig {
   link: string;
   feedUrl: string;
   language?: string;
+  /** Request-local translator used for protocol metadata when language is omitted. */
+  i18n?: I18n;
   lastBuildDate?: Date;
 }
 
@@ -35,7 +38,7 @@ export function generateRss2(config: FeedConfig, items: FeedItem[]): string {
     <title>${escapeXml(config.title)}</title>
     <link>${escapeXml(config.link)}</link>
     <description>${escapeXml(config.description)}</description>
-    <language>${config.language || 'zh-CN'}</language>
+    <language>${escapeXml(config.language || config.i18n?.locale || 'en')}</language>
     <lastBuildDate>${lastBuild.toUTCString()}</lastBuildDate>
     <atom:link href="${escapeXml(config.feedUrl)}" rel="self" type="application/rss+xml"/>
     ${items.map((item) => `<item>

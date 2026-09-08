@@ -209,4 +209,18 @@ describe('GET /feed description vs content (G7-6)', () => {
     expect(xml).not.toContain('<content:encoded>');
     expect(xml).toContain('<description>');
   });
+
+  it('resolves automatic feed language from Accept-Language and varies the response', async () => {
+    await testDb.insert(schema.options).values({ name: 'lang', user: 0, value: '' });
+    await seedContent('automatic-locale-post');
+    const res = await GET({
+      request: new Request('https://example.com/feed/', { headers: { 'accept-language': 'en-US,en;q=0.9' } }),
+      locals: {},
+      params: { type: '' },
+    } as any);
+    const xml = await res.text();
+
+    expect(xml).toContain('<language>en</language>');
+    expect(res.headers.get('vary')).toContain('Accept-Language');
+  });
 });

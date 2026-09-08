@@ -3,20 +3,21 @@ import { isAdminActionResponse, requireAdminAction } from '@/lib/admin-auth';
 import { REQUEST_BODY_LIMITS } from '@/lib/constants';
 import { InputError, readBoundedFormData, readBoundedJson } from '@/lib/input';
 import { jsonError, jsonOk, textError } from '@/lib/http';
+import type { I18n } from '@/lib/i18n';
 import {
   getPluginConfigurationView,
   PluginConfigurationError,
   savePluginConfiguration,
 } from '@/lib/plugin-config';
 
-function domainError(error: unknown, json: boolean): Response {
+function domainError(error: unknown, json: boolean, i18n: I18n): Response {
   if (error instanceof PluginConfigurationError) {
-    return json ? jsonError(error.status, error.message) : textError(error.status, error.message);
+    return json ? jsonError(error.status, error.message, undefined, i18n) : textError(error.status, error.message, undefined, i18n);
   }
   if (error instanceof InputError) {
-    return json ? jsonError(error.status, error.message) : textError(error.status, error.message);
+    return json ? jsonError(error.status, error.message, undefined, i18n) : textError(error.status, error.message, undefined, i18n);
   }
-  return json ? jsonError(400, '插件配置保存失败') : textError(400, '插件配置保存失败');
+  return json ? jsonError(400, '插件配置保存失败', undefined, i18n) : textError(400, '插件配置保存失败', undefined, i18n);
 }
 
 export const GET: APIRoute = async ({ request, url }) => {
@@ -27,7 +28,7 @@ export const GET: APIRoute = async ({ request, url }) => {
   try {
     return jsonOk(getPluginConfigurationView(auth.options, url.searchParams.get('id') || ''));
   } catch (error) {
-    return domainError(error, true);
+    return domainError(error, true, auth.i18n);
   }
 };
 
@@ -66,6 +67,6 @@ export const POST: APIRoute = async ({ request }) => {
       headers: { Location: `/admin/plugin-config?id=${encodeURIComponent(result.plugin)}&saved=1` },
     });
   } catch (error) {
-    return domainError(error, isJson);
+    return domainError(error, isJson, auth.i18n);
   }
 };

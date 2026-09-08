@@ -6,6 +6,7 @@ import {
   isAdminHtmlFormRequest,
   readAdminFlash,
 } from '@/lib/admin-flash';
+import { createI18n } from '@/lib/i18n';
 
 const options = { secret: 'flash-secret', siteUrl: 'https://example.com' } as any;
 
@@ -54,5 +55,23 @@ describe('admin form flash errors', () => {
     expect(adminFallbackForApiPath('/api/admin/content')).toBe('/admin/manage-posts');
     expect(adminFallbackForApiPath('/api/admin/unknown')).toBe('/admin');
     expect(clearAdminFlash(new Request('https://example.com/admin'))).toContain('Max-Age=0');
+  });
+
+  it('preserves a bounded descriptor and resolves it with the display locale', async () => {
+    const request = new Request('https://example.com/api/admin/user', {
+      method: 'POST',
+      headers: { referer: 'https://example.com/admin/user' },
+    });
+    const response = await createAdminErrorRedirect(request, options, 7, {
+      key: 'admin.error.greeting',
+      variables: { name: 'Alice' },
+      fallbackText: 'Hello, {name}',
+    }, '/admin');
+    const cookie = response.headers.get('set-cookie')!.split(';', 1)[0];
+    const nextRequest = new Request('https://example.com/admin/user', { headers: { cookie } });
+    const i18n = createI18n({ locale: 'en', catalogs: { en: { 'admin.error.greeting': 'Welcome, {name}' } } });
+
+    expect(await readAdminFlash(nextRequest, options, 7, i18n)).toBe('Welcome, Alice');
+    expect(await readAdminFlash(nextRequest, options, 7)).toBe('Hello, Alice');
   });
 });

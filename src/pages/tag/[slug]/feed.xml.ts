@@ -7,12 +7,12 @@ import { publishedPostCondition } from '@/lib/content-visibility';
 
 export const GET: APIRoute = async ({ request, locals, params }) => {
   const slug = params.slug || '';
-  const { db, options, urls, pluginCtx } = await getFeedRuntime(locals);
+  const { db, options, urls, pluginCtx, i18n, autoLocale } = await getFeedRuntime(locals, request);
 
   const tag = await db.query.metas.findFirst({
     where: and(eq(schema.metas.type, 'tag'), eq(schema.metas.slug, slug)),
   });
-  if (!tag) return new Response('Not Found', { status: 404 });
+  if (!tag) return new Response(i18n.t('core.error.notFound', {}, 'Not Found'), { status: 404 });
 
   const limit = clampFeedItems(options.feedItems);
   const rows = await db
@@ -32,15 +32,22 @@ export const GET: APIRoute = async ({ request, locals, params }) => {
   const items = [];
   for (const { contents: p } of rows) {
     items.push(
-      await buildFeedItem(p, urls.siteUrl, options.permalinkPattern as string | undefined, undefined, pluginCtx, !!(options.feedFullText)),
+      await buildFeedItem(p, urls.siteUrl, options.permalinkPattern as string | undefined, undefined, pluginCtx, !!(options.feedFullText), i18n),
     );
   }
 
-  const config = { title: `${options.title} - 标签：${tag.name}`, link: `${urls.siteUrl}/tag/${slug}/`, description: '', feedUrl: urls.siteUrl, language: 'zh-CN', lastBuildDate: items[0]?.date || new Date() };
+  const config = {
+    title: i18n.t('feed.tag.title', { siteTitle: options.title, tag: tag.name || '' }, `${options.title} - Tag: ${tag.name || ''}`),
+    link: `${urls.siteUrl}/tag/${slug}/`,
+    description: '',
+    feedUrl: urls.siteUrl,
+    i18n,
+    lastBuildDate: items[0]?.date || new Date(),
+  };
   return renderFeedResponse(
     pluginCtx,
     generateRss2(config, items),
     'application/rss+xml; charset=utf-8',
-    { requestUrl: new URL(request.url), type: params.slug || '', options, urls },
+    { requestUrl: new URL(request.url), type: params.slug || '', options, urls, i18n, autoLocale },
   );
 };

@@ -65,7 +65,7 @@ export async function loadSidebarData(
   if (cached && cached.key === cacheKey && cached.expiresAt > Date.now()) {
     return await applyFilterSafely(
       ctx,
-      'widget:sidebar',
+      'sidebar:data',
       cloneSidebarData(cached.data),
       db,
       siteUrl,
@@ -183,8 +183,8 @@ export async function loadSidebarData(
     data: sidebarData,
   };
 
-  // Apply widget:sidebar filter — plugins can add/modify sidebar widgets
-  return await applyFilterSafely(ctx, 'widget:sidebar', cloneSidebarData(sidebarData), db, siteUrl);
+  // Apply sidebar:data filter — plugins can add/modify sidebar widgets
+  return await applyFilterSafely(ctx, 'sidebar:data', cloneSidebarData(sidebarData), db, siteUrl);
 }
 
 /**

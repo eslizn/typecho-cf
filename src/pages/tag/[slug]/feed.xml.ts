@@ -1,11 +1,11 @@
 import type { APIRoute } from 'astro';
 import { schema } from '@/db';
 import { generateRss2 } from '@/lib/feed';
-import { clampFeedItems, buildFeedItem, getFeedRuntime, xmlResponse } from '@/lib/feed-helpers';
+import { clampFeedItems, buildFeedItem, getFeedRuntime, renderFeedResponse } from '@/lib/feed-helpers';
 import { eq, and, desc } from 'drizzle-orm';
 import { publishedPostCondition } from '@/lib/content-visibility';
 
-export const GET: APIRoute = async ({ locals, params }) => {
+export const GET: APIRoute = async ({ request, locals, params }) => {
   const slug = params.slug || '';
   const { db, options, urls, pluginCtx } = await getFeedRuntime(locals);
 
@@ -37,5 +37,10 @@ export const GET: APIRoute = async ({ locals, params }) => {
   }
 
   const config = { title: `${options.title} - 标签：${tag.name}`, link: `${urls.siteUrl}/tag/${slug}/`, description: '', feedUrl: urls.siteUrl, language: 'zh-CN', lastBuildDate: items[0]?.date || new Date() };
-  return xmlResponse(generateRss2(config, items), 'application/rss+xml; charset=utf-8');
+  return renderFeedResponse(
+    pluginCtx,
+    generateRss2(config, items),
+    'application/rss+xml; charset=utf-8',
+    { requestUrl: new URL(request.url), type: params.slug || '', options, urls },
+  );
 };

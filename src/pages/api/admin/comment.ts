@@ -36,7 +36,7 @@ export const POST: APIRoute = async ({ request, url }) => {
   if (!candidate.author || !candidate.text) return new Response('作者和内容不能为空', { status: 400 });
   let filtered: Record<string, unknown>;
   try {
-    filtered = validateFilteredComment(baseline, await applyFilter(auth.pluginCtx, 'feedback:comment', candidate, {
+    filtered = validateFilteredComment(baseline, await applyFilter(auth.pluginCtx, 'comment:beforeSave', candidate, {
       request, formData: form, db: auth.db, options: auth.options, isLoggedIn: true, editing: true,
     }));
   } catch (error) {

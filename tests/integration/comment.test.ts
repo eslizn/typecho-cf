@@ -346,7 +346,7 @@ describe('POST /api/comment', () => {
     await seedOptions(testDb);
     const content = await seedContent(testDb);
     mockApplyFilter.mockImplementation(async (_ctx: any, hook: string, data: any) => {
-      if (hook === 'feedback:comment') return { ...data, status: 'spam' };
+      if (hook === 'comment:beforeSave') return { ...data, status: 'spam' };
       return data;
     });
 
@@ -366,7 +366,7 @@ describe('POST /api/comment', () => {
   it('restores protected ownership and relationship fields after filtering', async () => {
     await seedOptions(testDb);
     const content = await seedContent(testDb, { authorId: 7 });
-    mockApplyFilter.mockImplementation(async (_ctx: any, hook: string, data: any) => hook === 'feedback:comment'
+    mockApplyFilter.mockImplementation(async (_ctx: any, hook: string, data: any) => hook === 'comment:beforeSave'
       ? { ...data, text: 'Valid transformation', cid: 999, authorId: 88, ownerId: 99, parent: 123, type: 'trackback' }
       : data);
 

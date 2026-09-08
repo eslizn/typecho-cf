@@ -298,7 +298,7 @@ LD("");
 
 export default function init({ addHook, pluginId }: PluginInitContext): void {
   registerPluginAdminPath(ADMIN_API_ROUTE);
-  // Default front-end route; the route:request handler below re-registers
+  // Default front-end route; the request:route handler below re-registers
   // the configured routePath lazily (configurable via admin settings), so a
   // cold isolate with a non-default routePath still gets cache exemptions.
   registerPluginRoute('/webdav');
@@ -334,7 +334,7 @@ export default function init({ addHook, pluginId }: PluginInitContext): void {
   );
 
   addHook(
-    'route:request',
+    'request:route',
     pluginId,
     async (result: PluginRouteResult, extra?: {
       request?: Request; url?: URL; path?: string; db?: Database;

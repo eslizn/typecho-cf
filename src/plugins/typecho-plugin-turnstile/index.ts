@@ -173,7 +173,7 @@ function buildSnippet(options: Record<string, unknown> | undefined, formId: stri
 <p id="${statusIdAttr}" class="typecho-turnstile-status" aria-live="polite"></p>
 </div>`;
 
-  // archive:footer is rendered just before </body>. Move the comment widget
+  // frontend:footer is rendered just before </body>. Move the comment widget
   // into the form so it stays next to the action it protects instead of
   // appearing at the bottom of the whole page.
   const placementHtml = formId === 'comment-form' ? `<script is:inline>
@@ -294,7 +294,7 @@ export default function init({ addHook, pluginId }: PluginInitContext): void {
     return directives;
   });
 
-  addHook('feedback:comment', pluginId, async (commentData: MutableContext, extra?: VerificationExtra) => {
+  addHook('comment:beforeSave', pluginId, async (commentData: MutableContext, extra?: VerificationExtra) => {
     if (!extra?.options) return commentData;
 
     const config = getPluginConfig(extra.options);
@@ -305,29 +305,29 @@ export default function init({ addHook, pluginId }: PluginInitContext): void {
     return commentData;
   });
 
-  addHook('archive:header', pluginId, (headHtml: string, extra?: { options?: Record<string, unknown>; pageContext?: { hasComments?: boolean } }) => {
+  addHook('frontend:head', pluginId, (headHtml: string, extra?: { options?: Record<string, unknown>; pageContext?: { hasComments?: boolean } }) => {
     if (!extra?.pageContext?.hasComments) return headHtml;
     const snippet = buildSnippet(extra?.options, 'comment-form');
     return headHtml + snippet.headHtml;
   });
 
-  addHook('archive:footer', pluginId, (bodyHtml: string, extra?: { options?: Record<string, unknown>; pageContext?: { hasComments?: boolean } }) => {
+  addHook('frontend:footer', pluginId, (bodyHtml: string, extra?: { options?: Record<string, unknown>; pageContext?: { hasComments?: boolean } }) => {
     if (!extra?.pageContext?.hasComments) return bodyHtml;
     const snippet = buildSnippet(extra?.options, 'comment-form');
     return bodyHtml + snippet.bodyHtml;
   });
 
-  addHook('admin:loginHead', pluginId, (headHtml: string, extra?: { options?: Record<string, unknown> }) => {
+  addHook('admin:login:head', pluginId, (headHtml: string, extra?: { options?: Record<string, unknown> }) => {
     const snippet = buildSnippet(extra?.options, 'login-form');
     return headHtml + snippet.headHtml;
   });
 
-  addHook('admin:loginForm', pluginId, (formHtml: string, extra?: { options?: Record<string, unknown> }) => {
+  addHook('admin:login:form', pluginId, (formHtml: string, extra?: { options?: Record<string, unknown> }) => {
     const snippet = buildSnippet(extra?.options, 'login-form');
     return formHtml + snippet.bodyHtml;
   });
 
-  addHook('user:login', pluginId, async (loginContext: MutableContext, extra?: VerificationExtra) => {
+  addHook('user:login:before', pluginId, async (loginContext: MutableContext, extra?: VerificationExtra) => {
     if (!extra?.options) return loginContext;
 
     const config = getPluginConfig(extra.options);
@@ -340,7 +340,7 @@ export default function init({ addHook, pluginId }: PluginInitContext): void {
 }
 
 /**
- * @deprecated Use archive:header / archive:footer hooks instead.
+ * @deprecated Use frontend:head / frontend:footer hooks instead.
  * Kept for backward compatibility.
  */
 export function getClientSnippet(options?: Record<string, unknown>): { headHtml: string; bodyHtml: string } {

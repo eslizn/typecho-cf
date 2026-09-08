@@ -194,7 +194,7 @@ function rejectComment(commentData: MutableCommentData, mode: SpamMode, reason: 
 }
 
 export default function init({ addHook, pluginId }: PluginInitContext): void {
-  addHook('feedback:comment', pluginId, async (
+  addHook('comment:beforeSave', pluginId, async (
     commentData: MutableCommentData,
     extra?: HookExtra,
   ) => {
@@ -240,7 +240,7 @@ export default function init({ addHook, pluginId }: PluginInitContext): void {
     return commentData;
   });
 
-  addHook('archive:footer', pluginId, async (
+  addHook('frontend:footer', pluginId, async (
     bodyHtml: string,
     extra?: { options?: Record<string, unknown>; pageContext?: { hasComments?: boolean } },
   ) => {

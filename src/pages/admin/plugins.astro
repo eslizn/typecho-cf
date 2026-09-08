@@ -209,11 +209,6 @@ const initFailures = getPluginInitFailures();
             </tbody>
           </table>
         </div>
-        <details class="typecho-mini-panel" style="margin-top: 20px; padding: 12px 16px;">
-          <summary><strong>写入 Hook 安全约定</strong></summary>
-          <p><code>post:write</code> / <code>page:write</code> 仅可修改标题、slug、时间、正文、排序、模板、状态、密码与三个 allow 开关；作者、内容类型、标识和分类/标签关系不可修改。</p>
-          <p><code>feedback:comment</code> 仅可修改作者显示信息、正文和审核状态，或设置 <code>_rejected</code>；文章、账号、归属、来源、类型与父评论字段不可修改。所有返回值在写库前都会重新校验。</p>
-        </details>
       </>
     )}
 

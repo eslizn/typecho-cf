@@ -7,6 +7,8 @@ import {
   doHook,
   applyFilter,
   hasHook,
+  normalizeHookPoint,
+  removePluginHooks,
   setActivatedPlugins,
   registerPluginInit,
   registerPluginLoaders,
@@ -20,6 +22,39 @@ import {
 function mockCtx(): HookContext {
   return { activatedPlugins: new Set<string>() };
 }
+
+describe('canonical Hook point names', () => {
+  it('exposes canonical values and deprecated aliases', () => {
+    expect(normalizeHookPoint('system:begin')).toBe('request:begin');
+    expect(normalizeHookPoint('content:content')).toBe('content:rendered');
+    expect(normalizeHookPoint('content:filter')).toBe('content:data');
+    expect(normalizeHookPoint('upload:upload')).toBe('upload:after');
+    expect(normalizeHookPoint('plugin:demo:action:auth')).toBe('plugin:demo:action:authorize');
+    expect(normalizeHookPoint('plugin:demo:action')).toBe('plugin:demo:action');
+  });
+
+  it('returns canonical values from the public constants for legacy keys', async () => {
+    const { HookPoints } = await import('@/lib/plugin');
+    expect(HookPoints['request:begin']).toBe('request:begin');
+    expect(HookPoints['system:begin']).toBe('request:begin');
+    expect(HookPoints['content:rendered']).toBe('content:rendered');
+    expect(HookPoints['content:content']).toBe('content:rendered');
+  });
+
+  it('deduplicates a handler registered through canonical and legacy names', async () => {
+    const pluginId = 'p-canonical-dedupe';
+    const ctx = mockCtx();
+    await setActivatedPlugins(ctx, [pluginId]);
+    const handler = vi.fn();
+
+    addHook('request:begin', pluginId, handler);
+    addHook('system:begin', pluginId, handler);
+    await doHook(ctx, 'system:begin');
+
+    expect(handler).toHaveBeenCalledOnce();
+    removePluginHooks(pluginId);
+  });
+});
 
 describe('addHook deduplication (G6-1)', () => {
   let ctx: HookContext;

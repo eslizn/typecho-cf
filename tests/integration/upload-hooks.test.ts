@@ -25,11 +25,11 @@ vi.mock('@/lib/plugin', async () => {
     parseActivatedPlugins: () => [],
     setActivatedPlugins: () => {},
     applyFilter: async (_ctx: any, hook: string, value: any, ...args: any[]) => {
-      if (hook === 'upload:beforeUpload') return await beforeUploadHook(value, ...args);
+      if (hook === 'upload:before') return await beforeUploadHook(value, ...args);
       return value;
     },
     doHook: async (_ctx: any, hook: string, ...args: any[]) => {
-      if (hook === 'upload:upload') await uploadHook(...args);
+      if (hook === 'upload:after') await uploadHook(...args);
       else if (hook === 'upload:delete') await deleteHook(...args);
     },
   };
@@ -113,7 +113,7 @@ describe('upload endpoint (G5-4 + G5-5)', () => {
     expect(lastStatus).toBe(429);
   });
 
-  it('fires upload:beforeUpload and upload:upload hooks (G5-5)', async () => {
+  it('fires upload:before and upload:after hooks (G5-5)', async () => {
     const cookie = await adminCookie();
     const csrfToken = await csrf();
     const res = await POST({
@@ -137,7 +137,7 @@ describe('upload endpoint (G5-4 + G5-5)', () => {
     expect(r2Put).not.toHaveBeenCalled();
   });
 
-  it('upload:beforeUpload can reject the upload', async () => {
+  it('upload:before can reject the upload', async () => {
     beforeUploadHook.mockImplementationOnce(async () => ({ rejected: 'too big' }));
     const cookie = await adminCookie();
     const csrfToken = await csrf();

@@ -1,11 +1,11 @@
 import type { APIRoute } from 'astro';
 import { schema } from '@/db';
 import { generateRss2, generateAtom } from '@/lib/feed';
-import { clampFeedItems, buildFeedItem, getFeedRuntime, xmlResponse } from '@/lib/feed-helpers';
+import { clampFeedItems, buildFeedItem, getFeedRuntime, renderFeedResponse } from '@/lib/feed-helpers';
 import { eq, and, desc } from 'drizzle-orm';
 import { publishedPostCondition } from '@/lib/content-visibility';
 
-export const GET: APIRoute = async ({ locals, params }) => {
+export const GET: APIRoute = async ({ request, locals, params }) => {
   const slug = params.slug || '';
   const { db, options, urls, pluginCtx } = await getFeedRuntime(locals);
 
@@ -39,5 +39,10 @@ export const GET: APIRoute = async ({ locals, params }) => {
   const isAtom = params.slug?.startsWith('atom-');
   const config = { title: `${options.title} - 分类：${cat.name}`, link: `${urls.siteUrl}/category/${slug}/`, description: '', feedUrl: urls.siteUrl, language: 'zh-CN', lastBuildDate: items[0]?.date || new Date() };
   const xml = isAtom ? generateAtom(config, items) : generateRss2(config, items);
-  return xmlResponse(xml, isAtom ? 'application/atom+xml; charset=utf-8' : 'application/rss+xml; charset=utf-8');
+  return renderFeedResponse(
+    pluginCtx,
+    xml,
+    isAtom ? 'application/atom+xml; charset=utf-8' : 'application/rss+xml; charset=utf-8',
+    { requestUrl: new URL(request.url), type: params.slug || '', options, urls },
+  );
 };

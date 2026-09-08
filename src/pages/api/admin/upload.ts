@@ -53,9 +53,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
       return jsonError(400, '没有上传文件');
     }
 
-    // G5-5: upload:beforeUpload — plugins can reject the upload by
+    // upload:before — plugins can reject the upload by
     // returning { rejected: 'reason' } in the filter result.
-    const beforeResult = await applyFilter(pluginCtx, 'upload:beforeUpload', { rejected: null as string | null }, {
+    const beforeResult = await applyFilter(pluginCtx, 'upload:before', { rejected: null as string | null }, {
       file, request, options, user: ctx.user,
     });
     if (beforeResult?.rejected) {
@@ -91,8 +91,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
     // file.type from the multipart upload.
     const cid = inserted[0]?.cid;
 
-    // G5-5: upload:upload — fire-and-forget post-upload notification.
-    await doHook(pluginCtx, 'upload:upload', { ...result, cid }, { request, options, user: ctx.user });
+    // upload:after — post-upload notification.
+    await doHook(pluginCtx, 'upload:after', { ...result, cid }, { request, options, user: ctx.user });
 
     return jsonOk([
       result.url,

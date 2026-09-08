@@ -18,7 +18,7 @@ const BASE_REQUIRED_GROUP = 'contributor';
 
 /**
  * Default role required to invoke a plugin action when the plugin has not
- * declared one via the `plugin:<id>:action:auth` filter. Kept at
+ * declared one via the `plugin:<id>:action:authorize` filter. Kept at
  * administrator so a plugin that ships a new action without updating its
  * auth filter fails closed rather than open.
  */
@@ -58,7 +58,7 @@ export const POST: APIRoute = async ({ request }) => {
   // opted in fails closed. Handlers return the plain group string.
   let requiredGroup = DEFAULT_ACTION_ROLE;
   try {
-    const declared = await applyFilter(pluginCtx, `plugin:${pluginId}:action:auth`, DEFAULT_ACTION_ROLE, {
+  const declared = await applyFilter(pluginCtx, `plugin:${pluginId}:action:authorize`, DEFAULT_ACTION_ROLE, {
       action,
       payload: body.payload || {},
       user: auth.user,

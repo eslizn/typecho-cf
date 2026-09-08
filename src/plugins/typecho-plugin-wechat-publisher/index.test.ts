@@ -75,7 +75,7 @@ describe('typecho-plugin-wechat-publisher', () => {
       'admin:managePosts:titleActions',
       'plugin:config:beforeSave',
       'plugin:typecho-plugin-wechat-publisher:action',
-      'plugin:typecho-plugin-wechat-publisher:action:auth',
+      'plugin:typecho-plugin-wechat-publisher:action:authorize',
     ]);
   });
 

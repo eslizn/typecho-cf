@@ -29,7 +29,12 @@ export async function saveIncomingFeedback(
     ip: input.ip, agent: input.agent.slice(0, 255), text: input.text.slice(0, 10000), type: input.type,
     status: options.commentsRequireModeration ? 'waiting' : 'approved', parent: 0,
   };
-  const filtered = await applyFilter(pluginCtx, `feedback:${input.type}`, baseline, { db, options, content });
+  const filtered = await applyFilter(
+    pluginCtx,
+    input.type === 'trackback' ? 'feedback:trackback:before' : 'feedback:pingback:before',
+    baseline,
+    { db, options, content },
+  );
   const value = { ...baseline, ...(filtered as Record<string, unknown>) };
   const status = value.status === 'approved' ? 'approved' : 'waiting';
   const inserted = await db.insert(schema.comments).values({
@@ -41,6 +46,10 @@ export async function saveIncomingFeedback(
     await db.update(schema.contents).set({ commentsNum: sql`${schema.contents.commentsNum} + 1` }).where(eq(schema.contents.cid, input.cid));
   }
   const row = { ...value, cid: input.cid, coid: inserted[0]?.coid };
-  await doHook(pluginCtx, `feedback:finish${input.type === 'trackback' ? 'Trackback' : 'Pingback'}`, row);
+  await doHook(
+    pluginCtx,
+    input.type === 'trackback' ? 'feedback:trackback:after' : 'feedback:pingback:after',
+    row,
+  );
   return inserted[0]?.coid || 0;
 }

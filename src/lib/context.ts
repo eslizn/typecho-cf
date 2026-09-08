@@ -135,8 +135,8 @@ async function buildContext(locals: InternalLocals, request: Request): Promise<R
     ? await generateSecurityToken(options.secret as string, ctx.user.authCode!, ctx.user.uid)
     : null;
 
-  // Trigger system:begin hook
-  await doHook(ctx, 'system:begin', ctx);
+  // Trigger request:begin after the request context is ready.
+  await doHook(ctx, 'request:begin', ctx);
 
   return ctx;
 }

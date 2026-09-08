@@ -113,12 +113,12 @@ import type { PluginInitContext } from 'typecho/plugin-sdk';
 
 export default function init({ addHook, pluginId }: PluginInitContext): void {
   // filter hook: transform data and return it
-  addHook('content:content', pluginId, (html: string) => {
+  addHook('content:rendered', pluginId, (html: string) => {
     return html + '<!-- powered by example plugin -->';
   });
 
   // call hook: side effects, no return value needed
-  addHook('feedback:finishComment', pluginId, (comment: { coid?: number }) => {
+  addHook('comment:afterCreate', pluginId, (comment: { coid?: number }) => {
     console.log('New comment:', comment.coid);
   });
 }
@@ -140,7 +140,7 @@ Inside a filter/call handler, read config from the `extra.options` object passed
 ```ts
 import { loadPluginConfig } from 'typecho/plugin-sdk';
 
-addHook('feedback:comment', pluginId, async (commentData: { _rejected?: string }, extra?: { options?: Record<string, unknown> }) => {
+addHook('comment:beforeSave', pluginId, async (commentData: { _rejected?: string }, extra?: { options?: Record<string, unknown> }) => {
   if (!extra?.options) return commentData;
 
   // Read this plugin's config (auto-merged with typecho.plugin.config defaults)
@@ -161,7 +161,7 @@ Config storage: `typecho_options` table, `name = "plugin:<pluginId>"`, value is 
 
 ## Currently Wired Hook Reference
 
-Plugins must only depend on the hooks listed below, which have explicit runtime call sites. Unlisted `HookPoints` constants have no call guarantee.
+The following is the complete list of canonical hook names with explicit runtime call sites. New plugins should use these names; unlisted `HookPoints` constants have no call guarantee.
 
 Adding a hook requires updating `HookPoints`, the call site, and this guide together.
 
@@ -169,45 +169,69 @@ Adding a hook requires updating `HookPoints`, the call site, and this guide toge
 
 | Hook | Trigger Location | Arguments |
 |------|-----------------|-----------|
-| `system:begin` | Every request init | `(context)` |
-| `post:finishPublish` | After post published | `(post)` |
-| `post:finishSave` | After post saved | `(post)` |
-| `post:delete` | Before post deleted | `(post)` |
-| `post:finishDelete` | After post deleted | `(post)` |
-| `page:finishPublish` | After page published | `(page)` |
-| `page:finishSave` | After page saved | `(page)` |
-| `page:delete` | Before page deleted | `(page)` |
-| `page:finishDelete` | After page deleted | `(page)` |
-| `feedback:finishComment` | After comment saved | `(comment)` |
+| `request:begin` / `request:end` | Request context ready / response finalized | `(context)` / `({ request, response })` |
+| `admin:begin` / `admin:end` | Admin layout starts / admin layout data is ready | `(context)` |
+| `archive:init` | Archive or single-content initialization | `(context)` |
+| `archive:index` / `archive:single` / `archive:category` / `archive:tag` / `archive:author` / `archive:search` | Before the corresponding archive or single-content preparation | `(context)` |
+| `archive:beforeRender` / `archive:afterRender` | Frontend document response before / after rendering | `(context)` / `({ ..., response })` |
+| `post:afterPublish` / `post:afterSave` | After post publish / save | `(post)` |
+| `post:beforeDelete` / `post:afterDelete` | Before / after post deletion | `(post)` |
+| `page:afterPublish` / `page:afterSave` | After page publish / save | `(page)` |
+| `page:beforeDelete` / `page:afterDelete` | Before / after page deletion | `(page)` |
+| `comment:afterCreate` | After comment save | `(comment)` |
+| `feedback:trackback:after` | After Trackback persistence | `(comment, extra)` |
+| `feedback:pingback:after` | After Pingback persistence | `(comment, extra)` |
+| `comment:reply` | After a reply comment is saved | `(comment, { parent })` |
 | `comment:action` | After a moderation action | `(comment, extra)` |
-| `upload:upload` | After file uploaded | `(upload, extra)` |
+| `user:login:success` / `user:login:failure` | Login success / rejection | `(summary)` / `({ request, reason })` |
+| `user:logout` | After logout cookies are cleared | `({ request })` |
+| `user:register:after` | After user persistence | `(userSummary)` |
+| `upload:after` | After file upload persistence | `(upload, extra)` |
 | `upload:delete` | After attachment deletion | `(attachment, extra)` |
 
 ### filter type (must return a value)
 
 | Hook | Trigger Location | Arguments | Description |
 |------|-----------------|-----------|-------------|
-| `route:request` | Middleware route dispatch | `(result, extra)` | Handles plugin routes; admin/API paths also require `registerPluginAdminPath` |
-| `admin:header` / `admin:footer` | Admin head/footer | `(html, extra)` | Safe display-oriented HTML injection |
-| `admin:loginHead` / `admin:loginForm` | Login head/form | `(html, extra)` | Login-page HTML injection |
-| `admin:writePost:bottom` / `admin:writePage:bottom` | Editor footer | `(html, extra)` | Injects editor UI |
-| `admin:managePosts:titleActions` | Post-list title actions | `(html, extra)` | Adds per-post admin actions |
+| `request:route` | Middleware route dispatch | `(result, extra)` | Handles plugin routes; admin/API paths also require `registerPluginAdminPath` |
+| `admin:head` / `admin:footer` | Admin head/footer | `(html, extra)` | Safe display-oriented HTML injection |
+| `admin:nav` | Admin navigation generation | `(groups, extra)` | Adjusts menu groups/items; hrefs are checked to stay on same-origin admin paths or anchors |
+| `admin:login:head` / `admin:login:form` | Login head/form | `(html, extra)` | Login-page HTML injection |
 | `admin:page` | `/admin/plugin/[slug]` | `(html, extra)` | Renders a plugin-owned admin page |
-| `archive:header` / `archive:footer` | Frontend head/footer | `(html, extra)` | Theme-independent frontend HTML/JS injection |
-| `content:markdown` | Before Markdown render | `(markdown, post)` | Filter raw Markdown text |
-| `content:content` | After Markdown render | `(html, post)` | Filter output HTML |
-| `post:write` | Before post save | `(data, extra)` | Filter post write data |
-| `page:write` | Before page save | `(data, extra)` | Filter page write data |
-| `feedback:comment` | Before comment save | `(commentData, extra)` | Validate/modify comment; set `_rejected` to reject |
-| `user:login` | Before password verification | `(context, extra)` | Set `_rejected` to reject login |
-| `upload:beforeUpload` | Before upload write | `(result, extra)` | Return a rejection reason to stop upload |
-| `feed:item` | RSS/Atom generation | `(item, post)` | Filter feed item |
-| `widget:sidebar` | Sidebar render | `(sidebarData, context)` | Filter sidebar data |
+| `admin:writePost:option` / `admin:writePost:advanceOption` / `admin:writePost:bottom` | Post editor option/advanced/footer areas | `(html, extra)` | Injects editor UI |
+| `admin:writePage:option` / `admin:writePage:advanceOption` / `admin:writePage:bottom` | Page editor option/advanced/footer areas | `(html, extra)` | Injects editor UI |
+| `admin:managePosts:titleActions` | Post-list title actions | `(html, extra)` | Adds per-post admin actions |
+| `admin:profile:bottom` | Profile-page footer | `(html, extra)` | Injects profile UI |
+| `plugin:config:beforeSave` | Before plugin config save | `(result, extra)` | Validate or normalize plugin config; return `{ success, settings?, error? }` |
+| `archive:query` | Before archive query construction | `(state, context)` | Adjusts page/page size or supplies safe extra SQL; visibility and archive scope remain protected |
+| `frontend:head` / `frontend:footer` | Frontend head/footer | `(html, extra)` | Theme-independent frontend HTML/JS injection |
+| `content:data` | After content data is loaded | `(content, extra)` | Changes display data; query, permission, identity, and permalink fields are protected |
+| `content:title` | Before displaying a content title | `(title, extra)` | Changes the display title |
+| `content:excerpt` | Before displaying a content excerpt | `(excerpt, extra)` | Changes the display excerpt |
+| `content:markdown` | Before Markdown rendering | `(markdown, extra?)` | Filters raw Markdown text |
+| `content:rendered` | After Markdown sanitization | `(html, extra?)` | Filters final post HTML |
+| `comment:data` | After comment display data is loaded | `(comment, extra)` | Changes display fields; identity, moderation, and tree fields are protected |
+| `comment:markdown` | Before comment Markdown rendering | `(markdown, extra?)` | Filters raw comment Markdown |
+| `comment:rendered` | After comment HTML sanitization | `(html, extra?)` | Filters final comment HTML |
+| `post:write` | Before post save | `(data, extra)` | Filters declared post fields; the result is revalidated |
+| `page:write` | Before page save | `(data, extra)` | Filters declared page fields; authorId, type, cid, and relations are protected |
+| `comment:beforeSave` | Before comment save | `(commentData, extra)` | Validates/modifies author, mail, url, text, and status; `_rejected` rejects |
+| `feedback:trackback:before` | Before Trackback persistence | `(data, extra)` | Validates or normalizes incoming feedback data |
+| `feedback:pingback:before` | Before Pingback persistence | `(data, extra)` | Validates or normalizes incoming feedback data |
+| `user:login:before` | Before password verification | `(context, extra)` | Set `_rejected` to reject login; the password is never passed to the hook |
+| `user:register:before` | Before user persistence | `(data, extra)` | Validates/normalizes public registration fields; password, permissions, and auth code remain system-owned |
+| `upload:before` | Before upload persistence | `(result, extra)` | Return a rejection reason to stop upload |
+| `feed:item` | After each RSS/Atom/RSS1 item is built | `(item, extra?)` | Filters one feed item |
+| `feed:render` | After the complete XML document is built | `(xml, extra)` | Filters the complete RSS/Atom/RSS1 document; content type and cache headers remain system-owned |
+| `sidebar:data` | After sidebar data is built | `(sidebarData, extra)` | Filters sidebar data |
 | `csp:directives` | Security-header generation | `(directives, extra)` | Append required CSP sources without clearing defaults |
 | `mail:send` | Mail adapter dispatch | `(result, extra)` | The first plugin returning `sent: true` completes delivery |
-| `plugin:config:beforeSave` | Before plugin config save | `(result, extra)` | Validate or normalize plugin config; return `{ success, settings?, error? }` |
-| `plugin:<id>:action:auth` | Plugin-action authorization | `(role, extra)` | Declares the minimum role for an action; default is administrator |
+| `plugin:<id>:action:authorize` | Plugin-action authorization | `(role, extra)` | Declares the minimum role for an action; default is administrator |
 | `plugin:<id>:action` | `/api/admin/plugin-action` | `(result, extra)` | Runs a plugin admin action and returns a handled result |
+
+### Compatibility aliases
+
+Legacy names are normalized to their canonical names so existing plugins continue to work, but new code should not register them. Important mappings include: `system:begin → request:begin`, `system:end → request:end`, `route:request → request:route`, `archive:header/footer → frontend:head/footer`, `content:filter → content:data`, `content:content → content:rendered`, `feedback:comment → comment:beforeSave`, `upload:beforeUpload → upload:before`, `upload:upload → upload:after`, `feed:generate → feed:render`, and `widget:sidebar → sidebar:data`. See `DeprecatedHookPointAliases` for the complete mapping.
 
 `applyFilter` propagates plugin exceptions by default. Business flows such as content saving, comments, login, and plugin configuration will stop and surface the error. Presentation-only injection points can be wrapped by `applyFilterSafely`; when one plugin fails, that plugin output is skipped and rendering continues.
 
@@ -215,10 +239,10 @@ Adding a hook requires updating `HookPoints`, the call site, and this guide toge
 
 ## Rejecting Comments
 
-In a `feedback:comment` filter, set `commentData._rejected` to reject the comment:
+In a `comment:beforeSave` filter, set `commentData._rejected` to reject the comment:
 
 ```ts
-addHook('feedback:comment', pluginId, async (commentData, extra) => {
+addHook('comment:beforeSave', pluginId, async (commentData, extra) => {
   if (spamDetected) {
     commentData._rejected = 'Spam detected';  // Non-empty string = rejected with 403
   }
@@ -230,7 +254,7 @@ addHook('feedback:comment', pluginId, async (commentData, extra) => {
 
 ## Providing Client-Side Code to Themes
 
-Plugins can automatically inject HTML/JS into frontend pages via `archive:header` and `archive:footer` filters — no theme modification required:
+Plugins can automatically inject HTML/JS into frontend pages via `frontend:head` and `frontend:footer` filters — no theme modification required:
 
 ```ts
 // index.ts
@@ -239,14 +263,14 @@ import { loadPluginConfig } from 'typecho/plugin-sdk';
 
 export default function init({ addHook, pluginId }: PluginInitContext): void {
   // Inject <head> content (e.g., SDK scripts)
-  addHook('archive:header', pluginId, (headHtml: string, extra?: { options?: Record<string, unknown> }) => {
+  addHook('frontend:head', pluginId, (headHtml: string, extra?: { options?: Record<string, unknown> }) => {
     const config = loadPluginConfig(extra?.options, pluginId);
     if (!config.sitekey) return headHtml;
     return headHtml + '<script src="..."></script>';
   });
 
   // Inject content before </body> (e.g., interaction scripts)
-  addHook('archive:footer', pluginId, (bodyHtml: string, extra?: { options?: Record<string, unknown> }) => {
+  addHook('frontend:footer', pluginId, (bodyHtml: string, extra?: { options?: Record<string, unknown> }) => {
     const config = loadPluginConfig(extra?.options, pluginId);
     if (!config.sitekey) return bodyHtml;
     return bodyHtml + '<script>/* ... */</script>';
@@ -388,12 +412,12 @@ npx vitest run src/plugins/<plugin-name>/index.test.ts
 - [ ] Logged-in user skip is tested
 - [ ] Missing config skip is tested
 - [ ] API failure (mocked) does not crash the handler
-- [ ] `pageContext` guard is tested (for `archive:header`/`archive:footer` hooks)
+- [ ] `pageContext` guard is tested (for `frontend:head`/`frontend:footer` hooks)
 
 ## Reference Example
 
 `typecho-plugin-antispam/` demonstrates:
 - `package.json` config declaration (under `typecho.plugin`)
-- `feedback:comment` filter hook (anti-spam)
+- `comment:beforeSave` filter hook (anti-spam)
 - Reading plugin config
 - Correct client IP extraction (CF-Connecting-IP priority)

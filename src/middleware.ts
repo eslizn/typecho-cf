@@ -1,6 +1,6 @@
 import { defineMiddleware } from 'astro:middleware';
 import { schema } from '@/db';
-import { applyFilter, isPluginAdminPath, isPluginRoute, parseActivatedPlugins, setActivatedPlugins } from '@/lib/plugin';
+import { applyFilter, doHook, isPluginAdminPath, isPluginRoute, parseActivatedPlugins, setActivatedPlugins } from '@/lib/plugin';
 import { hasAuthCookies } from '@/lib/auth';
 import { createAdminErrorRedirect, getAdminUserForFlash, isAdminHtmlFormRequest, adminFallbackForApiPath } from '@/lib/admin-flash';
 import { compilePermalinkPattern, DEFAULT_PERMALINK_PATTERNS } from '@/lib/permalink-pattern';
@@ -98,7 +98,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
     ? new Request(withCacheVersion(context.request.url, options.cacheVersion), { method: 'GET' })
     : null;
 
-  // Safe early hit: no activated plugins means no route:request overrides and
+  // Safe early hit: no activated plugins means no request:route overrides and
   // no csp:directives filter contributions on the cached response.
   if (cacheKey && activatedIds.length === 0) {
     const cached = await caches.default.match(cacheKey);
@@ -233,15 +233,15 @@ export const onRequest = defineMiddleware(async (context, next) => {
   }
 
   // ── Plugin route table ────────────────────────────────────────────────────
-  // Only paths the system route table did NOT claim reach route:request
+  // Only paths the system route table did NOT claim reach request:route
   // (priority: system fixed > system routes > plugin routes). permalinkTarget
   // is resolved above, so a plugin can never shadow a configured permalink
-  // URL: once a system route claims the path, route:request is skipped. The
+  // URL: once a system route claims the path, request:route is skipped. The
   // same applies to the internal rewrite target (locals._permalinkRewrite is
   // set on the second middleware pass), so plugins cannot hijack
   // /contents/{cid}/ either.
   if (!permalinkTarget && !context.locals._permalinkRewrite) {
-    const pluginRoute = await applyFilter(pluginCtx, 'route:request', { handled: false }, {
+    const pluginRoute = await applyFilter(pluginCtx, 'request:route', { handled: false }, {
       request: context.request,
       url,
       path,
@@ -268,7 +268,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
   // served only while they match the configured permalink patterns; once a
   // custom pattern is set, the old default URLs hard-404. Non-content paths
   // pass through (isContentPathAllowed returns true for them). Plugin routes
-  // are exempt via isPluginRoute(): route:request above already resolved
+  // are exempt via isPluginRoute(): request:route above already resolved
   // plugin paths (lazily registering configurable entry points), and a bare
   // plugin slug must not be mistaken for a deprecated default page form.
   // Internal rewrites mark the request with locals._permalinkRewrite
@@ -290,6 +290,18 @@ export const onRequest = defineMiddleware(async (context, next) => {
     if (cached) {
       return await finalizeRequestResponse(cached, { request: context.request, pluginCtx });
     }
+  }
+
+  const shouldRunArchiveRenderHooks = isFrontendDocumentRequest(context.request, path) && !isPluginRoute(path);
+  const archiveRenderContext = {
+    request: context.request,
+    requestUrl: context.request.url,
+    path,
+    options,
+    pluginCtx,
+  };
+  if (shouldRunArchiveRenderHooks) {
+    await doHook(pluginCtx, 'archive:beforeRender', archiveRenderContext);
   }
 
   // Execute the route handler
@@ -345,6 +357,10 @@ export const onRequest = defineMiddleware(async (context, next) => {
     }
   }
 
+  if (shouldRunArchiveRenderHooks) {
+    await doHook(pluginCtx, 'archive:afterRender', { ...archiveRenderContext, response });
+  }
+
   return finalizeRequestResponse(response, {
     request: context.request,
     pluginCtx,
@@ -354,7 +370,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
 });
 
 /**
- * Paths that plugins MUST NOT be able to claim via route:request.
+ * Paths that plugins MUST NOT be able to claim via request:route.
  * Hard-coded so a misbehaving plugin can never shadow the install
  * flow, login, or admin endpoints.
  */
@@ -372,4 +388,19 @@ function withCacheVersion(requestUrl: string, cacheVersion?: number): string {
   const url = new URL(requestUrl);
   url.searchParams.set('__typecho_cache', String(cacheVersion || 0));
   return url.toString();
+}
+
+function isFrontendDocumentRequest(request: Request, path: string): boolean {
+  if (request.method !== 'GET' && request.method !== 'HEAD') return false;
+  if (
+    path === '/install' ||
+    path === '/sitemap.xml' ||
+    path === '/robots.txt' ||
+    path.startsWith('/admin') ||
+    path.startsWith('/api/') ||
+    path.startsWith('/feed') ||
+    path.startsWith('/usr/')
+  ) return false;
+  const accept = request.headers.get('accept');
+  return !accept || accept.includes('text/html') || accept.includes('*/*');
 }

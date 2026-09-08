@@ -3,7 +3,7 @@ import type { SiteOptions } from '@/lib/options';
 import type { computeUrls } from '@/lib/options';
 import type { UserRow } from '@/lib/context';
 import { hasPermission } from '@/lib/auth';
-import { applyFilterSafely, type HookContext } from '@/lib/plugin';
+import { applyFilterSafely, doHook, type HookContext } from '@/lib/plugin';
 import { clearAdminFlash, readAdminFlash } from '@/lib/admin-flash';
 
 interface Props {
@@ -24,8 +24,21 @@ const isAdmin = hasPermission(userGroup, 'administrator');
 const isEditor = hasPermission(userGroup, 'editor');
 const isContributor = hasPermission(userGroup, 'contributor');
 
+interface AdminMenuItem {
+  label: string;
+  href: string;
+  active?: boolean;
+  show?: boolean;
+}
+
+interface AdminMenuGroup {
+  label: string;
+  show?: boolean;
+  children: AdminMenuItem[];
+}
+
 // Typecho 原版菜单结构：嵌套的 ul.root > li.parent + ul.child
-const menuGroups = [
+const menuGroups: AdminMenuGroup[] = [
   {
     label: '控制台',
     show: isContributor,
@@ -69,14 +82,76 @@ const menuGroups = [
   },
 ];
 
+const adminHookContext = {
+  request: Astro.request,
+  path: Astro.url.pathname,
+  method: Astro.request.method,
+  options,
+  urls,
+  user,
+  activeMenu,
+  title,
+};
+await doHook(_pluginCtx, 'admin:begin', adminHookContext);
+
+function isSafeAdminHref(value: unknown): value is string {
+  if (typeof value !== 'string' || value.length > 512 || /[\u0000-\u001f]/.test(value)) return false;
+  if (value === '#') return true;
+  try {
+    const parsed = new URL(value, Astro.url);
+    return parsed.origin === Astro.url.origin
+      && (parsed.pathname === '/admin' || parsed.pathname.startsWith('/admin/'));
+  } catch {
+    return false;
+  }
+}
+
+function normalizeMenuGroups(value: unknown, fallback: AdminMenuGroup[]): AdminMenuGroup[] {
+  if (!Array.isArray(value)) return fallback;
+  const fallbackByLabel = new Map(fallback.map(group => [group.label, group]));
+  const groups: AdminMenuGroup[] = [];
+  for (const rawGroup of value) {
+    if (!rawGroup || typeof rawGroup !== 'object') continue;
+    const group = rawGroup as Record<string, unknown>;
+    if (typeof group.label !== 'string' || group.label.length > 200 || !Array.isArray(group.children)) continue;
+    const fallbackGroup = fallbackByLabel.get(group.label);
+    const children: AdminMenuItem[] = [];
+    for (const rawItem of group.children) {
+      if (!rawItem || typeof rawItem !== 'object') continue;
+      const item = rawItem as Record<string, unknown>;
+      if (typeof item.label !== 'string' || item.label.length > 200 || !isSafeAdminHref(item.href)) continue;
+      const fallbackItem = fallbackGroup?.children.find(child => child.href === item.href);
+      children.push({
+        label: item.label,
+        href: item.href,
+        active: item.active === true,
+        // A navigation filter may add links, but it cannot turn a core menu
+        // item hidden by the current user's permission into a visible one.
+        show: item.show !== false && fallbackItem?.show !== false,
+      });
+    }
+    if (children.length > 0) {
+      groups.push({
+        label: group.label,
+        show: group.show !== false && fallbackGroup?.show !== false,
+        children,
+      });
+    }
+  }
+  return groups;
+}
+
 // Determine which group is "focus" (has an active child)
 // Compute index among visible (filtered) groups to match the .map() idx
-const visibleGroups = menuGroups.filter(g => g.show);
+const filteredMenuGroups = await applyFilterSafely(_pluginCtx, 'admin:nav', menuGroups, adminHookContext);
+const safeMenuGroups = normalizeMenuGroups(filteredMenuGroups, menuGroups);
+const visibleGroups = safeMenuGroups.filter(g => g.show);
 const focusGroupIdx = visibleGroups.findIndex(g => g.children.some(c => c.active));
-const adminHeadHtml = await applyFilterSafely(_pluginCtx, 'admin:header', '', { options, urls, user, activeMenu, title });
+const adminHeadHtml = await applyFilterSafely(_pluginCtx, 'admin:head', '', adminHookContext);
 const adminFooterHtml = await applyFilterSafely(_pluginCtx, 'admin:footer', '', { options, urls, user, activeMenu, title });
 const flashError = user ? await readAdminFlash(Astro.request, options, user.uid) : null;
 if (flashError) Astro.response.headers.append('Set-Cookie', clearAdminFlash(Astro.request));
+await doHook(_pluginCtx, 'admin:end', { ...adminHookContext, menuGroups: safeMenuGroups });
 ---
 <!DOCTYPE html>
 <html lang={options.lang === 'zh_CN' ? 'zh-CN' : 'en'}>

@@ -7,6 +7,7 @@ import { createTestDb, type TestDatabase } from '../helpers';
 import { hashPassword, PBKDF2_ITERATIONS } from '@/lib/auth';
 import { schema } from '@/db';
 import { eq } from 'drizzle-orm';
+import { addHook, removePluginHooks } from '@/lib/plugin';
 
 let testDb: TestDatabase;
 
@@ -19,10 +20,15 @@ import { POST } from '@/pages/api/users/login';
 
 const SITE_URL = 'https://example.com';
 
-async function seedSite(secretValue = 'sekret') {
+async function seedSite(secretValue = 'sekret', activatedPlugins: string[] = []) {
   await testDb.insert(schema.options).values({ name: 'secret', user: 0, value: secretValue });
   await testDb.insert(schema.options).values({ name: 'siteUrl', user: 0, value: SITE_URL });
   await testDb.insert(schema.options).values({ name: 'installed', user: 0, value: '1' });
+  if (activatedPlugins.length > 0) {
+    await testDb.insert(schema.options).values({
+      name: 'activatedPlugins', user: 0, value: JSON.stringify(activatedPlugins),
+    });
+  }
 }
 
 async function seedUser(password: string, opts: { group?: string; iterations?: number } = {}) {
@@ -193,5 +199,51 @@ describe('login security', () => {
     const stored = updated!.password!;
     const parts = stored.split('$');
     expect(parseInt(parts[2], 10)).toBe(PBKDF2_ITERATIONS);
+  });
+
+  it('runs login before/success/failure hooks with sanitized payloads', async () => {
+    const pluginId = 'login-hooks-test';
+    const events: string[] = [];
+    let beforeFormData: FormData | undefined;
+    let successPayload: Record<string, unknown> | undefined;
+    let failurePayload: Record<string, unknown> | undefined;
+    addHook('user:login:before', pluginId, (value: unknown, extra: any) => {
+      beforeFormData = extra.formData;
+      events.push('before');
+      return value;
+    });
+    addHook('user:login:success', pluginId, (payload: any) => {
+      successPayload = payload;
+      events.push('success');
+    });
+    addHook('user:login:failure', pluginId, (payload: Record<string, unknown>) => {
+      failurePayload = payload;
+      events.push('failure');
+    });
+
+    try {
+      await seedSite('sekret', [pluginId]);
+      await seedUser('correct-password');
+      const success = await POST({
+        request: makeRequest({ ip: '5.5.5.5', origin: SITE_URL, body: { name: 'alice', password: 'correct-password' } }),
+        locals: {},
+      } as any);
+      expect(success.status).toBe(302);
+      expect(events).toEqual(['before', 'success']);
+      expect(beforeFormData?.get('password')).toBeNull();
+      expect(successPayload?.user).not.toHaveProperty('password');
+      expect(successPayload?.user).not.toHaveProperty('authCode');
+
+      const failure = await POST({
+        request: makeRequest({ ip: '5.5.5.6', origin: SITE_URL, body: { name: 'alice', password: 'wrong-password' } }),
+        locals: {},
+      } as any);
+      expect(failure.status).toBe(302);
+      expect(failurePayload).toMatchObject({ reason: 'invalid' });
+      expect(failurePayload).not.toHaveProperty('password');
+      expect(events).toEqual(['before', 'success', 'before', 'failure']);
+    } finally {
+      removePluginHooks(pluginId);
+    }
   });
 });

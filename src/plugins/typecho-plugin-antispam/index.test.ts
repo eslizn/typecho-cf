@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import init from './index';
+import { normalizeHookPoint } from '@/lib/plugin';
 
 const HONEYPOT_FIELD = 'address_confirm';
 const TOKEN_FIELD = 'antispam_token';
@@ -13,6 +14,8 @@ function collectHooks() {
       hooks.set(point, handler);
     },
   });
+  const get = hooks.get.bind(hooks);
+  hooks.get = ((point: string) => get(normalizeHookPoint(point))) as typeof hooks.get;
   return hooks;
 }
 
@@ -45,8 +48,8 @@ describe('typecho-plugin-antispam', () => {
     const hooks = collectHooks();
 
     expect([...hooks.keys()].sort()).toEqual([
-      'archive:footer',
-      'feedback:comment',
+      'comment:beforeSave',
+      'frontend:footer',
     ]);
   });
 

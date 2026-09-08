@@ -6,6 +6,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { GET, POST } from '@/pages/api/users/logout';
+import { addHook, removePluginHooks } from '@/lib/plugin';
 
 describe('users/logout endpoint (G1-1)', () => {
   it('GET redirects without clearing cookies', async () => {
@@ -57,5 +58,28 @@ describe('users/logout endpoint (G1-1)', () => {
     } as any);
     expect(response.status).toBe(403);
     expect(response.headers.get('Set-Cookie')).toBeNull();
+  });
+
+  it('runs user:logout after a same-origin POST', async () => {
+    const pluginId = 'logout-hook-test';
+    const calls: Request[] = [];
+    addHook('user:logout', pluginId, ({ request }: { request: Request }) => calls.push(request));
+    try {
+      const request = new Request('https://example.com/api/users/logout', { method: 'POST' });
+      const response = await POST({
+        request,
+        locals: {
+          _typechoCore: {
+            db: null,
+            options: {},
+            pluginCtx: { activatedPlugins: new Set([pluginId]) },
+          },
+        },
+      } as any);
+      expect(response.status).toBe(302);
+      expect(calls).toEqual([request]);
+    } finally {
+      removePluginHooks(pluginId);
+    }
   });
 });

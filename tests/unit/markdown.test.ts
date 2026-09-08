@@ -7,7 +7,8 @@
  * constructs that span the boundary are resolved correctly.
  */
 import { describe, it, expect } from 'vitest';
-import { autop, escapeHtml, generateExcerpt, renderCommentText, renderContentExcerpt, renderMarkdown, stripHtmlTags, stripTypechoMarkers } from '@/lib/markdown';
+import { autop, escapeHtml, generateExcerpt, renderCommentText, renderCommentTextFiltered, renderContentExcerpt, renderMarkdown, stripHtmlTags, stripTypechoMarkers } from '@/lib/markdown';
+import { addHook, removePluginHooks, type HookContext } from '@/lib/plugin';
 
 // ---------------------------------------------------------------------------
 // renderMarkdown
@@ -217,6 +218,32 @@ describe('renderCommentText', () => {
     const markdown = renderCommentText('**bold**', { markdown: true });
     expect(plain).not.toContain('<strong>');
     expect(markdown).toContain('<strong>bold</strong>');
+  });
+});
+
+describe('renderCommentTextFiltered hooks', () => {
+  it('runs comment markdown and rendered filters in order after sanitization', async () => {
+    const pluginId = 'comment-render-hook-test';
+    const events: string[] = [];
+    addHook('comment:markdown', pluginId, (source: string) => {
+      events.push('markdown');
+      return `${source}\n\n**hooked**`;
+    });
+    addHook('comment:rendered', pluginId, (html: string) => {
+      events.push('rendered');
+      return `${html}<p>after</p>`;
+    });
+
+    try {
+      const ctx: HookContext = { activatedPlugins: new Set([pluginId]) };
+      const html = await renderCommentTextFiltered(ctx, 'hello', { markdown: true });
+      expect(events).toEqual(['markdown', 'rendered']);
+      expect(html).toContain('<strong>hooked</strong>');
+      expect(html).toContain('<p>after</p>');
+      expect(html).not.toContain('<script>');
+    } finally {
+      removePluginHooks(pluginId);
+    }
   });
 });
 

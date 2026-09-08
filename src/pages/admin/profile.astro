@@ -5,6 +5,7 @@ import { buildGravatarUrl } from '@/lib/gravatar';
 import { eq, and, sql } from 'drizzle-orm';
 import { schema } from '@/db';
 import { PASSWORD_MIN_LENGTH } from '@/lib/constants';
+import { applyFilterSafely } from '@/lib/plugin';
 
 const ctx = await createContext(Astro.locals, Astro.request);
 const authCheck = requireAuth(ctx);
@@ -26,6 +27,7 @@ const [stats, gravatarUrl] = await Promise.all([
   buildGravatarUrl(user!.mail, { size: 220, defaultImage: 'mp' }),
 ]);
 const [postCount, commentCount, catCount] = stats;
+const profileBottomHtml = await applyFilterSafely(ctx, 'admin:profile:bottom', '', { options, urls, user, csrfToken });
 ---
 <Admin title="个人设置" options={options} urls={urls} user={user} activeMenu="profile" pluginCtx={ctx}>
   <div class="col-mb-12 col-tb-3">
@@ -109,5 +111,7 @@ const [postCount, commentCount, catCount] = stats;
         </ul>
       </form>
     </section>
+
+    {profileBottomHtml && <Fragment set:html={profileBottomHtml} />}
   </div>
 </Admin>

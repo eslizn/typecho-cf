@@ -34,7 +34,7 @@ Typecho 经典默认主题，简洁优雅的两栏博客布局。
 - **密码保护** — 支持文章/页面密码访问，未验证时展示密码输入表单
 - **前后导航** — 文章详情页底部展示上一篇/下一篇链接
 - **侧边栏** — 展示最近文章、最近评论、分类列表、归档链接
-- **插件兼容** — 将 `pluginCtx` 传给系统 `Base.astro`，由布局执行激活插件的 `archive:header` / `archive:footer` Hook
+- **插件兼容** — 将 `pluginCtx` 传给系统 `Base.astro`，由布局执行激活插件的 `frontend:head` / `frontend:footer` Hook
 - **Gravatar 头像** — 评论列表展示 Gravatar 头像
 - **RSS/Feed 自动发现** — `<head>` 包含 feed 自动发现链接
 

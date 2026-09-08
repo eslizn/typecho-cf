@@ -64,6 +64,21 @@ export async function buildFeedItem(
   return item;
 }
 
+/**
+ * Apply the complete-feed filter after the XML document has been generated.
+ * Keeping this in the shared helper makes category/tag/author feeds follow
+ * the same lifecycle as the main feed route.
+ */
+export async function renderFeedResponse(
+  pluginCtx: HookContext,
+  xml: string,
+  contentType: string,
+  extra: Record<string, unknown>,
+): Promise<Response> {
+  const filteredXml = await applyFilterSafely(pluginCtx, 'feed:render', xml, extra);
+  return xmlResponse(typeof filteredXml === 'string' ? filteredXml : xml, contentType);
+}
+
 export function xmlResponse(xml: string, contentType: string): Response {
   return new Response(xml, {
     headers: {

@@ -10,7 +10,7 @@ import {
   passwordHashNeedsRehash,
 } from '@/lib/auth';
 import { LOGIN_ERROR_FLASH_COOKIE, createFlashRedirectHeaders } from '@/lib/flash';
-import { applyFilter, setActivatedPlugins, parseActivatedPlugins, type HookContext } from '@/lib/plugin';
+import { applyFilter, doHook, setActivatedPlugins, parseActivatedPlugins, type HookContext } from '@/lib/plugin';
 import {
   clearLoginFailures,
   loginLockedUntil,
@@ -46,6 +46,23 @@ function redirectWithLoginError(message: string, request?: Request): Response {
     status: 302,
     headers: createFlashRedirectHeaders(LOGIN_URL, LOGIN_ERROR_FLASH_COOKIE, message, LOGIN_URL, request),
   });
+}
+
+function buildLoginHookFormData(formData: FormData): FormData {
+  const safe = new FormData();
+  for (const [key, value] of formData.entries()) {
+    if (key === 'password' || key === 'pass' || key === 'currentPassword') continue;
+    safe.append(key, value);
+  }
+  return safe;
+}
+
+async function notifyLoginFailure(
+  pluginCtx: HookContext,
+  request: Request,
+  reason: 'missing_input' | 'locked' | 'rejected' | 'invalid',
+): Promise<void> {
+  await doHook(pluginCtx, 'user:login:failure', { request, reason });
 }
 
 /**
@@ -105,8 +122,14 @@ export const POST: APIRoute = async ({ request, locals }) => {
   })();
   const referer = safeAdminRedirectUrl(refererAbsolute, options.siteUrl || '', '/admin/');
 
-  if (!name) return redirectWithLoginError('请输入用户名', request);
-  if (!password) return redirectWithLoginError('请输入密码', request);
+  if (!name) {
+    await notifyLoginFailure(pluginCtx, request, 'missing_input');
+    return redirectWithLoginError('请输入用户名', request);
+  }
+  if (!password) {
+    await notifyLoginFailure(pluginCtx, request, 'missing_input');
+    return redirectWithLoginError('请输入密码', request);
+  }
 
   // ── Brute-force throttle ────────────────────────────────────────────────
   const rateConfig = readLoginRateLimitConfig(options as unknown as Record<string, unknown>);
@@ -121,12 +144,21 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const remaining = Math.max(1, Math.ceil((lockedUntil - Date.now()) / 1000));
     const headers = createFlashRedirectHeaders(LOGIN_URL, LOGIN_ERROR_FLASH_COOKIE, `登录失败次数过多，请 ${remaining} 秒后再试`, LOGIN_URL, request);
     headers.set('Retry-After', String(remaining));
+    await notifyLoginFailure(pluginCtx, request, 'locked');
     return new Response(null, { status: 302, headers });
   }
 
-  const loginContext = await applyFilter(pluginCtx, 'user:login', {}, { request, formData, options });
-  if (loginContext._rejected) {
-    return redirectWithLoginError(String(loginContext._rejected), request);
+  const loginContext = await applyFilter(pluginCtx, 'user:login:before', {}, {
+    request,
+    formData: buildLoginHookFormData(formData),
+    options: { ...options, secret: undefined },
+  });
+  const rejectedReason = loginContext && typeof loginContext === 'object'
+    ? (loginContext as { _rejected?: unknown })._rejected
+    : undefined;
+  if (rejectedReason) {
+    await notifyLoginFailure(pluginCtx, request, 'rejected');
+    return redirectWithLoginError(String(rejectedReason), request);
   }
 
   if (!user) {
@@ -136,16 +168,19 @@ export const POST: APIRoute = async ({ request, locals }) => {
     // no-user reply arrives in < 10 ms and enumeration becomes trivial.
     await verifyPassword(password, DUMMY_PASSWORD_HASH);
     await recordLoginFailure(db, ip, rateConfig);
+    await notifyLoginFailure(pluginCtx, request, 'invalid');
     return redirectWithLoginError('用户名或密码无效', request);
   }
 
   const valid = await verifyPassword(password, user.password || '');
   if (valid === 'needs_reset') {
     await recordLoginFailure(db, ip, rateConfig);
+    await notifyLoginFailure(pluginCtx, request, 'invalid');
     return redirectWithLoginError('密码格式已升级，请使用忘记密码功能重置密码', request);
   }
   if (valid !== true) {
     await recordLoginFailure(db, ip, rateConfig);
+    await notifyLoginFailure(pluginCtx, request, 'invalid');
     return redirectWithLoginError('用户名或密码无效', request);
   }
 
@@ -184,6 +219,19 @@ export const POST: APIRoute = async ({ request, locals }) => {
   for (const cookie of cookieHeaders) {
     headers.append('Set-Cookie', cookie);
   }
+
+  await doHook(pluginCtx, 'user:login:success', {
+    request,
+    remember,
+    user: {
+      uid: user.uid,
+      name: user.name,
+      mail: user.mail,
+      screenName: user.screenName,
+      url: user.url,
+      group: user.group,
+    },
+  });
 
   return new Response(null, { status: 302, headers });
 };

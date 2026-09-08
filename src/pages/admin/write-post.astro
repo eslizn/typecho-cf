@@ -92,6 +92,9 @@ const isMarkdown = !post || (post.text && post.text.indexOf('<!--markdown-->') >
 
 // Build preview URL using permalink pattern
 const previewUrl = isEdit && post ? buildPermalink(post, urls.siteUrl, options.permalinkPattern) : '';
+const writePostHookExtra = { options, post, user, isEdit };
+const writePostOptionHtml = await applyFilterSafely(ctx, 'admin:writePost:option', '', writePostHookExtra);
+const writePostAdvanceOptionHtml = await applyFilterSafely(ctx, 'admin:writePost:advanceOption', '', writePostHookExtra);
 const writePostBottomHtml = await applyFilterSafely(ctx, 'admin:writePost:bottom', '', { options, post, user, isEdit });
 
 ---
@@ -170,6 +173,8 @@ const writePostBottomHtml = await applyFilterSafely(ctx, 'admin:writePost:bottom
           </ul>
         </section>
 
+        {writePostOptionHtml && <Fragment set:html={writePostOptionHtml} />}
+
         <section class="typecho-post-option">
           <label class="typecho-label">标签</label>
           <p><div data-tags-input data-tags-api="/api/admin/tags-suggest">
@@ -229,6 +234,8 @@ const writePostBottomHtml = await applyFilterSafely(ctx, 'admin:writePost:bottom
               </li>
             </ul>
           </section>
+
+          {writePostAdvanceOptionHtml && <Fragment set:html={writePostAdvanceOptionHtml} />}
         </div>
 
         <div id="custom-field" class:list={[{ fold: customFields.length === 0 }]}>

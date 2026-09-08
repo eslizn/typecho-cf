@@ -475,7 +475,7 @@ describe('Middleware: content path whitelist (default URLs rejected once custom 
   it('exempts registered plugin routes from the deprecation check', async () => {
     // Plugin front-end routes are dynamic (route table), not fixed surfaces:
     // once registered, a bare-slug plugin path survives a custom page pattern
-    // and reaches route:request instead of a middleware 404. The plugin does
+    // and reaches request:route instead of a middleware 404. The plugin does
     // not claim this path, so the route falls through to Astro's 404.
     registerPluginRoute('/unit-plugin-route');
     const next = vi.fn(async () => new Response('not found', { status: 404 }));
@@ -486,7 +486,7 @@ describe('Middleware: content path whitelist (default URLs rejected once custom 
 
   it('serves an activated plugin route under a custom page pattern', async () => {
     // WebDAV is activated earlier in this file; its dynamic route (/webdav,
-    // registered by the plugin init) must still be claimed by route:request
+    // registered by the plugin init) must still be claimed by request:route
     // even though the bare-slug form no longer matches the custom page
     // pattern — priority: system fixed > system routes > plugin routes.
     const next = vi.fn(async () => new Response('not found', { status: 404 }));
@@ -572,10 +572,10 @@ describe('Middleware: content path whitelist (default URLs rejected once custom 
     expect(next).toHaveBeenCalled();
   });
 
-  it('lazily serves a custom WebDAV routePath under a custom page pattern (whitelist runs after route:request)', async () => {
+  it('lazily serves a custom WebDAV routePath under a custom page pattern (whitelist runs after request:route)', async () => {
     // Cold-isolate scenario: only the default /webdav is in the plugin route
-    // table; a configured /dav entry is registered lazily by route:request.
-    // The whitelist must run after route:request, otherwise /dav is
+    // table; a configured /dav entry is registered lazily by request:route.
+    // The whitelist must run after request:route, otherwise /dav is
     // mistaken for a deprecated bare-slug page form and 404s forever.
     await testDb.insert(schema.options).values({
       name: 'plugin:typecho-plugin-webdav',
@@ -600,14 +600,14 @@ describe('Middleware: content path whitelist (default URLs rejected once custom 
     expect(response.headers.get('WWW-Authenticate')).toContain('Basic realm="Typecho WebDAV"');
   });
 
-  it('skips route:request on the internal rewrite target so plugins cannot hijack /contents/{cid}/', async () => {
+  it('skips request:route on the internal rewrite target so plugins cannot hijack /contents/{cid}/', async () => {
     const hijack = vi.fn(async (result: any, extra?: { path?: string }) => {
       if (extra?.path === '/contents/123/') {
         return { handled: true, response: new Response('hijacked', { status: 200 }) };
       }
       return result;
     });
-    addHook('route:request', 'test-hijack', hijack, 1);
+    addHook('request:route', 'test-hijack', hijack, 1);
     const next = vi.fn(async () => new Response('rendered', { status: 200 }));
     const ctx = makeCtx('/contents/123/', { _permalinkRewrite: true });
     const response = await onRequest(ctx, next) as Response;

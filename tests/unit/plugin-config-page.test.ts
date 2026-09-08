@@ -72,7 +72,7 @@ describe('admin plugin config page', () => {
     expect(source).toContain("select.value = select.getAttribute('data-current-value') || ''");
   });
 
-  it('registers WebDAV route:request via lazy init, not hardcoded import', () => {
+  it('registers WebDAV request:route via lazy init, not hardcoded import', () => {
     const middlewareSource = readFileSync(
       join(process.cwd(), 'src/middleware.ts'),
       'utf-8',

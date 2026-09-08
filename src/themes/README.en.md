@@ -327,7 +327,7 @@ const { options, posts, pagination, urls, isLoggedIn, user, pluginCtx } = Astro.
 </Base>
 ```
 
-> Follow the default theme and use the system `Base.astro` with `pluginCtx` unless you intentionally provide your own document shell. `Base` supplies the HTML document, theme stylesheets, feed discovery, and `archive:header` / `archive:footer` plugin injection. The runtime selects components through a build-time virtual module but does not automatically wrap them in a layout.
+> Follow the default theme and use the system `Base.astro` with `pluginCtx` unless you intentionally provide your own document shell. `Base` supplies the HTML document, theme stylesheets, feed discovery, and `frontend:head` / `frontend:footer` plugin injection. The runtime selects components through a build-time virtual module but does not automatically wrap them in a layout.
 
 ---
 

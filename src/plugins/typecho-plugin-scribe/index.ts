@@ -1444,7 +1444,7 @@ export default function init({ addHook, pluginId }: PluginInitContext): void {
   );
 
   addHook(
-    `plugin:${pluginId}:action:auth`,
+    `plugin:${pluginId}:action:authorize`,
     pluginId,
     (defaultRole: string, extra?: { action?: string }) => {
       // AI writing helpers write into the current editor session, so

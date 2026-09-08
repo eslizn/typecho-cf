@@ -55,7 +55,7 @@
         ├─ 安装检测（typecho_options 表不存在 → /install）
         ├─ 分页 URL 重写（/page/N/ → 基础路径 + locals._page）
         ├─ 加载 options + 激活插件
-        ├─ route:request filter（插件自定义路由）
+        ├─ request:route filter（插件自定义路由）
         ├─ 边缘缓存（Cache API，跳过已登录/admin/api 路径）
         └─ 固定链接重写（post/page/category pattern → 内置路由）
      → src/lib/context.ts
@@ -64,7 +64,7 @@
         ├─ 自动激活插件（首次安装/升级时）
         ├─ 验证 Cookie（__typecho_uid / __typecho_authCode）
         ├─ 生成 CSRF token
-        └─ 触发 system:begin hook
+        └─ 触发 request:begin hook
      → 路由匹配（.astro 页面 或 .ts API 端点）
      → 布局渲染（Base.astro → Blog.astro 或 Admin.astro）
 ```
@@ -89,7 +89,7 @@ src/lib/plugin.ts       — 插件系统核心（~670 行）
   ├─ doHook() — call 钩子（副作用，无返回值）
   ├─ applyFilter() — filter 钩子（链式变换，抛异常中断）
   ├─ applyFilterSafely() — filter 钩子（吞异常，展示用）
-  └─ HookPoints 常量 — 50+ 挂载点定义
+  └─ HookPoints 常量 — 70+ canonical 挂载点定义
 
 src/lib/theme.ts        — 主题系统
 src/integrations/theme-loader.ts   — 构建时发现主题包 → 虚拟模块
@@ -219,7 +219,7 @@ addHook(hookPoint, pluginId, handler, priority = 10)
 
 ### 6.3 插件管理路径注册
 
-插件通过 `route:request` hook 处理的 admin/api 路径必须注册，否则中间件的 `isReservedCorePath` 会拦截：
+插件通过 `request:route` hook 处理的 admin/api 路径必须注册，否则中间件的 `isReservedCorePath` 会拦截：
 
 ```typescript
 import { registerPluginAdminPath } from 'typecho/plugin-sdk';
@@ -228,7 +228,7 @@ export default function init({ addHook, pluginId }: PluginInitContext): void {
   // 注册插件的管理路径，使其不被中间件拦截
   registerPluginAdminPath('/api/admin/webdav');
 
-  addHook('route:request', pluginId, async (result, extra) => {
+  addHook('request:route', pluginId, async (result, extra) => {
     if (extra.path === '/api/admin/webdav') { /* ... */ }
     return result;
   });
@@ -267,16 +267,16 @@ WebDAV 插件的文件管理器是完整参考实现：`admin:page` 返回包含
 
 ### 6.6 Hook 触发点
 
-插件只应依赖下列已在运行时接入的 Hook。`HookPoints` 中未列出的常量无调用保证。
+插件只应依赖下列已在运行时接入的 canonical Hook。`HookPoints` 中未列出的常量无调用保证；旧名称通过 `DeprecatedHookPointAliases` 兼容归一化。
 
 **call**：
-`system:begin`, `post:finishPublish`, `post:finishSave`, `post:delete`, `post:finishDelete`, `page:finishPublish`, `page:finishSave`, `page:delete`, `page:finishDelete`, `feedback:finishComment`, `comment:action`, `upload:upload`, `upload:delete`
+`request:begin`, `request:end`, `admin:begin`, `admin:end`, `archive:init`, `archive:beforeRender`, `archive:afterRender`, `archive:index`, `archive:single`, `archive:category`, `archive:tag`, `archive:author`, `archive:search`, `post:afterPublish`, `post:afterSave`, `post:beforeDelete`, `post:afterDelete`, `page:afterPublish`, `page:afterSave`, `page:beforeDelete`, `page:afterDelete`, `comment:afterCreate`, `feedback:trackback:after`, `feedback:pingback:after`, `comment:reply`, `comment:action`, `user:login:success`, `user:login:failure`, `user:logout`, `user:register:after`, `upload:after`, `upload:delete`
 
 **filter**：
-`route:request`, `admin:header`, `admin:footer`, `admin:page`, `admin:loginHead`, `admin:loginForm`, `admin:writePost:bottom`, `admin:writePage:bottom`, `admin:managePosts:titleActions`, `archive:header`, `archive:footer`, `content:markdown`, `content:content`, `post:write`, `page:write`, `feedback:comment`, `user:login`, `upload:beforeUpload`, `feed:item`, `widget:sidebar`, `plugin:config:beforeSave`, `csp:directives`, `mail:send`
+`request:route`, `admin:head`, `admin:footer`, `admin:nav`, `admin:login:head`, `admin:login:form`, `admin:page`, `admin:writePost:option`, `admin:writePost:advanceOption`, `admin:writePost:bottom`, `admin:writePage:option`, `admin:writePage:advanceOption`, `admin:writePage:bottom`, `admin:managePosts:titleActions`, `admin:profile:bottom`, `plugin:config:beforeSave`, `archive:query`, `frontend:head`, `frontend:footer`, `content:data`, `content:title`, `content:excerpt`, `content:markdown`, `content:rendered`, `comment:data`, `comment:markdown`, `comment:rendered`, `post:write`, `page:write`, `comment:beforeSave`, `feedback:trackback:before`, `feedback:pingback:before`, `user:login:before`, `user:register:before`, `upload:before`, `feed:item`, `feed:render`, `sidebar:data`, `csp:directives`, `mail:send`
 
 **动态插件动作 filter**：
-`plugin:<id>:action:auth`, `plugin:<id>:action`
+`plugin:<id>:action:authorize`, `plugin:<id>:action`
 
 完整参数和安全约束以 `src/plugins/README.md` 为准。
 
@@ -312,7 +312,7 @@ WebDAV 插件的文件管理器是完整参考实现：`admin:page` 返回包含
 
 ### 7.3 样式注入
 
-推荐主题组件使用系统 `Base.astro`；该布局会在 `<head>` 注入 `<link>` 标签（基于主题 manifest 的 `stylesheets` + `stylesheet`），并执行前台插件注入。自行输出完整 HTML 的主题必须自行处理样式和 `archive:header` / `archive:footer`。
+推荐主题组件使用系统 `Base.astro`；该布局会在 `<head>` 注入 `<link>` 标签（基于主题 manifest 的 `stylesheets` + `stylesheet`），并执行前台插件注入。自行输出完整 HTML 的主题必须自行处理样式和 `frontend:head` / `frontend:footer`。
 
 ### 7.4 主题自定义配置（可选）
 
@@ -369,7 +369,7 @@ WebDAV 插件的文件管理器是完整参考实现：`admin:page` 返回包含
 
 ### 8.5 安全响应头
 
-中间件 (`src/middleware.ts`) 通过 `applySecurityHeaders()` 在每次中间件托管响应中自动添加以下安全响应头，除非路由处理程序已设置同名 Header；包括普通路由、插件 `route:request` 响应、缓存命中响应、安装/静态资源早返回路径：
+中间件 (`src/middleware.ts`) 通过 `applySecurityHeaders()` 在每次中间件托管响应中自动添加以下安全响应头，除非路由处理程序已设置同名 Header；包括普通路由、插件 `request:route` 响应、缓存命中响应、安装/静态资源早返回路径：
 
 | Header | Value |
 |--------|-------|
@@ -485,8 +485,8 @@ vi.mock('cloudflare:workers', () => ({ env: { DB: null, BUCKET: { delete: mockFn
 | 示例 | 路径 | 说明 |
 |------|------|------|
 | 参考插件（基础） | `src/plugins/typecho-plugin-antispam/` | 含完整 package.json、index.ts、index.test.ts，基础 filter hook 示例 |
-| 参考插件（高级） | `src/plugins/typecho-plugin-webdav/` | 含 `plugin:config:beforeSave` 校验、`route:request` 自定义路由、`admin:page` 管理页面、`admin:footer` 菜单注入、`WebDavStorageAdapter` 适配器模式、内联 JS 文件管理器 |
-| 参考插件（CSP 注入） | `src/plugins/typecho-plugin-turnstile/` | 含 `csp:directives` filter hook 动态追加 CSP 来源、`admin:loginHead`/`admin:loginForm` 注入 Turnstile Widget |
+| 参考插件（高级） | `src/plugins/typecho-plugin-webdav/` | 含 `plugin:config:beforeSave` 校验、`request:route` 自定义路由、`admin:page` 管理页面、`admin:footer` 菜单注入、`WebDavStorageAdapter` 适配器模式、内联 JS 文件管理器 |
+| 参考插件（CSP 注入） | `src/plugins/typecho-plugin-turnstile/` | 含 `csp:directives` filter hook 动态追加 CSP 来源、`admin:login:head`/`admin:login:form` 注入 Turnstile Widget |
 | 参考主题 | `src/themes/typecho-theme-minimal/` | 含完整 theme.json、5 个模板组件 |
 
 ---

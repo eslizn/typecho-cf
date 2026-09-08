@@ -56,7 +56,7 @@ Typecho-CF AI 写作助手插件，接入 OpenAI 兼容 LLM，在编辑器中生
 | `admin:writePost:bottom` | filter | 文章编辑器底部注入 AI 操作按钮 |
 | `admin:writePage:bottom` | filter | 页面编辑器底部注入 AI 操作按钮 |
 | `plugin:config:beforeSave` | filter | 保存前验证 LLM endpoint 和 model 可用性 |
-| `plugin:<id>:action:auth` | filter | 将 generate/polish/correct 的最低权限声明为 contributor |
+| `plugin:<id>:action:authorize` | filter | 将 generate/polish/correct 的最低权限声明为 contributor |
 | `plugin:<id>:action` | action | 处理 generate/polish/correct 操作 |
 
 ## 依赖

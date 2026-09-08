@@ -7,6 +7,8 @@ import { InputError, readBoundedFormData } from '@/lib/input';
 import { REGISTER_NOTICE_FLASH_COOKIE, createFlashRedirectHeaders } from '@/lib/flash';
 import { eq } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
+import { getRequestCoreContextFromLocals } from '@/lib/context';
+import { applyFilter, doHook, parseActivatedPlugins, setActivatedPlugins, type HookContext } from '@/lib/plugin';
 
 /**
  * Reject cross-origin POSTs. Tightening this beyond the global CSRF
@@ -31,9 +33,12 @@ function isSameOriginRequest(request: Request, siteUrl: string): boolean {
   return false;
 }
 
-export const POST: APIRoute = async ({ request }) => {
-  const db = getDb(env.DB);
-  const options = await loadOptions(db);
+export const POST: APIRoute = async ({ request, locals }) => {
+  const core = getRequestCoreContextFromLocals(locals);
+  const db = core?.db ?? getDb(env.DB);
+  const options = core?.options ?? await loadOptions(db);
+  const pluginCtx: HookContext = core?.pluginCtx ?? { activatedPlugins: new Set<string>() };
+  if (!core) await setActivatedPlugins(pluginCtx, parseActivatedPlugins(options.activatedPlugins as string | undefined));
 
   if (!options.allowRegister) {
     return new Response('注册已关闭', { status: 403 });
@@ -70,11 +75,52 @@ export const POST: APIRoute = async ({ request }) => {
     return new Response('邮箱格式不正确', { status: 400 });
   }
 
+  let registrationData: { name: string; mail: string; screenName: string } = {
+    name,
+    mail,
+    screenName: name,
+  };
+  try {
+    const filtered = await applyFilter(pluginCtx, 'user:register:before', { ...registrationData }, {
+      request,
+      db,
+      options: { ...options, secret: undefined },
+      passwordLength: password.length,
+    });
+    if (filtered?._rejected) {
+      return new Response(String(filtered._rejected), { status: 403 });
+    }
+    if (!filtered || typeof filtered !== 'object') {
+      return new Response('注册信息无效', { status: 400 });
+    }
+    registrationData = {
+      name: typeof filtered.name === 'string' ? filtered.name.trim() : '',
+      mail: typeof filtered.mail === 'string' ? filtered.mail.trim() : '',
+      screenName: typeof filtered.screenName === 'string' ? filtered.screenName.trim() : '',
+    };
+  } catch (error) {
+    console.error({
+      event: 'register_filter_failed',
+      errorType: error instanceof Error ? error.name : 'UnknownError',
+    });
+    return new Response('插件处理注册信息时出错，请稍后重试', { status: 503 });
+  }
+
+  if (registrationData.name.length < 2 || registrationData.name.length > 32) {
+    return new Response('用户名长度需在2-32个字符之间', { status: 400 });
+  }
+  if (!registrationData.mail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(registrationData.mail)) {
+    return new Response('邮箱格式不正确', { status: 400 });
+  }
+  if (registrationData.screenName.length > 150) {
+    return new Response('昵称过长', { status: 400 });
+  }
+
   const [[existingName], [existingMail]] = await db.batch([
     db.select({ uid: schema.users.uid }).from(schema.users)
-      .where(eq(schema.users.name, name)).limit(1),
+      .where(eq(schema.users.name, registrationData.name)).limit(1),
     db.select({ uid: schema.users.uid }).from(schema.users)
-      .where(eq(schema.users.mail, mail)).limit(1),
+      .where(eq(schema.users.mail, registrationData.mail)).limit(1),
   ]);
   if (existingName) {
     return new Response('用户名已被使用', { status: 409 });
@@ -88,10 +134,10 @@ export const POST: APIRoute = async ({ request }) => {
   const now = Math.floor(Date.now() / 1000);
 
   const result = await db.insert(schema.users).values({
-    name,
-    mail,
+    name: registrationData.name,
+    mail: registrationData.mail,
     password: hashedPassword,
-    screenName: name,
+    screenName: registrationData.screenName || registrationData.name,
     created: now,
     activated: now,
     logged: 0,
@@ -102,6 +148,19 @@ export const POST: APIRoute = async ({ request }) => {
   if (!result[0]?.uid) {
     return new Response('注册失败', { status: 500 });
   }
+
+  await doHook(pluginCtx, 'user:register:after', {
+    request,
+    user: {
+      uid: result[0].uid,
+      name: registrationData.name,
+      mail: registrationData.mail,
+      screenName: registrationData.screenName || registrationData.name,
+      group: 'subscriber',
+      created: now,
+      activated: now,
+    },
+  });
 
   // No auto-login: redirect to the login page with a success flash. This
   // closes the cross-site session-fixation surface where a third-party

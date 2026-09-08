@@ -237,11 +237,11 @@ export const POST: APIRoute = async ({ request, locals }) => {
     }
   }
 
-  // Apply feedback:comment filter — plugins can modify/reject comment data before save.
+  // Apply comment:beforeSave filter — plugins can modify/reject comment data before save.
   // G6-5: catch plugin failures and convert to a 403 reject reason
   // rather than letting them surface as a 500 to the commenter.
   try {
-    const filtered = await applyFilter(pluginCtx, 'feedback:comment', commentData, {
+    const filtered = await applyFilter(pluginCtx, 'comment:beforeSave', commentData, {
       request, formData, db, options, isLoggedIn: !!userId,
     });
     commentData = validateFilteredComment(protectedCommentData, filtered);
@@ -280,8 +280,11 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const newCoid = inserted[0].coid;
   commentData.coid = newCoid;
 
-  // Trigger feedback:finishComment hook — plugins can act after comment saved
-  await doHook(pluginCtx, 'feedback:finishComment', commentData);
+  // Trigger comment:afterCreate hook — plugins can act after comment saved
+  await doHook(pluginCtx, 'comment:afterCreate', commentData);
+  if (parent > 0) {
+    await doHook(pluginCtx, 'comment:reply', commentData, { parent });
+  }
 
   // Email notification (fire-and-forget via waitUntil)
   if (finalStatus === 'approved') {

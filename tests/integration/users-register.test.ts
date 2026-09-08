@@ -19,6 +19,7 @@ vi.mock('@/db', async () => {
 });
 
 import { POST } from '@/pages/api/users/register';
+import { addHook, removePluginHooks } from '@/lib/plugin';
 
 const SITE_URL = 'https://example.com';
 
@@ -102,5 +103,42 @@ describe('users/register endpoint (G1-5)', () => {
       locals: {},
     } as any);
     expect(response.status).toBe(400);
+  });
+
+  it('runs register before/after hooks without exposing the password', async () => {
+    const pluginId = 'register-hooks-test';
+    const events: string[] = [];
+    let beforeData: Record<string, unknown> | undefined;
+    let afterUser: Record<string, unknown> | undefined;
+    addHook('user:register:before', pluginId, (data: Record<string, unknown>, extra: any) => {
+      beforeData = data;
+      events.push(`before:${extra.passwordLength}`);
+      return { ...data, screenName: 'Bob Display' };
+    });
+    addHook('user:register:after', pluginId, (payload: any) => {
+      afterUser = payload.user;
+      events.push('after');
+    });
+
+    try {
+      await seedRegistrationOpen();
+      await testDb.insert(schema.options).values({
+        name: 'activatedPlugins', user: 0, value: JSON.stringify([pluginId]),
+      });
+      const response = await POST({
+        request: buildRequest({ origin: SITE_URL, body: { name: 'bob', mail: 'b@b.com', password: 'strong-secret-123' } }),
+        locals: {},
+      } as any);
+
+      expect(response.status).toBe(302);
+      expect(beforeData).toEqual({ name: 'bob', mail: 'b@b.com', screenName: 'bob' });
+      expect(beforeData).not.toHaveProperty('password');
+      expect(afterUser).toMatchObject({ name: 'bob', mail: 'b@b.com', screenName: 'Bob Display' });
+      expect(afterUser).not.toHaveProperty('password');
+      expect(afterUser).not.toHaveProperty('authCode');
+      expect(events).toEqual(['before:17', 'after']);
+    } finally {
+      removePluginHooks(pluginId);
+    }
   });
 });

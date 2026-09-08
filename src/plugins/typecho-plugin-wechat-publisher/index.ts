@@ -637,7 +637,7 @@ export default function init({ addHook, pluginId }: PluginInitContext): void {
   );
 
   addHook(
-    `plugin:${pluginId}:action:auth`,
+    `plugin:${pluginId}:action:authorize`,
     pluginId,
     (defaultRole: string, extra?: { action?: string }) => {
       // Sync-to-WeChat writes back to a third-party account and modifies

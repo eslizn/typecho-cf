@@ -327,7 +327,7 @@ const { options, posts, pagination, urls, isLoggedIn, user, pluginCtx } = Astro.
 </Base>
 ```
 
-> 推荐像默认主题一样使用系统 `Base.astro` 并传入 `pluginCtx`。`Base` 负责完整 HTML 外壳、主题样式、Feed 自动发现以及 `archive:header` / `archive:footer` 插件注入。主题也可以自行输出完整 HTML，但届时必须自行链接样式并处理这些集成功能。系统只负责通过构建时虚拟模块选择组件，不会自动在外层包裹布局。
+> 推荐像默认主题一样使用系统 `Base.astro` 并传入 `pluginCtx`。`Base` 负责完整 HTML 外壳、主题样式、Feed 自动发现以及 `frontend:head` / `frontend:footer` 插件注入。主题也可以自行输出完整 HTML，但届时必须自行链接样式并处理这些集成功能。系统只负责通过构建时虚拟模块选择组件，不会自动在外层包裹布局。
 
 ---
 

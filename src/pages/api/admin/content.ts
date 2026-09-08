@@ -301,9 +301,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
     // Trigger post/page finish hooks
     const finishData = { ...contentData, cid: newCid };
     if (!isDraft) {
-      await doHook(pluginCtx, type === 'page' ? 'page:finishPublish' : 'post:finishPublish', finishData);
+      await doHook(pluginCtx, type === 'page' ? 'page:afterPublish' : 'post:afterPublish', finishData);
     }
-    await doHook(pluginCtx, type === 'page' ? 'page:finishSave' : 'post:finishSave', finishData);
+    await doHook(pluginCtx, type === 'page' ? 'page:afterSave' : 'post:afterSave', finishData);
 
     await purgeContentAndRelatedCache(db, options, newCid, finishData as typeof schema.contents.$inferSelect);
 
@@ -382,7 +382,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       }
       await db.batch(revisionStatements as [any, ...any[]]);
       await attachTags(db, revisionCid, tags, false);
-      await doHook(pluginCtx, existingBaseType === 'page' ? 'page:finishSave' : 'post:finishSave', {
+      await doHook(pluginCtx, existingBaseType === 'page' ? 'page:afterSave' : 'post:afterSave', {
         ...revisionData, cid: revisionCid, parent: cid,
       });
       return new Response(null, { status: 302, headers: { Location: `/admin/write-${existingBaseType}?cid=${cid}` } });
@@ -498,7 +498,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     // Trigger pre-delete hook
     const isPage = existing.type?.startsWith('page');
-    await doHook(pluginCtx, isPage ? 'page:delete' : 'post:delete', existing);
+    await doHook(pluginCtx, isPage ? 'page:beforeDelete' : 'post:beforeDelete', existing);
 
     // Decrement meta counts before deleting relationships (single UPDATE
     // over all mids linked to this content, restricted to category/tag
@@ -531,7 +531,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     await purgeContentAndRelatedCache(db, options, cid, existing);
 
     // Trigger post-delete hook
-    await doHook(pluginCtx, isPage ? 'page:finishDelete' : 'post:finishDelete', existing);
+    await doHook(pluginCtx, isPage ? 'page:afterDelete' : 'post:afterDelete', existing);
 
     const redirectTo = isPage ? '/admin/manage-pages' : '/admin/manage-posts';
     return new Response(null, {

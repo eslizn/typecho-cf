@@ -4,7 +4,7 @@ import { buildPermalink } from '@/lib/content';
 import { renderContent } from '@/lib/markdown';
 import { generateRss2, generateAtom, generateRss1, type FeedItem } from '@/lib/feed';
 import { applyFilterSafely } from '@/lib/plugin';
-import { getFeedRuntime } from '@/lib/feed-helpers';
+import { getFeedRuntime, renderFeedResponse } from '@/lib/feed-helpers';
 import { eq, and, desc, sql, or } from 'drizzle-orm';
 import { publishedPostCondition } from '@/lib/content-visibility';
 
@@ -12,7 +12,7 @@ const FEED_ITEMS_DEFAULT = 10;
 const FEED_ITEMS_MIN = 5;
 const FEED_ITEMS_MAX = 50;
 
-export const GET: APIRoute = async ({ locals, params }) => {
+export const GET: APIRoute = async ({ request, locals, params }) => {
   const { db, options, urls, pluginCtx } = await getFeedRuntime(locals);
 
   const type = params.type || '';
@@ -21,7 +21,7 @@ export const GET: APIRoute = async ({ locals, params }) => {
   const isRss1 = type.startsWith('rss');
 
   if (isComments) {
-    return generateCommentsFeed(db, options, urls, isAtom, isRss1);
+    return generateCommentsFeed(db, options, urls, pluginCtx, isAtom, isRss1);
   }
 
   // Posts feed
@@ -130,11 +130,11 @@ export const GET: APIRoute = async ({ locals, params }) => {
     contentType = 'application/rss+xml; charset=utf-8';
   }
 
-  return new Response(xml, {
-    headers: {
-      'Content-Type': contentType,
-      'Cache-Control': 'public, s-maxage=1800', // 30 min edge cache for feeds
-    },
+  return renderFeedResponse(pluginCtx, xml, contentType, {
+    requestUrl: new URL(request?.url || urls.feedUrl || urls.siteUrl || 'http://localhost/'),
+    type,
+    options,
+    urls,
   });
 };
 
@@ -142,6 +142,7 @@ async function generateCommentsFeed(
   db: Database,
   options: any,
   urls: any,
+  pluginCtx: Parameters<typeof applyFilterSafely>[0],
   isAtom: boolean,
   isRss1: boolean
 ) {
@@ -168,7 +169,9 @@ async function generateCommentsFeed(
     lastBuildDate: recentRows[0] ? new Date((recentRows[0].comment.created || 0) * 1000) : new Date(),
   };
 
-  const items = recentRows.map(({ comment, content }) => ({
+  const items: FeedItem[] = [];
+  for (const { comment, content } of recentRows) {
+    let item: FeedItem = {
     title: `${comment.author || '匿名'} 的评论`,
     link: `${buildPermalink(
       { cid: content.cid, slug: content.slug, type: content.type, created: content.created },
@@ -179,7 +182,10 @@ async function generateCommentsFeed(
     content: renderContent(comment.text || '').html,
     date: new Date((comment.created || 0) * 1000),
     author: comment.author || '匿名',
-  }));
+    };
+    item = await applyFilterSafely(pluginCtx, 'feed:item', item);
+    items.push(item);
+  }
 
   let xml: string;
   let contentType: string;
@@ -195,10 +201,10 @@ async function generateCommentsFeed(
     contentType = 'application/rss+xml; charset=utf-8';
   }
 
-  return new Response(xml, {
-    headers: {
-      'Content-Type': contentType,
-      'Cache-Control': 'public, s-maxage=1800', // 30 min edge cache for comment feeds
-    },
+  return renderFeedResponse(pluginCtx, xml, contentType, {
+    requestUrl: urls.commentsFeedUrl,
+    type: 'comments',
+    options,
+    urls,
   });
 }

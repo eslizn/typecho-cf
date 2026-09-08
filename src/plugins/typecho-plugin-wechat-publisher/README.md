@@ -55,7 +55,7 @@ Typecho-CF 微信公众号同步插件，将文章同步到微信公众号草稿
 | `admin:managePosts:titleActions` | filter | 文章列表标题旁注入同步按钮 |
 | `admin:footer` | filter | 注入同步按钮的点击处理 JS |
 | `plugin:config:beforeSave` | filter | 保存前规范化配置并校验必填项/URL |
-| `plugin:<id>:action:auth` | filter | 将 sync 动作的最低权限声明为 editor |
+| `plugin:<id>:action:authorize` | filter | 将 sync 动作的最低权限声明为 editor |
 | `plugin:<id>:action` | action | 处理同步操作 |
 
 ## 依赖

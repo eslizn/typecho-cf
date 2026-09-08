@@ -1,12 +1,16 @@
 /**
  * Integration tests for feed route filtering.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as schema from '@/db/schema';
 import { createTestDb, type TestDatabase } from '../helpers';
 import { eq } from 'drizzle-orm';
 
 let testDb: TestDatabase;
+
+const { mockApplyFilterSafely } = vi.hoisted(() => ({
+  mockApplyFilterSafely: vi.fn(async (_ctx: unknown, _hook: string, value: unknown) => value),
+}));
 
 vi.mock('@/db', async () => {
   const actual = await vi.importActual<typeof import('@/db')>('@/db');
@@ -17,10 +21,15 @@ vi.mock('@/lib/plugin', () => ({
   parseActivatedPlugins: () => [],
   setActivatedPlugins: () => {},
   applyFilter: async (_ctx: any, _hook: string, data: any) => data,
-  applyFilterSafely: async (_ctx: any, _hook: string, data: any) => data,
+  applyFilterSafely: mockApplyFilterSafely,
 }));
 
 import { GET } from '@/pages/feed/[...type]';
+
+afterEach(() => {
+  mockApplyFilterSafely.mockReset();
+  mockApplyFilterSafely.mockImplementation(async (_ctx: unknown, _hook: string, value: unknown) => value);
+});
 
 async function seedOptions() {
   const options: Record<string, string> = {
@@ -147,6 +156,33 @@ describe('GET /feed feedItems clamp (G7-7)', () => {
     const xml = await res.text();
     const items = (xml.match(/<item>/g) || []).length;
     expect(items).toBe(10);
+  });
+});
+
+describe('GET /feed complete document filter', () => {
+  beforeEach(async () => {
+    testDb = await createTestDb();
+    await seedOptions();
+  });
+
+  it('runs feed:render after XML generation and preserves feed headers', async () => {
+    await seedContent('render-hook-post');
+    mockApplyFilterSafely.mockImplementation(async (_ctx, hook, value) => {
+      if (hook === 'feed:render') return `${String(value)}\n<!-- filtered-feed -->`;
+      return value;
+    });
+
+    const response = await GET({
+      request: new Request('https://example.com/feed/'),
+      locals: {},
+      params: { type: '' },
+    } as any);
+    const xml = await response.text();
+
+    expect(xml).toContain('<!-- filtered-feed -->');
+    expect(response.headers.get('content-type')).toContain('application/rss+xml');
+    expect(response.headers.get('cache-control')).toBe('public, s-maxage=1800');
+    expect(mockApplyFilterSafely.mock.calls.some(call => call[1] === 'feed:render')).toBe(true);
   });
 });
 

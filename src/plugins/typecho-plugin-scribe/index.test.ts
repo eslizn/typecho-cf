@@ -28,7 +28,7 @@ describe('typecho-plugin-scribe', () => {
       'admin:writePost:bottom',
       'plugin:config:beforeSave',
       'plugin:typecho-plugin-scribe:action',
-      'plugin:typecho-plugin-scribe:action:auth',
+      'plugin:typecho-plugin-scribe:action:authorize',
     ]);
   });
 

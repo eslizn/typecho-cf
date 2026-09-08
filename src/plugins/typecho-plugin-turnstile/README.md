@@ -25,20 +25,20 @@ Typecho-CF Cloudflare Turnstile 验证码插件，集成 Cloudflare Turnstile �
 
 ```
 前端页面加载
-  → archive:header hook 注入 Turnstile SDK + 状态管理 JS + 样式
-  → archive:footer hook 注入 Turnstile Widget HTML
-  → admin:loginHead / admin:loginForm hook 同理会注入登录页面
+  → frontend:head hook 注入 Turnstile SDK + 状态管理 JS + 样式
+  → frontend:footer hook 注入 Turnstile Widget HTML
+  → admin:login:head / admin:login:form hook 同理会注入登录页面
   → only on pages that have comments (pageContext.hasComments)
 
 用户提交评论
-  → feedback:comment hook 触发
+  → comment:beforeSave hook 触发
   → 已登录用户跳过
   → 检查 Widget token 是否存在 → 不存在则提示"请完成人机验证"
   → 调用 Cloudflare /siteverify API 验证 token
   → 失败则 _rejected → 403
 
 用户登录
-  → user:login hook 触发
+  → user:login:before hook 触发
   → 同上验证流程（登录场景不跳过已登录用户）
 ```
 
@@ -47,12 +47,12 @@ Typecho-CF Cloudflare Turnstile 验证码插件，集成 Cloudflare Turnstile �
 | Hook | 类型 | 用途 |
 |------|------|------|
 | `csp:directives` | filter | 为 Turnstile SDK、验证请求和 iframe 追加 CSP 来源 |
-| `feedback:comment` | filter | 评论提交时验证 Turnstile token |
-| `archive:header` | filter | 评论页面 `<head>` 注入 SDK 和状态管理 JS |
-| `archive:footer` | filter | 评论页面注入 Widget HTML |
-| `admin:loginHead` | filter | 登录页 `<head>` 注入 SDK |
-| `admin:loginForm` | filter | 登录表单注入 Widget |
-| `user:login` | filter | 登录请求验证 Turnstile token |
+| `comment:beforeSave` | filter | 评论提交时验证 Turnstile token |
+| `frontend:head` | filter | 评论页面 `<head>` 注入 SDK 和状态管理 JS |
+| `frontend:footer` | filter | 评论页面注入 Widget HTML |
+| `admin:login:head` | filter | 登录页 `<head>` 注入 SDK |
+| `admin:login:form` | filter | 登录表单注入 Widget |
+| `user:login:before` | filter | 登录请求验证 Turnstile token |
 
 ## 依赖
 

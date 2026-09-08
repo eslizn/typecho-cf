@@ -9,3 +9,5 @@ minimumReleaseAgeExclude:
   - astro
   - miniflare
   - wrangler
+  - '@types/node@26.5.0'
+  - marked@18.0.12

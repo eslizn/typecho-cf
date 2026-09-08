@@ -15,12 +15,13 @@ import {
   buildPermalink, buildAuthorLink,
   buildCategoryLink, buildTagLink, buildSearchLink,
 } from '@/lib/content';
-import { renderCommentText, renderContentExcerpt, renderMarkdownFiltered } from '@/lib/markdown';
+import { renderContentExcerpt, renderCommentTextFiltered, renderMarkdownFiltered } from '@/lib/markdown';
 import { paginate } from '@/lib/pagination';
 import { generateCommentToken } from '@/lib/auth';
 import { buildGravatarUrl } from '@/lib/gravatar';
 import { loadCommentPage } from '@/lib/comment-page';
 import type { RequestContext } from '@/lib/context';
+import { applyFilter, applyFilterSafely, doHook } from '@/lib/plugin';
 import { canViewContent, publishedPostCondition } from '@/lib/content-visibility';
 import type {
   ThemeIndexProps, ThemePostProps, ThemePageProps, ThemeArchiveProps, ThemeNotFoundProps,
@@ -82,17 +83,83 @@ function getPage(locals: Record<string, unknown>, url: URL): number {
   return raw ? (typeof raw === 'number' ? raw : parseInt(raw, 10) || 1) : 1;
 }
 
-function buildCommentTree(allComments: CommentRow[], options: SiteOptions): CommentNode[] {
+async function filterContentRow(
+  ctx: RequestContext,
+  post: ContentRow,
+  stage: 'list' | 'single',
+): Promise<ContentRow> {
+  const filtered = await applyFilterSafely(ctx, 'content:data', { ...post }, { content: post, stage });
+  if (!filtered || typeof filtered !== 'object') return post;
+  const candidate = filtered as Record<string, unknown>;
+  const display: Partial<ContentRow> = {};
+  if (typeof candidate.title === 'string' || candidate.title === null) display.title = candidate.title;
+  if (typeof candidate.text === 'string' || candidate.text === null) display.text = candidate.text;
+  if (typeof candidate.template === 'string' || candidate.template === null) display.template = candidate.template;
+  if (typeof candidate.order === 'number' && Number.isFinite(candidate.order)) display.order = candidate.order;
+  return {
+    ...post,
+    ...display,
+    // Query, visibility, relationship, and permalink identity are system-owned.
+    cid: post.cid,
+    type: post.type,
+    slug: post.slug,
+    status: post.status,
+    authorId: post.authorId,
+    parent: post.parent,
+    created: post.created,
+    modified: post.modified,
+    password: post.password,
+    commentsNum: post.commentsNum,
+    allowComment: post.allowComment,
+    allowFeed: post.allowFeed,
+    allowPing: post.allowPing,
+  };
+}
+
+async function filterContentTitle(ctx: RequestContext, title: string, post: ContentRow): Promise<string> {
+  const filtered = await applyFilterSafely(ctx, 'content:title', title, { content: post });
+  return typeof filtered === 'string' ? filtered : title;
+}
+
+async function filterContentExcerpt(ctx: RequestContext, excerpt: string, post: ContentRow): Promise<string> {
+  const filtered = await applyFilterSafely(ctx, 'content:excerpt', excerpt, { content: post });
+  return typeof filtered === 'string' ? filtered : excerpt;
+}
+
+async function filterCommentRow(ctx: RequestContext, comment: CommentRow): Promise<CommentRow> {
+  const filtered = await applyFilterSafely(ctx, 'comment:data', { ...comment }, { comment });
+  if (!filtered || typeof filtered !== 'object') return comment;
+  const candidate = filtered as Record<string, unknown>;
+  const display: Partial<CommentRow> = {};
+  if (typeof candidate.author === 'string' || candidate.author === null) display.author = candidate.author;
+  if (typeof candidate.mail === 'string' || candidate.mail === null) display.mail = candidate.mail;
+  if (typeof candidate.url === 'string' || candidate.url === null) display.url = candidate.url;
+  if (typeof candidate.text === 'string' || candidate.text === null) display.text = candidate.text;
+  return {
+    ...comment,
+    ...display,
+    // Keep comment identity, ownership, moderation and tree relationships intact.
+    coid: comment.coid,
+    cid: comment.cid,
+    ownerId: comment.ownerId,
+    parent: comment.parent,
+    status: comment.status,
+    created: comment.created,
+  };
+}
+
+async function buildCommentTree(ctx: RequestContext, allComments: CommentRow[], options: SiteOptions): Promise<CommentNode[]> {
+  const displayComments = await Promise.all(allComments.map(comment => filterCommentRow(ctx, comment)));
   const map = new Map<number, CommentNode>();
   const roots: CommentNode[] = [];
 
-  for (const c of allComments) {
+  for (const c of displayComments) {
     map.set(c.coid, {
       coid: c.coid,
       author: c.author || '匿名',
       mail: c.mail || '',
       url: c.url || '',
-      text: renderCommentText(c.text || '', {
+      text: await renderCommentTextFiltered(ctx, c.text || '', {
         markdown: !!options.commentsMarkdown,
         htmlTagAllowed: options.commentsHTMLTagAllowed,
       }),
@@ -102,10 +169,10 @@ function buildCommentTree(allComments: CommentRow[], options: SiteOptions): Comm
   }
 
   if (!options.commentsThreaded) {
-    return allComments.map(comment => map.get(comment.coid)!);
+    return displayComments.map(comment => map.get(comment.coid)!);
   }
 
-  for (const c of allComments) {
+  for (const c of displayComments) {
     const node = map.get(c.coid)!;
     if (c.parent && map.has(c.parent)) {
       map.get(c.parent)!.children.push(node);
@@ -190,27 +257,35 @@ function mapPostCategories(
   return map;
 }
 
-function toPostListItem(
+async function toPostListItem(
+  ctx: RequestContext,
   post: ContentRow,
   authorMap: AuthorMap,
   categoryMap: CategoryMap,
   siteUrl: string,
   permalinkPattern?: string | null,
-): PostListItem {
-  const author = authorMap.get(post.authorId || 0);
-  const categories = categoryMap.get(post.cid) || [];
+): Promise<PostListItem> {
+  const displayPost = await filterContentRow(ctx, post, 'list');
+  const author = authorMap.get(displayPost.authorId || 0);
+  const categories = categoryMap.get(displayPost.cid) || [];
   const permalink = buildPermalink(
-    { cid: post.cid, slug: post.slug, type: post.type, created: post.created, category: categories[0]?.slug },
+    { cid: displayPost.cid, slug: displayPost.slug, type: displayPost.type, created: displayPost.created, category: categories[0]?.slug },
     siteUrl,
     permalinkPattern,
   );
+  const title = await filterContentTitle(ctx, displayPost.title || '无标题', displayPost);
+  const excerpt = await filterContentExcerpt(
+    ctx,
+    renderContentExcerpt(displayPost.text || '', '- 阅读剩余部分 -', permalink),
+    displayPost,
+  );
   return {
-    cid: post.cid,
-    title: post.title || '无标题',
+    cid: displayPost.cid,
+    title,
     permalink,
-    excerpt: renderContentExcerpt(post.text || '', '- 阅读剩余部分 -', permalink),
-    created: post.created || 0,
-    commentsNum: post.commentsNum || 0,
+    excerpt,
+    created: displayPost.created || 0,
+    commentsNum: displayPost.commentsNum || 0,
     author: author ? { uid: author.uid, name: author.name || '', screenName: author.screenName || author.name || '' } : null,
     categories,
   };
@@ -224,6 +299,8 @@ interface ArchiveParams {
   archiveTitle: string;
   archiveType: 'index' | 'category' | 'tag' | 'author' | 'search';
   baseUrl: string;
+  hookPoint: 'archive:index' | 'archive:category' | 'archive:tag' | 'archive:author' | 'archive:search';
+  hookParams: Record<string, string | number | undefined>;
   /** Additional WHERE conditions beyond type='post' + status='publish' */
   extraWhere?: ReturnType<typeof sql>;
   /** If set, INNER JOIN relationships and filter on this meta ID */
@@ -233,6 +310,55 @@ interface ArchiveParams {
   ftsMatch?: string | null;
   /** Stable key fragment for versioned archive count caching. */
   countKey?: string;
+}
+
+interface ArchiveLifecycleContext {
+  archiveType: ArchiveParams['archiveType'] | 'single';
+  requestUrl: string;
+  path: string;
+  params: Record<string, string | number | undefined>;
+  options: SiteOptions;
+  urls: RequestContext['urls'];
+  user: RequestContext['user'];
+}
+
+interface ArchiveQueryState {
+  page: number;
+  pageSize: number;
+  /** Optional plugin condition; system visibility and archive scope stay protected. */
+  extraWhere?: ReturnType<typeof sql>;
+}
+
+function buildArchiveLifecycleContext(
+  ctx: RequestContext,
+  requestUrl: string,
+  params: ArchiveParams,
+): ArchiveLifecycleContext {
+  return {
+    archiveType: params.archiveType,
+    requestUrl,
+    path: new URL(requestUrl).pathname,
+    params: params.hookParams,
+    options: ctx.options,
+    urls: ctx.urls,
+    user: ctx.user,
+  };
+}
+
+function isSqlCondition(value: unknown): value is ReturnType<typeof sql> {
+  return !!value
+    && typeof value === 'object'
+    && Array.isArray((value as { queryChunks?: unknown }).queryChunks);
+}
+
+function clampArchivePage(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.min(10_000, Math.max(1, Math.floor(parsed))) : fallback;
+}
+
+function clampArchivePageSize(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.min(100, Math.max(1, Math.floor(parsed))) : fallback;
 }
 
 const ARCHIVE_COUNT_CACHE_TTL_MS = 60_000;
@@ -272,9 +398,20 @@ async function prepareArchiveData(
   params: ArchiveParams,
 ): Promise<ThemeArchiveProps> {
   const { db, options, urls } = ctx;
+  const lifecycle = buildArchiveLifecycleContext(ctx, requestUrl, params);
+  await doHook(ctx, 'archive:init', lifecycle);
+  await doHook(ctx, params.hookPoint, lifecycle);
+
+  const initialPage = getPage(locals, url);
+  const defaultPageSize = Number(options.pageSize) || 5;
+  const filteredQuery = await applyFilter(ctx, 'archive:query', {
+    page: initialPage,
+    pageSize: defaultPageSize,
+  } as ArchiveQueryState, lifecycle) as Partial<ArchiveQueryState> | null | undefined;
+  const page = clampArchivePage(filteredQuery?.page, initialPage);
+  const pageSize = clampArchivePageSize(filteredQuery?.pageSize, defaultPageSize);
+  const pluginWhere = isSqlCondition(filteredQuery?.extraWhere) ? filteredQuery.extraWhere : undefined;
   const commonPromise = loadCommon(ctx, requestUrl);
-  const page = getPage(locals, url);
-  const pageSize = options.pageSize || 5;
 
   // G7-5: every archive (index, category, tag, author, search) hides
   // posts whose `created` is in the future. The legacy code only
@@ -284,6 +421,7 @@ async function prepareArchiveData(
     publishedPostCondition(),
   ];
   if (params.extraWhere) baseConditions.push(params.extraWhere);
+  if (pluginWhere) baseConditions.push(pluginWhere);
   if (params.ftsMatch) {
     baseConditions.push(sql`${contentsFtsTableRef} MATCH ${params.ftsMatch}`);
   }
@@ -346,8 +484,12 @@ async function prepareArchiveData(
   // (type, status, created) index keeps plain archive counts index-only.
   // Cache by cacheVersion + archive identity to avoid repeating count(*)
   // on every page view within an isolate.
+  // A plugin-provided SQL condition is not represented by the normal archive
+  // identity key. Skip the isolate count cache in that case rather than
+  // returning a count produced for a different filtered result set.
+  const useCountCache = !pluginWhere;
   const countCacheKey = `${options.cacheVersion}\0${params.archiveType}\0${params.countKey || params.baseUrl}\0${params.joinMid ?? ''}\0${params.ftsMatch || ''}`;
-  const cachedCount = readCachedArchiveCount(countCacheKey);
+  const cachedCount = useCountCache ? readCachedArchiveCount(countCacheKey) : undefined;
   const countStatement = cachedCount === undefined
     ? applyJoins(
         db.select({ count: sql<number>`count(*)` }).from(schema.contents),
@@ -370,7 +512,7 @@ async function prepareArchiveData(
   if (countStatement) {
     const [countResult, posts] = batchResult as [Array<{ count: number }>, unknown];
     totalPosts = Number(countResult?.[0]?.count ?? 0);
-    writeCachedArchiveCount(countCacheKey, totalPosts);
+    if (useCountCache) writeCachedArchiveCount(countCacheKey, totalPosts);
     initialPosts = posts;
   } else {
     totalPosts = cachedCount!;
@@ -453,9 +595,9 @@ async function prepareArchiveData(
     ...common,
     archiveTitle: params.archiveTitle,
     archiveType: params.archiveType,
-    posts: rawPosts.map(p =>
-      toPostListItem(p, authorMap, categoryMap, urls.siteUrl, options.permalinkPattern as string | undefined)
-    ),
+    posts: await Promise.all(rawPosts.map(p =>
+      toPostListItem(ctx, p, authorMap, categoryMap, urls.siteUrl, options.permalinkPattern as string | undefined)
+    )),
     pagination: pg,
   };
 }
@@ -472,6 +614,8 @@ export async function prepareIndexData(
     archiveTitle: '',
     archiveType: 'index',
     baseUrl: ctx.urls.siteUrl + '/',
+    hookPoint: 'archive:index',
+    hookParams: {},
     // G7-5: future-post filter is shared by prepareArchiveData now, no
     // need to duplicate it here.
   });
@@ -505,6 +649,21 @@ export async function preparePostData(
   if (!canViewContent(contentRow, { isLoggedIn, uid: user?.uid })) {
     return new Response('Not Found', { status: 404 });
   }
+
+  const singleLifecycle: ArchiveLifecycleContext = {
+    archiveType: 'single',
+    requestUrl,
+    path: new URL(requestUrl).pathname,
+    params: { cid: contentRow.cid, type: contentRow.type || 'post' },
+    options,
+    urls,
+    user,
+  };
+  await doHook(ctx, 'archive:init', singleLifecycle);
+  await doHook(ctx, 'archive:single', singleLifecycle);
+
+  const displayContentRow = await filterContentRow(ctx, contentRow, 'single');
+  const displayTitle = await filterContentTitle(ctx, displayContentRow.title || '无标题', displayContentRow);
 
   // Password
   const hasPassword = !!contentRow.password;
@@ -568,7 +727,7 @@ export async function preparePostData(
     permalink: buildTagLink(m.slug || '', urls.siteUrl),
   }));
 
-  const commentTree = buildCommentTree(allComments, options);
+  const commentTree = await buildCommentTree(ctx, allComments, options);
   const gravatarMap = options.commentsAvatar
     ? await buildGravatarMap(allComments, options.commentsAvatarRating || 'G')
     : {};
@@ -582,7 +741,7 @@ export async function preparePostData(
   const allowComment = contentRow.allowComment === '1';
   const renderedContent = hasPassword && !passwordVerified
     ? '<p>此内容已加密，请输入密码访问。</p>'
-    : await renderMarkdownFiltered(ctx, contentRow.text || '');
+    : await renderMarkdownFiltered(ctx, displayContentRow.text || '');
 
   // Generate CSRF token for comment form, bound to cid so that pages
   // visited via email/RSS without a referer still validate.
@@ -594,7 +753,7 @@ export async function preparePostData(
     ...common,
     post: {
       cid: contentRow.cid,
-      title: contentRow.title || '无标题',
+      title: displayTitle,
       permalink,
       content: renderedContent,
       created: contentRow.created || 0,
@@ -645,6 +804,21 @@ export async function preparePageData(
     return new Response('Not Found', { status: 404 });
   }
 
+  const singleLifecycle: ArchiveLifecycleContext = {
+    archiveType: 'single',
+    requestUrl,
+    path: new URL(requestUrl).pathname,
+    params: { cid: pageRow.cid, slug: cleanSlug, type: 'page' },
+    options,
+    urls,
+    user,
+  };
+  await doHook(ctx, 'archive:init', singleLifecycle);
+  await doHook(ctx, 'archive:single', singleLifecycle);
+
+  const displayPageRow = await filterContentRow(ctx, pageRow, 'single');
+  const displayTitle = await filterContentTitle(ctx, displayPageRow.title || '无标题', displayPageRow);
+
   const permalink = buildPermalink(
     { cid: pageRow.cid, slug: pageRow.slug, type: pageRow.type, created: pageRow.created },
     urls.siteUrl,
@@ -661,7 +835,7 @@ export async function preparePageData(
   ]);
   const allComments = commentPage.rows;
 
-  const commentTree = buildCommentTree(allComments, options);
+  const commentTree = await buildCommentTree(ctx, allComments, options);
   const gravatarMap = options.commentsAvatar
     ? await buildGravatarMap(allComments, options.commentsAvatarRating || 'G')
     : {};
@@ -669,7 +843,7 @@ export async function preparePageData(
 
   const renderedContent = hasPassword && !passwordVerified
     ? '<p>此内容已加密，请输入密码访问。</p>'
-    : await renderMarkdownFiltered(ctx, pageRow.text || '');
+    : await renderMarkdownFiltered(ctx, displayPageRow.text || '');
 
   // Generate CSRF token for comment form, bound to cid so that pages
   // visited via email/RSS without a referer still validate.
@@ -681,7 +855,7 @@ export async function preparePageData(
     ...common,
     page: {
       cid: pageRow.cid,
-      title: pageRow.title || '无标题',
+      title: displayTitle,
       slug: cleanSlug,
       permalink,
       content: renderedContent,
@@ -718,6 +892,8 @@ export async function prepareCategoryData(
     archiveTitle: `分类 ${category.name} 下的文章`,
     archiveType: 'category',
     baseUrl: buildCategoryLink(slug, ctx.urls.siteUrl, ctx.options.categoryPattern as string | undefined),
+    hookPoint: 'archive:category',
+    hookParams: { slug, mid: category.mid },
     joinMid: category.mid,
   });
 }
@@ -741,6 +917,8 @@ export async function prepareTagData(
     archiveTitle: `标签 ${tag.name} 下的文章`,
     archiveType: 'tag',
     baseUrl: buildTagLink(slug, ctx.urls.siteUrl),
+    hookPoint: 'archive:tag',
+    hookParams: { slug, mid: tag.mid },
     joinMid: tag.mid,
   });
 }
@@ -764,6 +942,8 @@ export async function prepareAuthorData(
     archiveTitle: `${author.screenName || author.name} 发布的文章`,
     archiveType: 'author',
     baseUrl: buildAuthorLink(uidNum, ctx.urls.siteUrl),
+    hookPoint: 'archive:author',
+    hookParams: { uid: uidNum },
     extraWhere: eq(schema.contents.authorId, uidNum),
     authorOverride: authorMap,
   });
@@ -795,6 +975,8 @@ export async function prepareSearchData(
     archiveTitle: `包含关键字 ${trimmed} 的文章`,
     archiveType: 'search',
     baseUrl: buildSearchLink(trimmed, ctx.urls.siteUrl),
+    hookPoint: 'archive:search',
+    hookParams: { keywords: trimmed },
     // empty/too-short keyword → no results, never scans; keywords with any
     // short term (or an unavailable FTS index) keep the LIKE scan.
     extraWhere: !isUsefulKeyword

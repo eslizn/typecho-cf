@@ -105,114 +105,172 @@ interface HookRegistration {
 // ==================== Hook Definitions ====================
 
 /**
- * Complete hook point definitions, mapped from Typecho's original plugin system.
- * 
- * Naming convention: component:hookName
- * - Components map to Typecho's Widget classes
- * - Hook names match original Typecho names where applicable
+ * Canonical hook point definitions.
+ *
+ * Hook names intentionally describe the resource and lifecycle stage. The
+ * deprecated aliases below remain accepted by the public API so existing
+ * plugins keep working while new plugins can use one consistent vocabulary.
  */
-export const HookPoints = {
-  // --- Core System ---
-  'system:begin': 'system:begin',                    // System startup
-  'system:end': 'system:end',                        // System shutdown
-  'route:request': 'route:request',                  // Filter: custom plugin route handling
+const CanonicalHookPoints = {
+  // --- Request lifecycle ---
+  'request:begin': 'request:begin',
+  'request:end': 'request:end',
+  'request:route': 'request:route',
 
   // --- Admin UI ---
-  'admin:header': 'admin:header',                    // Admin head section (inject CSS/meta)
-  'admin:footer': 'admin:footer',                    // Admin footer (inject JS)
-  'admin:navBar': 'admin:navBar',                    // Admin navigation extension
-  'admin:begin': 'admin:begin',                      // Admin page begin
-  'admin:end': 'admin:end',                          // Admin page end
-  'admin:loginHead': 'admin:loginHead',              // Filter: HTML injected into login page <head>
-  'admin:loginForm': 'admin:loginForm',              // Filter: HTML injected into login page form
-  'admin:page': 'admin:page',                        // Filter: plugin-owned admin page HTML
+  'admin:head': 'admin:head',
+  'admin:footer': 'admin:footer',
+  'admin:nav': 'admin:nav',
+  'admin:begin': 'admin:begin',
+  'admin:end': 'admin:end',
+  'admin:login:head': 'admin:login:head',
+  'admin:login:form': 'admin:login:form',
+  'admin:page': 'admin:page',
+  'admin:writePost:option': 'admin:writePost:option',
+  'admin:writePost:advanceOption': 'admin:writePost:advanceOption',
+  'admin:writePost:bottom': 'admin:writePost:bottom',
+  'admin:managePosts:titleActions': 'admin:managePosts:titleActions',
+  'admin:writePage:option': 'admin:writePage:option',
+  'admin:writePage:advanceOption': 'admin:writePage:advanceOption',
+  'admin:writePage:bottom': 'admin:writePage:bottom',
+  'admin:profile:bottom': 'admin:profile:bottom',
+  'plugin:config:beforeSave': 'plugin:config:beforeSave',
 
-  // --- Content Editing (Admin) ---
-  'admin:writePost:option': 'admin:writePost:option',          // Post editor sidebar options
-  'admin:writePost:advanceOption': 'admin:writePost:advanceOption', // Post editor advanced options
-  'admin:writePost:bottom': 'admin:writePost:bottom',          // Post editor bottom area
-  'admin:managePosts:titleActions': 'admin:managePosts:titleActions', // Post list title inline actions
-  'admin:writePage:option': 'admin:writePage:option',          // Page editor sidebar options
-  'admin:writePage:advanceOption': 'admin:writePage:advanceOption', // Page editor advanced options
-  'admin:writePage:bottom': 'admin:writePage:bottom',          // Page editor bottom area
-  'admin:profile:bottom': 'admin:profile:bottom',              // Profile page bottom area
-  'plugin:config:beforeSave': 'plugin:config:beforeSave',      // Filter: validate or normalize plugin config before saving
+  // --- Frontend archives and render lifecycle ---
+  'archive:query': 'archive:query',
+  'archive:init': 'archive:init',
+  'archive:beforeRender': 'archive:beforeRender',
+  'archive:afterRender': 'archive:afterRender',
+  'archive:index': 'archive:index',
+  'archive:single': 'archive:single',
+  'archive:category': 'archive:category',
+  'archive:tag': 'archive:tag',
+  'archive:author': 'archive:author',
+  'archive:search': 'archive:search',
+  'frontend:head': 'frontend:head',
+  'frontend:footer': 'frontend:footer',
 
-  // --- Content Display (Frontend) ---
-  'archive:select': 'archive:select',               // Filter: DB query for content listing
-  'archive:handleInit': 'archive:handleInit',        // After content init
-  'archive:header': 'archive:header',                // Frontend head section
-  'archive:footer': 'archive:footer',                // Frontend footer section
-  'archive:beforeRender': 'archive:beforeRender',    // Before template render
-  'archive:afterRender': 'archive:afterRender',      // After template render
-  'archive:indexHandle': 'archive:indexHandle',       // Index page processing
-  'archive:singleHandle': 'archive:singleHandle',    // Single post/page processing
-  'archive:categoryHandle': 'archive:categoryHandle', // Category archive processing
-  'archive:tagHandle': 'archive:tagHandle',          // Tag archive processing
-  'archive:searchHandle': 'archive:searchHandle',    // Search results processing
+  // --- Content and comment display ---
+  'content:data': 'content:data',
+  'content:title': 'content:title',
+  'content:excerpt': 'content:excerpt',
+  'content:markdown': 'content:markdown',
+  'content:rendered': 'content:rendered',
+  'comment:data': 'comment:data',
+  'comment:rendered': 'comment:rendered',
+  'comment:markdown': 'comment:markdown',
 
-  // --- Content Filtering ---
-  'content:filter': 'content:filter',                // Filter: raw content row data
-  'content:title': 'content:title',                  // Filter: content title
-  'content:excerpt': 'content:excerpt',              // Filter: content excerpt/summary
-  'content:markdown': 'content:markdown',            // Filter: Markdown processing
-  'content:content': 'content:content',              // Filter: rendered HTML content
+  // --- Content management ---
+  'post:write': 'post:write',
+  'post:afterPublish': 'post:afterPublish',
+  'post:afterSave': 'post:afterSave',
+  'post:beforeDelete': 'post:beforeDelete',
+  'post:afterDelete': 'post:afterDelete',
+  'page:write': 'page:write',
+  'page:afterPublish': 'page:afterPublish',
+  'page:afterSave': 'page:afterSave',
+  'page:beforeDelete': 'page:beforeDelete',
+  'page:afterDelete': 'page:afterDelete',
 
-  // --- Comment Filtering ---
-  'comment:filter': 'comment:filter',                // Filter: raw comment row data
-  'comment:content': 'comment:content',              // Filter: rendered comment content
-  'comment:markdown': 'comment:markdown',            // Filter: comment Markdown
+  // --- Comment and incoming feedback ---
+  'comment:beforeSave': 'comment:beforeSave',
+  'comment:afterCreate': 'comment:afterCreate',
+  'feedback:trackback:before': 'feedback:trackback:before',
+  'feedback:trackback:after': 'feedback:trackback:after',
+  'feedback:pingback:before': 'feedback:pingback:before',
+  'feedback:pingback:after': 'feedback:pingback:after',
+  'comment:reply': 'comment:reply',
+  'comment:action': 'comment:action',
 
-  // --- Content Management ---
-  'post:write': 'post:write',                        // Filter: post data before save
-  'post:finishPublish': 'post:finishPublish',        // After post published
-  'post:finishSave': 'post:finishSave',              // After post saved (draft or publish)
-  'post:delete': 'post:delete',                      // Before post delete
-  'post:finishDelete': 'post:finishDelete',          // After post deleted
-  'page:write': 'page:write',                        // Filter: page data before save
-  'page:finishPublish': 'page:finishPublish',        // After page published
-  'page:finishSave': 'page:finishSave',              // After page saved
-  'page:delete': 'page:delete',                      // Before page delete
-  'page:finishDelete': 'page:finishDelete',          // After page deleted
+  // --- User system ---
+  'user:login:before': 'user:login:before',
+  'user:login:success': 'user:login:success',
+  'user:login:failure': 'user:login:failure',
+  'user:logout': 'user:logout',
+  'user:register:before': 'user:register:before',
+  'user:register:after': 'user:register:after',
 
-  // --- Comment Management ---
-  'feedback:comment': 'feedback:comment',            // Filter: comment data before save
-  'feedback:finishComment': 'feedback:finishComment', // After comment saved
-  'feedback:trackback': 'feedback:trackback',        // Filter: incoming trackback
-  'feedback:finishTrackback': 'feedback:finishTrackback',
-  'feedback:pingback': 'feedback:pingback',          // Filter: incoming pingback
-  'feedback:finishPingback': 'feedback:finishPingback',
-  'feedback:reply': 'feedback:reply',                // On comment reply
-  'comment:action': 'comment:action',                // Call: comment moderation action applied
+  // --- File upload ---
+  'upload:before': 'upload:before',
+  'upload:after': 'upload:after',
+  'upload:delete': 'upload:delete',
 
-  // --- User System ---
-  'user:login': 'user:login',                        // Login attempt
-  'user:loginSucceed': 'user:loginSucceed',          // Login success
-  'user:loginFail': 'user:loginFail',                // Login failure
-  'user:logout': 'user:logout',                      // User logout
-  'user:register': 'user:register',                  // Filter: registration data
-  'user:finishRegister': 'user:finishRegister',      // After registration
-
-  // --- File Upload ---
-  'upload:beforeUpload': 'upload:beforeUpload',      // Before file upload
-  'upload:upload': 'upload:upload',                  // After file uploaded
-  'upload:delete': 'upload:delete',                  // File deletion
-
-  // --- Feed ---
-  'feed:item': 'feed:item',                          // Filter: feed item data
-  'feed:generate': 'feed:generate',                  // Filter: complete feed XML
-
-  // --- Sidebar / Widgets ---
-  'widget:sidebar': 'widget:sidebar',                // Filter: sidebar data
-
-  // --- Security headers ---
-  'csp:directives': 'csp:directives',                // Filter: CSP directives map (G3-5)
-
-  // --- Mail ---
-  'mail:send': 'mail:send',                          // Filter: mail sending (plugin adapter)
+  // --- Feed, sidebar, and infrastructure ---
+  'feed:item': 'feed:item',
+  'feed:render': 'feed:render',
+  'sidebar:data': 'sidebar:data',
+  'csp:directives': 'csp:directives',
+  'mail:send': 'mail:send',
 } as const;
 
-export type HookPoint = typeof HookPoints[keyof typeof HookPoints];
+/** @deprecated Hook names retained for third-party plugin compatibility. */
+export const DeprecatedHookPointAliases = {
+  'system:begin': 'request:begin',
+  'system:end': 'request:end',
+  'route:request': 'request:route',
+  'admin:header': 'admin:head',
+  'admin:navBar': 'admin:nav',
+  'admin:loginHead': 'admin:login:head',
+  'admin:loginForm': 'admin:login:form',
+  'archive:select': 'archive:query',
+  'archive:handleInit': 'archive:init',
+  'archive:header': 'frontend:head',
+  'archive:footer': 'frontend:footer',
+  'archive:indexHandle': 'archive:index',
+  'archive:singleHandle': 'archive:single',
+  'archive:categoryHandle': 'archive:category',
+  'archive:tagHandle': 'archive:tag',
+  'archive:searchHandle': 'archive:search',
+  'content:filter': 'content:data',
+  'content:content': 'content:rendered',
+  'comment:filter': 'comment:data',
+  'comment:content': 'comment:rendered',
+  'post:finishPublish': 'post:afterPublish',
+  'post:finishSave': 'post:afterSave',
+  'post:delete': 'post:beforeDelete',
+  'post:finishDelete': 'post:afterDelete',
+  'page:finishPublish': 'page:afterPublish',
+  'page:finishSave': 'page:afterSave',
+  'page:delete': 'page:beforeDelete',
+  'page:finishDelete': 'page:afterDelete',
+  'feedback:comment': 'comment:beforeSave',
+  'feedback:finishComment': 'comment:afterCreate',
+  'feedback:trackback': 'feedback:trackback:before',
+  'feedback:finishTrackback': 'feedback:trackback:after',
+  'feedback:pingback': 'feedback:pingback:before',
+  'feedback:finishPingback': 'feedback:pingback:after',
+  'feedback:reply': 'comment:reply',
+  'user:login': 'user:login:before',
+  'user:loginSucceed': 'user:login:success',
+  'user:loginFail': 'user:login:failure',
+  'user:register': 'user:register:before',
+  'user:finishRegister': 'user:register:after',
+  'upload:beforeUpload': 'upload:before',
+  'upload:upload': 'upload:after',
+  'feed:generate': 'feed:render',
+  'widget:sidebar': 'sidebar:data',
+} as const satisfies Record<string, typeof CanonicalHookPoints[keyof typeof CanonicalHookPoints]>;
+
+/**
+ * Public constants include canonical names and deprecated keys whose values
+ * already point at the canonical registry key.
+ */
+export const HookPoints = {
+  ...CanonicalHookPoints,
+  ...DeprecatedHookPointAliases,
+} as const;
+
+export type HookPoint = typeof CanonicalHookPoints[keyof typeof CanonicalHookPoints];
+
+/** Normalize static aliases and the dynamic plugin action authorization hook. */
+export function normalizeHookPoint(hookPoint: string): string {
+  const alias = DeprecatedHookPointAliases[hookPoint as keyof typeof DeprecatedHookPointAliases];
+  if (alias) return alias;
+  if (hookPoint.endsWith(':action:auth')) {
+    return `${hookPoint.slice(0, -':auth'.length)}:authorize`;
+  }
+  return hookPoint;
+}
 
 // ==================== Plugin Registry ====================
 
@@ -272,7 +330,7 @@ export function resetPluginInitState(): void {
 /**
  * Plugins can register admin paths that bypass the reserved-core-path guard
  * in middleware. Call this during plugin init() for each /admin/ or /api/admin/
- * path the plugin serves via route:request.
+ * path the plugin serves via request:route.
  */
 const pluginAdminPaths = new Set<string>();
 
@@ -285,7 +343,7 @@ export function isPluginAdminPath(path: string): boolean {
 }
 
 /**
- * Front-end routes served by plugins via route:request. Registered during
+ * Front-end routes served by plugins via request:route. Registered during
  * plugin init() (and lazily refreshed by plugins whose route path is
  * configurable). Middleware uses this table to:
  *   1. exempt plugin routes from the content-path deprecation check, and
@@ -294,7 +352,7 @@ export function isPluginAdminPath(path: string): boolean {
  *
  * Routing priority is: system fixed > system routes (admin permalink
  * patterns) > plugin routes. Middleware resolves the permalink rewrite
- * target before route:request and skips route:request entirely once a
+ * target before request:route and skips request:route entirely once a
  * path is claimed by a configured system pattern, so plugin registrations
  * never shadow a system route.
  */
@@ -478,10 +536,11 @@ export function addHook(
   handler: CallHandler | FilterHandler,
   priority = 10,
 ): void {
-  if (!hookRegistry.has(hookPoint)) {
-    hookRegistry.set(hookPoint, []);
+  const normalizedPoint = normalizeHookPoint(hookPoint);
+  if (!hookRegistry.has(normalizedPoint)) {
+    hookRegistry.set(normalizedPoint, []);
   }
-  const handlers = hookRegistry.get(hookPoint)!;
+  const handlers = hookRegistry.get(normalizedPoint)!;
   if (handlers.some(h => h.pluginId === pluginId && h.handler === handler)) {
     return;
   }
@@ -512,14 +571,15 @@ export function removePluginHooks(pluginId: string): void {
  * @param args - Arguments to pass to handlers
  */
 export async function doHook(ctx: HookContext, hookPoint: string, ...args: any[]): Promise<void> {
-  if (!hasHook(ctx, hookPoint)) return;
+  const normalizedPoint = normalizeHookPoint(hookPoint);
+  if (!hasHook(ctx, normalizedPoint)) return;
 
-  for (const reg of hookRegistry.get(hookPoint)!) {
+  for (const reg of hookRegistry.get(normalizedPoint)!) {
     if (!ctx.activatedPlugins.has(reg.pluginId)) continue;
     try {
       await (reg.handler as CallHandler)(...args);
     } catch (err) {
-      console.error(`[plugin] Error in hook ${hookPoint} from plugin ${reg.pluginId}:`, err);
+      console.error(`[plugin] Error in hook ${normalizedPoint} from plugin ${reg.pluginId}:`, err);
     }
   }
 }
@@ -536,15 +596,16 @@ export async function doHook(ctx: HookContext, hookPoint: string, ...args: any[]
  * @returns The filtered value
  */
 export async function applyFilter(ctx: HookContext, hookPoint: string, value: any, ...args: any[]): Promise<any> {
-  if (!hasHook(ctx, hookPoint)) return value;
+  const normalizedPoint = normalizeHookPoint(hookPoint);
+  if (!hasHook(ctx, normalizedPoint)) return value;
 
   let result = value;
-  for (const reg of hookRegistry.get(hookPoint)!) {
+  for (const reg of hookRegistry.get(normalizedPoint)!) {
     if (!ctx.activatedPlugins.has(reg.pluginId)) continue;
     try {
       result = await (reg.handler as FilterHandler)(result, ...args);
     } catch (err) {
-      console.error(`[plugin] Error in filter ${hookPoint} from plugin ${reg.pluginId}:`, err);
+      console.error(`[plugin] Error in filter ${normalizedPoint} from plugin ${reg.pluginId}:`, err);
       throw err;
     }
   }
@@ -557,15 +618,16 @@ export async function applyFilter(ctx: HookContext, hookPoint: string, value: an
  * preferable to failing the entire page.
  */
 export async function applyFilterSafely(ctx: HookContext, hookPoint: string, value: any, ...args: any[]): Promise<any> {
-  if (!hasHook(ctx, hookPoint)) return value;
+  const normalizedPoint = normalizeHookPoint(hookPoint);
+  if (!hasHook(ctx, normalizedPoint)) return value;
 
   let result = value;
-  for (const reg of hookRegistry.get(hookPoint)!) {
+  for (const reg of hookRegistry.get(normalizedPoint)!) {
     if (!ctx.activatedPlugins.has(reg.pluginId)) continue;
     try {
       result = await (reg.handler as FilterHandler)(result, ...args);
     } catch (err) {
-      console.error(`[plugin] Error in safe filter ${hookPoint} from plugin ${reg.pluginId}:`, err);
+      console.error(`[plugin] Error in safe filter ${normalizedPoint} from plugin ${reg.pluginId}:`, err);
     }
   }
   return result;
@@ -583,16 +645,17 @@ export async function applyFilterUntil(
   stopWhen: (value: any) => boolean,
   ...args: any[]
 ): Promise<any> {
-  if (!hasHook(ctx, hookPoint)) return value;
+  const normalizedPoint = normalizeHookPoint(hookPoint);
+  if (!hasHook(ctx, normalizedPoint)) return value;
 
   let result = value;
-  for (const reg of hookRegistry.get(hookPoint)!) {
+  for (const reg of hookRegistry.get(normalizedPoint)!) {
     if (!ctx.activatedPlugins.has(reg.pluginId)) continue;
     try {
       result = await (reg.handler as FilterHandler)(result, ...args);
       if (stopWhen(result)) return result;
     } catch (err) {
-      console.error(`[plugin] Error in short-circuit filter ${hookPoint} from plugin ${reg.pluginId}:`, err);
+      console.error(`[plugin] Error in short-circuit filter ${normalizedPoint} from plugin ${reg.pluginId}:`, err);
     }
   }
   return result;
@@ -602,7 +665,7 @@ export async function applyFilterUntil(
  * Check if a hook point has any registered handlers
  */
 export function hasHook(ctx: HookContext, hookPoint: string): boolean {
-  const handlers = hookRegistry.get(hookPoint);
+  const handlers = hookRegistry.get(normalizeHookPoint(hookPoint));
   if (!handlers) return false;
   return handlers.some(h => ctx.activatedPlugins.has(h.pluginId));
 }
@@ -649,8 +712,8 @@ export function parseActivatedPlugins(value: string | null | undefined): string[
  * Collect client-side HTML snippets from all activated plugins.
  *
  * Plugins register their frontend output by hooking into:
- *   - archive:header (filter): receives current headHtml, returns headHtml with appended content
- *   - archive:footer (filter): receives current bodyHtml, returns bodyHtml with appended content
+ *   - frontend:head (filter): receives current headHtml, returns headHtml with appended content
+ *   - frontend:footer (filter): receives current bodyHtml, returns bodyHtml with appended content
  *
  * This function applies both filters and returns the aggregated result.
  * Themes should call this once and inject the HTML into <head> and before </body>.
@@ -670,8 +733,8 @@ export async function getClientSnippets(
   options: Record<string, any>,
   pageContext?: PageContext,
 ): Promise<{ headHtml: string; bodyHtml: string }> {
-  let headHtml = await applyFilterSafely(ctx, 'archive:header', '', { options, pageContext });
-  let bodyHtml = await applyFilterSafely(ctx, 'archive:footer', '', { options, pageContext });
+  let headHtml = await applyFilterSafely(ctx, 'frontend:head', '', { options, pageContext });
+  let bodyHtml = await applyFilterSafely(ctx, 'frontend:footer', '', { options, pageContext });
   return { headHtml, bodyHtml };
 }
 

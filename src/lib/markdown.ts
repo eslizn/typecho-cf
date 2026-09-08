@@ -1,6 +1,6 @@
 import { marked } from 'marked';
 import sanitizeHtml from 'sanitize-html';
-import { applyFilter, type HookContext } from '@/lib/plugin';
+import { applyFilter, applyFilterSafely, type HookContext } from '@/lib/plugin';
 import { escapeHtml as escapeHtmlShared } from '@/lib/escape';
 
 // ─── HTML escape helper ─────────────────────────────────────────────────────
@@ -154,6 +154,28 @@ export function renderCommentText(text: string, options: CommentRenderOptions = 
   return autop(sanitized);
 }
 
+/** Render a comment while allowing presentation-only plugin filters. */
+export async function renderCommentTextFiltered(
+  ctx: HookContext,
+  text: string,
+  options: CommentRenderOptions = {},
+): Promise<string> {
+  if (!text) return '';
+
+  let source = stripMarkdownPrefix(text);
+  const sanitizeOptions = buildCommentSanitizeOptions(options.htmlTagAllowed, !!options.markdown);
+  let rendered: string;
+  if (options.markdown) {
+    const filteredSource = await applyFilterSafely(ctx, 'comment:markdown', source);
+    if (typeof filteredSource === 'string') source = filteredSource;
+    rendered = sanitizeHtml(marked.parse(source, { async: false }) as string, sanitizeOptions);
+  } else {
+    rendered = autop(sanitizeHtml(source, sanitizeOptions));
+  }
+  const filteredRendered = await applyFilterSafely(ctx, 'comment:rendered', rendered);
+  return typeof filteredRendered === 'string' ? filteredRendered : rendered;
+}
+
 /**
  * Render markdown to HTML with plugin filter hooks (async)
  * Use this for content display where plugins should be able to intercept
@@ -167,13 +189,15 @@ export async function renderMarkdownFiltered(ctx: HookContext, text: string): Pr
   content = content.replace(MORE_COMMENT_RE, '');
 
   // Apply content:markdown filter — plugins can modify the raw markdown
-  content = await applyFilter(ctx, 'content:markdown', content);
+  const filteredContent = await applyFilter(ctx, 'content:markdown', content);
+  if (typeof filteredContent === 'string') content = filteredContent;
 
   const html = marked.parse(content, { async: false }) as string;
   let sanitized = sanitizeHtml(html, SANITIZE_OPTIONS);
 
-  // Apply content:content filter — plugins can modify the rendered HTML
-  sanitized = await applyFilter(ctx, 'content:content', sanitized);
+  // Apply content:rendered filter — plugins can modify the rendered HTML
+  const filteredRendered = await applyFilter(ctx, 'content:rendered', sanitized);
+  if (typeof filteredRendered === 'string') sanitized = filteredRendered;
 
   return sanitized;
 }

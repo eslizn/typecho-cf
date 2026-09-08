@@ -25,10 +25,10 @@ Typecho-CF 本地反垃圾评论插件，基于蜜罐陷阱 + 时间验证 + 链
 
 ```
 用户访问评论页面
-  → archive:footer hook 注入蜜罐 HTML + 时间令牌（HMAC-SHA256）
+  → frontend:footer hook 注入蜜罐 HTML + 时间令牌（HMAC-SHA256）
   → 用户填写表单期间令牌持续计时
 用户提交评论
-  → feedback:comment hook 触发
+  → comment:beforeSave hook 触发
   → 已登录用户跳过所有检测
   → ① 蜜罐检测：隐藏字段有值 → 拦截
   → ② 时间检测：令牌缺失/过期/提交过快 → 拦截
@@ -40,8 +40,8 @@ Typecho-CF 本地反垃圾评论插件，基于蜜罐陷阱 + 时间验证 + 链
 
 | Hook | 类型 | 用途 |
 |------|------|------|
-| `feedback:comment` | filter | 评论提交时执行三层检测，设置 spam/waiting/rejected |
-| `archive:footer` | filter | 评论页面注入蜜罐 HTML 和 HMAC 时间令牌 |
+| `comment:beforeSave` | filter | 评论提交时执行三层检测，设置 spam/waiting/rejected |
+| `frontend:footer` | filter | 评论页面注入蜜罐 HTML 和 HMAC 时间令牌 |
 
 ## 依赖
 

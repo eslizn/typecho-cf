@@ -113,12 +113,12 @@ import type { PluginInitContext } from 'typecho/plugin-sdk';
 
 export default function init({ addHook, pluginId }: PluginInitContext): void {
   // filter 钩子：修改数据并返回
-  addHook('content:content', pluginId, (html: string) => {
+  addHook('content:rendered', pluginId, (html: string) => {
     return html + '<!-- powered by example plugin -->';
   });
 
   // call 钩子：执行副作用，不需要返回值
-  addHook('feedback:finishComment', pluginId, (comment: { coid?: number }) => {
+  addHook('comment:afterCreate', pluginId, (comment: { coid?: number }) => {
     console.log('新评论：', comment.coid);
   });
 }
@@ -140,7 +140,7 @@ export default function init({ addHook, pluginId }: PluginInitContext): void {
 ```ts
 import { loadPluginConfig } from 'typecho/plugin-sdk';
 
-addHook('feedback:comment', pluginId, async (commentData: { _rejected?: string }, extra?: { options?: Record<string, unknown> }) => {
+addHook('comment:beforeSave', pluginId, async (commentData: { _rejected?: string }, extra?: { options?: Record<string, unknown> }) => {
   if (!extra?.options) return commentData;
 
   // 读取本插件配置（已与 typecho.plugin.config 默认值合并）
@@ -161,51 +161,75 @@ addHook('feedback:comment', pluginId, async (commentData: { _rejected?: string }
 
 ## 当前已接入的 Hook 参考
 
-插件只应依赖下表已在运行时接入的 Hook。未列出的 `HookPoints` 常量无调用保证；新增触发点时需同时更新 `HookPoints`、调用位置和本文档。
+以下是运行时已经有实际触发位置的完整 canonical Hook 名称。新插件应使用这些名称；未列出的 `HookPoints` 常量无调用保证。新增触发点时需同时更新 `HookPoints`、调用位置和本文档。
 
 ### call 类型（副作用，无需返回值）
 
 | Hook | 触发位置 | 参数 |
 |------|---------|------|
-| `system:begin` | 每次请求初始化 | `(context)` |
-| `post:finishPublish` | 文章发布后 | `(post)` |
-| `post:finishSave` | 文章保存后 | `(post)` |
-| `post:delete` | 文章删除前 | `(post)` |
-| `post:finishDelete` | 文章删除后 | `(post)` |
-| `page:finishPublish` | 页面发布后 | `(page)` |
-| `page:finishSave` | 页面保存后 | `(page)` |
-| `page:delete` | 页面删除前 | `(page)` |
-| `page:finishDelete` | 页面删除后 | `(page)` |
-| `feedback:finishComment` | 评论保存后 | `(comment)` |
+| `request:begin` / `request:end` | 请求上下文初始化完成 / 响应最终确定 | `(context)` / `({ request, response })` |
+| `admin:begin` / `admin:end` | 管理布局开始 / 管理布局数据确定 | `(context)` |
+| `archive:init` | 归档或单篇数据初始化 | `(context)` |
+| `archive:index` / `archive:single` / `archive:category` / `archive:tag` / `archive:author` / `archive:search` | 对应归档或单篇数据准备前 | `(context)` |
+| `archive:beforeRender` / `archive:afterRender` | 前台文档响应渲染前 / 后 | `(context)` / `({ ..., response })` |
+| `post:afterPublish` / `post:afterSave` | 文章发布后 / 保存后 | `(post)` |
+| `post:beforeDelete` / `post:afterDelete` | 文章删除前 / 后 | `(post)` |
+| `page:afterPublish` / `page:afterSave` | 页面发布后 / 保存后 | `(page)` |
+| `page:beforeDelete` / `page:afterDelete` | 页面删除前 / 后 | `(page)` |
+| `comment:afterCreate` | 评论保存后 | `(comment)` |
+| `feedback:trackback:after` | Trackback 写入后 | `(comment, extra)` |
+| `feedback:pingback:after` | Pingback 写入后 | `(comment, extra)` |
+| `comment:reply` | 回复评论写入后 | `(comment, { parent })` |
 | `comment:action` | 评论审核动作完成 | `(comment, extra)` |
-| `upload:upload` | 文件上传后 | `(upload, extra)` |
+| `user:login:success` / `user:login:failure` | 登录成功 / 登录拒绝 | `(summary)` / `({ request, reason })` |
+| `user:logout` | 登出 Cookie 清理后 | `({ request })` |
+| `user:register:after` | 用户写入成功后 | `(userSummary)` |
+| `upload:after` | 文件写入成功后 | `(upload, extra)` |
 | `upload:delete` | 附件删除后 | `(attachment, extra)` |
 
 ### filter 类型（必须返回值）
 
 | Hook | 触发位置 | 参数 | 说明 |
 |------|---------|------|------|
-| `route:request` | 中间件路由分发 | `(result, extra)` | 处理插件自定义路由；管理/API 路径还需 `registerPluginAdminPath`，前台路径建议 `registerPluginRoute`（避开内容路由废弃检查与边缘缓存） |
-| `admin:header` / `admin:footer` | 管理后台头部/底部 | `(html, extra)` | 安全展示型 HTML 注入 |
-| `admin:loginHead` / `admin:loginForm` | 登录页头部/表单 | `(html, extra)` | 登录页 HTML 注入 |
-| `admin:writePost:bottom` / `admin:writePage:bottom` | 编辑器底部 | `(html, extra)` | 编辑器 UI 注入 |
-| `admin:managePosts:titleActions` | 文章列表标题操作区 | `(html, extra)` | 在每篇文章标题旁追加管理操作 |
+| `request:route` | 中间件路由分发 | `(result, extra)` | 处理插件自定义路由；管理/API 路径还需 `registerPluginAdminPath`，前台路径建议 `registerPluginRoute` |
+| `admin:head` / `admin:footer` | 管理后台头部/底部 | `(html, extra)` | 安全展示型 HTML 注入 |
+| `admin:nav` | 管理后台导航生成 | `(groups, extra)` | 修改分组/菜单项；系统会校验 href 只能指向本站管理路径或锚点 |
+| `admin:login:head` / `admin:login:form` | 登录页头部/表单 | `(html, extra)` | 登录页 HTML 注入 |
 | `admin:page` | `/admin/plugin/[slug]` | `(html, extra)` | 渲染插件专属管理页面 |
-| `archive:header` / `archive:footer` | 前台页面头部/底部 | `(html, extra)` | 主题无关的前台 HTML/JS 注入 |
-| `content:markdown` | Markdown 渲染前 | `(markdown, post)` | 过滤原始 Markdown 文本 |
-| `content:content` | Markdown 渲染后 | `(html, post)` | 过滤输出 HTML |
-| `post:write` | 文章保存前 | `(data, extra)` | 仅可修改 title、slug、created、text、order、template、status、password、allowComment、allowPing、allowFeed；返回值会重新校验 |
+| `admin:writePost:option` / `admin:writePost:advanceOption` / `admin:writePost:bottom` | 文章编辑器选项/高级选项/底部 | `(html, extra)` | 编辑器 UI 注入 |
+| `admin:writePage:option` / `admin:writePage:advanceOption` / `admin:writePage:bottom` | 页面编辑器选项/高级选项/底部 | `(html, extra)` | 编辑器 UI 注入 |
+| `admin:managePosts:titleActions` | 文章列表标题操作区 | `(html, extra)` | 在每篇文章标题旁追加管理操作 |
+| `admin:profile:bottom` | 个人资料页底部 | `(html, extra)` | 个人资料 UI 注入 |
+| `plugin:config:beforeSave` | 插件配置保存前 | `(result, extra)` | 校验或规范化配置，返回 `{ success, settings?, error? }` |
+| `archive:query` | 归档查询参数准备时 | `(state, context)` | 可调整页码/页大小，或返回安全的额外 SQL 条件；系统可见性和归档范围受保护 |
+| `frontend:head` / `frontend:footer` | 前台页面头部/底部 | `(html, extra)` | 主题无关的前台 HTML/JS 注入 |
+| `content:data` | 文章数据准备后 | `(content, extra)` | 修改展示数据；查询、权限、身份和固定链接字段受保护 |
+| `content:title` | 文章标题展示前 | `(title, extra)` | 修改展示标题 |
+| `content:excerpt` | 文章摘要展示前 | `(excerpt, extra)` | 修改展示摘要 |
+| `content:markdown` | Markdown 渲染前 | `(markdown, extra?)` | 过滤原始 Markdown 文本 |
+| `content:rendered` | Markdown 净化后 | `(html, extra?)` | 过滤最终文章 HTML |
+| `comment:data` | 评论展示数据准备后 | `(comment, extra)` | 修改展示字段；身份、审核状态和树关系受保护 |
+| `comment:markdown` | 评论 Markdown 渲染前 | `(markdown, extra?)` | 过滤原始评论 Markdown |
+| `comment:rendered` | 评论 HTML 净化后 | `(html, extra?)` | 过滤最终评论 HTML |
+| `post:write` | 文章保存前 | `(data, extra)` | 仅可修改声明的文章字段，返回值会重新校验 |
 | `page:write` | 页面保存前 | `(data, extra)` | 可修改字段同 `post:write`；authorId、type、cid 与关系数据受保护 |
-| `feedback:comment` | 评论保存前 | `(commentData, extra)` | 仅可修改 author、mail、url、text、status，设置 `_rejected` 可拒绝；身份/归属/关系字段受保护 |
-| `user:login` | 密码校验前 | `(context, extra)` | 设置 `_rejected` 可拒绝登录 |
-| `upload:beforeUpload` | 上传写入前 | `(result, extra)` | 设置拒绝原因可中止上传 |
-| `feed:item` | RSS/Atom 生成 | `(item, post)` | 过滤 feed 条目 |
-| `widget:sidebar` | 侧边栏渲染 | `(sidebarData, context)` | 过滤侧边栏数据 |
+| `comment:beforeSave` | 评论保存前 | `(commentData, extra)` | 仅可修改 author、mail、url、text、status，设置 `_rejected` 可拒绝 |
+| `feedback:trackback:before` | Trackback 写入前 | `(data, extra)` | 校验或规范化引用反馈数据 |
+| `feedback:pingback:before` | Pingback 写入前 | `(data, extra)` | 校验或规范化引用反馈数据 |
+| `user:login:before` | 密码校验前 | `(context, extra)` | 设置 `_rejected` 可拒绝登录；密码不会传给插件 |
+| `user:register:before` | 用户写入前 | `(data, extra)` | 校验/规范化公开注册字段；密码、权限、认证码由系统控制 |
+| `upload:before` | 上传写入前 | `(result, extra)` | 设置拒绝原因可中止上传 |
+| `feed:item` | 单条 RSS/Atom/RSS1 项生成后 | `(item, extra?)` | 过滤 feed 条目 |
+| `feed:render` | 完整 XML 生成后 | `(xml, extra)` | 过滤整份 RSS/Atom/RSS1 文档；响应类型和缓存头由系统控制 |
+| `sidebar:data` | 侧边栏数据生成后 | `(sidebarData, extra)` | 过滤侧边栏数据 |
 | `csp:directives` | 安全响应头生成 | `(directives, extra)` | 追加插件所需 CSP 来源，不应清空默认项 |
 | `mail:send` | 邮件发送适配 | `(result, extra)` | 首个返回 `sent: true` 的插件完成投递 |
-| `plugin:config:beforeSave` | 插件配置保存前 | `(result, extra)` | 校验或规范化插件配置，返回 `{ success, settings?, error? }` |
-| `plugin:<id>:action:auth` | 插件动作鉴权 | `(role, extra)` | 为指定 action 声明最低角色，默认 administrator |
+| `plugin:<id>:action:authorize` | 插件动作鉴权 | `(role, extra)` | 为指定 action 声明最低角色，默认 administrator |
 | `plugin:<id>:action` | `/api/admin/plugin-action` | `(result, extra)` | 执行插件管理动作并返回 handled 结果 |
+
+### 兼容别名
+
+旧名称仍会归一化到 canonical 名称，因此已有插件可以继续运行，但新代码不要再注册旧名称。重要映射包括：`system:begin → request:begin`、`system:end → request:end`、`route:request → request:route`、`archive:header/footer → frontend:head/footer`、`content:filter → content:data`、`content:content → content:rendered`、`feedback:comment → comment:beforeSave`、`upload:beforeUpload → upload:before`、`upload:upload → upload:after`、`feed:generate → feed:render`、`widget:sidebar → sidebar:data`。完整映射见 `DeprecatedHookPointAliases`。
 
 `applyFilter` 默认会传播插件异常。业务链路（保存内容、评论、登录、插件配置等）会因此中止并暴露错误。纯展示注入点可由系统使用 `applyFilterSafely` 包裹，单个插件失败时跳过该插件输出并继续渲染。
 
@@ -215,10 +239,10 @@ addHook('feedback:comment', pluginId, async (commentData: { _rejected?: string }
 
 ## 拒绝评论
 
-在 `feedback:comment` filter 中，设置 `commentData._rejected` 可拒绝评论：
+在 `comment:beforeSave` filter 中，设置 `commentData._rejected` 可拒绝评论：
 
 ```ts
-addHook('feedback:comment', pluginId, async (commentData, extra) => {
+addHook('comment:beforeSave', pluginId, async (commentData, extra) => {
   if (spamDetected) {
     commentData._rejected = '检测到垃圾评论';  // 非空字符串 = 拒绝，返回 403
   }
@@ -230,7 +254,7 @@ addHook('feedback:comment', pluginId, async (commentData, extra) => {
 
 ## 向主题提供客户端代码
 
-插件可通过 `archive:header` 和 `archive:footer` filter 自动向前端页面注入 HTML/JS，无需主题手动适配：
+插件可通过 `frontend:head` 和 `frontend:footer` filter 自动向前端页面注入 HTML/JS，无需主题手动适配：
 
 ```ts
 // index.ts
@@ -239,14 +263,14 @@ import { loadPluginConfig } from 'typecho/plugin-sdk';
 
 export default function init({ addHook, pluginId }: PluginInitContext): void {
   // 注入 <head> 内容（如 SDK 脚本）
-  addHook('archive:header', pluginId, (headHtml: string, extra?: { options?: Record<string, unknown> }) => {
+  addHook('frontend:head', pluginId, (headHtml: string, extra?: { options?: Record<string, unknown> }) => {
     const config = loadPluginConfig(extra?.options, pluginId);
     if (!config.sitekey) return headHtml;
     return headHtml + '<script src="..."></script>';
   });
 
   // 注入 </body> 前内容（如交互脚本）
-  addHook('archive:footer', pluginId, (bodyHtml: string, extra?: { options?: Record<string, unknown> }) => {
+  addHook('frontend:footer', pluginId, (bodyHtml: string, extra?: { options?: Record<string, unknown> }) => {
     const config = loadPluginConfig(extra?.options, pluginId);
     if (!config.sitekey) return bodyHtml;
     return bodyHtml + '<script>/* ... */</script>';
@@ -388,12 +412,12 @@ npx vitest run src/plugins/<插件名>/index.test.ts
 - [ ] 已登录用户跳过已测试
 - [ ] 缺少配置时跳过已测试
 - [ ] API 故障（mock）不会导致 handler 崩溃
-- [ ] `pageContext` 守卫已测试（针对 `archive:header`/`archive:footer` hook）
+- [ ] `pageContext` 守卫已测试（针对 `frontend:head`/`frontend:footer` hook）
 
 ## 参考示例
 
 `typecho-plugin-antispam/` 目录演示了：
 - `package.json` 配置声明（在 `typecho.plugin` 中）
-- `feedback:comment` filter 钩子（反垃圾评论）
+- `comment:beforeSave` filter 钩子（反垃圾评论）
 - 读取插件配置
 - 正确提取客户端 IP（优先 CF-Connecting-IP）

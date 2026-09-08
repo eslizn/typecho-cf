@@ -4,6 +4,7 @@ import {
   mergeVary,
   resolveRequestTarget,
 } from '@/lib/request-bootstrap';
+import { addHook, removePluginHooks, type HookContext } from '@/lib/plugin';
 
 describe('resolveRequestTarget()', () => {
   it('resolves pagination while preserving the original URL and query', () => {
@@ -46,6 +47,21 @@ describe('finalizeRequestResponse()', () => {
     expect(cached.headers.get('set-cookie')).toBeNull();
     expect(cached.headers.get('vary')).toContain('Cookie');
     put.mockRestore();
+  });
+
+  it('fires request:end once when middleware finalizes the same request repeatedly', async () => {
+    const pluginId = 'request-end-test';
+    const pluginCtx: HookContext = { activatedPlugins: new Set([pluginId]) };
+    const handler = vi.fn();
+    addHook('request:end', pluginId, handler);
+    const request = new Request('https://example.com/');
+
+    await finalizeRequestResponse(new Response('first'), { request, pluginCtx });
+    await finalizeRequestResponse(new Response('second'), { request, pluginCtx });
+
+    expect(handler).toHaveBeenCalledOnce();
+    expect(handler.mock.calls[0][0].response).toBeInstanceOf(Response);
+    removePluginHooks(pluginId);
   });
 });
 

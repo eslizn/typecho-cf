@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import init, { getClientSnippet } from './index';
+import { normalizeHookPoint } from '@/lib/plugin';
 
 function collectHooks() {
   const hooks = new Map<string, Function>();
@@ -12,6 +13,8 @@ function collectHooks() {
       hooks.set(point, handler);
     },
   });
+  const get = hooks.get.bind(hooks);
+  hooks.get = ((point: string) => get(normalizeHookPoint(point))) as typeof hooks.get;
   return hooks;
 }
 
@@ -100,13 +103,13 @@ describe('typecho-plugin-turnstile', () => {
     const hooks = collectHooks();
 
     expect([...hooks.keys()].sort()).toEqual([
-      'admin:loginForm',
-      'admin:loginHead',
-      'archive:footer',
-      'archive:header',
+      'admin:login:form',
+      'admin:login:head',
+      'comment:beforeSave',
       'csp:directives',
-      'feedback:comment',
-      'user:login',
+      'frontend:footer',
+      'frontend:head',
+      'user:login:before',
     ]);
   });
 

@@ -1,6 +1,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { generateAuthToken, generateSecurityToken, hashPassword } from '@/lib/auth';
 import { REQUEST_BODY_LIMITS } from '@/lib/constants';
+import { normalizeHookPoint } from '@/lib/plugin';
 import init, {
   clearWebDavAuthFailures,
   getWebDavClientIp,
@@ -174,6 +175,8 @@ function collectHooks() {
       hooks.set(point, handler);
     },
   });
+  const get = hooks.get.bind(hooks);
+  hooks.get = ((point: string) => get(normalizeHookPoint(point))) as typeof hooks.get;
   return hooks;
 }
 
@@ -586,7 +589,7 @@ describe('typecho-plugin-webdav hooks', () => {
       'admin:footer',
       'admin:page',
       'plugin:config:beforeSave',
-      'route:request',
+      'request:route',
     ]);
   });
 

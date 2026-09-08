@@ -69,6 +69,9 @@ const isMarkdown = !page || (page.text && page.text.indexOf('<!--markdown-->') >
 
 // Build preview URL
 const previewUrl = isEdit && page ? buildPermalink(page, urls.siteUrl, options.permalinkPattern, options.pagePattern) : '';
+const writePageHookExtra = { options, page, user, isEdit };
+const writePageOptionHtml = await applyFilterSafely(ctx, 'admin:writePage:option', '', writePageHookExtra);
+const writePageAdvanceOptionHtml = await applyFilterSafely(ctx, 'admin:writePage:advanceOption', '', writePageHookExtra);
 const writePageBottomHtml = await applyFilterSafely(ctx, 'admin:writePage:bottom', '', { options, page, user, isEdit });
 
 ---
@@ -139,6 +142,8 @@ const writePageBottomHtml = await applyFilterSafely(ctx, 'admin:writePage:bottom
           <p class="description">为你的自定义页面设定一个序列值以后, 能够使得它们按此值从小到大排列</p>
         </section>
 
+        {writePageOptionHtml && <Fragment set:html={writePageOptionHtml} />}
+
         <button type="button" id="advance-panel-btn" class="btn btn-xs">高级选项 <i class="i-caret-down"></i></button>
         <div id="advance-panel">
           <section class="typecho-post-option visibility-option">
@@ -180,6 +185,8 @@ const writePageBottomHtml = await applyFilterSafely(ctx, 'admin:writePage:bottom
               </li>
             </ul>
           </section>
+
+          {writePageAdvanceOptionHtml && <Fragment set:html={writePageAdvanceOptionHtml} />}
         </div>
 
         <div id="custom-field" class:list={[{ fold: customFields.length === 0 }]}>

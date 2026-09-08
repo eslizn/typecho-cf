@@ -70,7 +70,7 @@ Typecho-CF WebDAV 协议插件，通过 WebDAV 协议挂载和访问多种存储
 
 ```
 请求到达
-  → route:request hook 先处理已注册的 `/api/admin/webdav` 管理 API
+  → request:route hook 先处理已注册的 `/api/admin/webdav` 管理 API
   → 对协议入口检查 protocolEnabled（关闭则跳过，继续正常路由）
   → 匹配 routePath 前缀的请求进入 WebDAV 协议处理
   → 非 WebDAV 请求跳过，继续正常路由
@@ -102,7 +102,7 @@ Typecho-CF WebDAV 协议插件，通过 WebDAV 协议挂载和访问多种存储
 | Hook | 类型 | 用途 |
 |------|------|------|
 | `plugin:config:beforeSave` | filter | 保存前校验挂载配置有效性，标准化所有配置字段 |
-| `route:request` | filter | 分发 WebDAV 协议和 `/api/admin/webdav`；协议关闭时仅跳过 WebDAV 入口 |
+| `request:route` | filter | 分发 WebDAV 协议和 `/api/admin/webdav`；协议关闭时仅跳过 WebDAV 入口 |
 | `admin:page` | filter | 注入 WebDAV 文件管理器 HTML 及内联 JS（面包屑导航、CRUD、拖拽上传） |
 | `admin:footer` | filter | 向管理后台导航栏「管理」菜单注入 WebDav 入口 |
 

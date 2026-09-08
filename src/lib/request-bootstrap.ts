@@ -4,7 +4,7 @@ import { setRequestCoreContext, type RequestCoreContext } from '@/lib/context';
 import { ensureDatabaseReady, TablesMissingError } from '@/lib/isolate-boot';
 import { ensureSecret, loadOptions } from '@/lib/options';
 import { parsePageNumber } from '@/lib/input';
-import { parseActivatedPlugins, setActivatedPlugins, type HookContext } from '@/lib/plugin';
+import { doHook, parseActivatedPlugins, setActivatedPlugins, type HookContext } from '@/lib/plugin';
 import { applySecurityHeaders } from '@/lib/security-headers';
 
 export interface RequestTarget {
@@ -34,6 +34,11 @@ export interface ResponseFinalization {
   cacheKey?: Request | null;
   executionContext?: { waitUntil(promise: Promise<unknown>): void } | null;
 }
+
+// A request can pass through several early-return branches in middleware
+// (plugin route, cache hit, whitelist rejection, or the normal route). Keep
+// request:end exactly-once at the finalization boundary.
+const finalizedRequests = new WeakSet<Request>();
 
 /** Resolve Typecho `/page/N/` syntax without short-circuiting middleware. */
 export function resolveRequestTarget(request: Request, locals: App.Locals): RequestTarget {
@@ -123,20 +128,28 @@ export async function finalizeRequestResponse(
     { request: finalization.request },
     finalization.pluginCtx,
   );
-  if (!finalization.cacheKey || finalized.status !== 200) return finalized;
+  if (finalization.cacheKey && finalized.status === 200) {
+    const cacheHeaders = new Headers(finalized.headers);
+    if (!cacheHeaders.has('Cache-Control')) cacheHeaders.set('Cache-Control', 'public, s-maxage=300');
+    cacheHeaders.set('Vary', mergeVary(cacheHeaders.get('Vary'), ['Cookie', 'Accept-Encoding']));
+    cacheHeaders.delete('Set-Cookie');
+    const cacheable = new Response(finalized.clone().body, {
+      status: finalized.status,
+      statusText: finalized.statusText,
+      headers: cacheHeaders,
+    });
+    const cacheWrite = caches.default.put(finalization.cacheKey, cacheable);
+    if (finalization.executionContext) finalization.executionContext.waitUntil(cacheWrite);
+    else await cacheWrite;
+  }
 
-  const cacheHeaders = new Headers(finalized.headers);
-  if (!cacheHeaders.has('Cache-Control')) cacheHeaders.set('Cache-Control', 'public, s-maxage=300');
-  cacheHeaders.set('Vary', mergeVary(cacheHeaders.get('Vary'), ['Cookie', 'Accept-Encoding']));
-  cacheHeaders.delete('Set-Cookie');
-  const cacheable = new Response(finalized.clone().body, {
-    status: finalized.status,
-    statusText: finalized.statusText,
-    headers: cacheHeaders,
-  });
-  const cacheWrite = caches.default.put(finalization.cacheKey, cacheable);
-  if (finalization.executionContext) finalization.executionContext.waitUntil(cacheWrite);
-  else await cacheWrite;
+  if (finalization.pluginCtx && !finalizedRequests.has(finalization.request)) {
+    finalizedRequests.add(finalization.request);
+    await doHook(finalization.pluginCtx, 'request:end', {
+      request: finalization.request,
+      response: finalized,
+    });
+  }
   return finalized;
 }
 

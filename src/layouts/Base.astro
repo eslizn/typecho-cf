@@ -5,6 +5,7 @@ import type { UserRow } from '@/lib/context';
 import { getThemeStylesheets } from '@/lib/theme';
 import { getClientSnippets, type PageContext, type HookContext } from '@/lib/plugin';
 import { THEME_PREVIEW_OPTION, THEME_PREVIEW_QUERY_PARAM } from '@/lib/theme-preview';
+import type { I18n } from '@/lib/i18n';
 
 interface Props {
   title?: string;
@@ -17,6 +18,7 @@ interface Props {
   bodyClass?: string;
   pageContext?: PageContext;
   pluginCtx?: HookContext;
+  i18n?: I18n;
 }
 
 const {
@@ -30,9 +32,12 @@ const {
   bodyClass = '',
   pageContext,
   pluginCtx,
+  i18n,
 } = Astro.props;
 
 const pageTitle = title ? `${title} - ${options.title}` : options.title;
+const pageI18n = i18n ?? pluginCtx?.i18n;
+const documentLocale = pageI18n?.locale || (options.lang === 'zh_CN' ? 'zh-CN' : 'en');
 const themeStylesheets = getThemeStylesheets(options.theme || 'typecho-theme-minimal');
 const previewTheme = typeof options[THEME_PREVIEW_OPTION] === 'string'
   ? options[THEME_PREVIEW_OPTION]
@@ -42,7 +47,7 @@ const previewTheme = typeof options[THEME_PREVIEW_OPTION] === 'string'
 const pluginSnippets = await getClientSnippets(pluginCtx ?? { activatedPlugins: new Set<string>() }, options as Record<string, any>, pageContext);
 ---
 <!DOCTYPE html>
-<html lang={options.lang === 'zh_CN' ? 'zh-CN' : 'en'}>
+<html lang={documentLocale}>
 <head>
   <meta charset={options.charset || 'UTF-8'} />
   <meta name="renderer" content="webkit" />

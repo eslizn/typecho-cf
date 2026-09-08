@@ -2,6 +2,7 @@
 import Base from './Base.astro';
 import type { SiteOptions } from '@/lib/options';
 import type { computeUrls } from '@/lib/options';
+import type { I18n } from '@/lib/i18n';
 
 interface Props {
   title?: string;
@@ -20,6 +21,7 @@ interface Props {
     categories?: Array<{ name: string; slug: string; count: number; permalink: string }>;
     archives?: Array<{ date: string; permalink: string }>;
   };
+  i18n?: I18n;
 }
 
 const {
@@ -34,6 +36,7 @@ const {
   currentSlug,
   showSidebar = true,
   sidebarData,
+  i18n,
 } = Astro.props;
 
 const currentPath = new URL(Astro.request.url).pathname;
@@ -47,6 +50,7 @@ const isIndex = currentPath === '/';
   urls={urls}
   user={user}
   isLoggedIn={isLoggedIn}
+  i18n={i18n}
 >
   <header id="header" class="clearfix">
     <div class="container">

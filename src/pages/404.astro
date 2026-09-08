@@ -2,6 +2,7 @@
 import { themeTemplates } from 'virtual:theme-templates';
 import { createContext } from '@/lib/context';
 import { prepareNotFoundData } from '@/lib/page-data';
+import { createCoreRequestI18n } from '@/lib/i18n-runtime';
 
 let data;
 let activeTheme = 'minimal';
@@ -12,8 +13,9 @@ try {
   data = await prepareNotFoundData(ctx, Astro.request.url);
 } catch {
   // If DB not initialized, provide minimal fallback data
+  const fallbackI18n = createCoreRequestI18n(Astro.request).i18n;
   data = {
-    options: { title: 'Blog', charset: 'UTF-8', lang: 'zh_CN', description: '' } as any,
+    options: { title: 'Blog', charset: 'UTF-8', lang: '', description: '' } as any,
     urls: { siteUrl: '', adminUrl: '/admin', feedUrl: '/feed', commentsFeedUrl: '/feed/comments', loginUrl: '/admin/login', logoutUrl: '/api/users/logout', registerUrl: '/admin/register' } as any,
     user: null,
     isLoggedIn: false,
@@ -23,6 +25,7 @@ try {
     themeConfig: {},
     statusCode: 404,
     errorTitle: '404 - 页面没找到',
+    i18n: fallbackI18n,
   };
 }
 

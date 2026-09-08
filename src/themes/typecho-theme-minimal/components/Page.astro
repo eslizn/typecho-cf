@@ -14,6 +14,7 @@ type Props = ThemePageProps;
 
 const {
   options, urls, user, isLoggedIn, pages, sidebarData, currentPath, pluginCtx,
+  i18n,
   page, comments, commentOptions, commentPagination, gravatarMap,
 } = Astro.props;
 
@@ -28,6 +29,7 @@ const totalComments = commentPagination.totalComments;
   user={user}
   isLoggedIn={isLoggedIn}
   pluginCtx={pluginCtx}
+  i18n={i18n}
   pageContext={{ hasComments: commentOptions.allowComment, pageType: 'page' }}
 >
   <header id="header" class="clearfix">

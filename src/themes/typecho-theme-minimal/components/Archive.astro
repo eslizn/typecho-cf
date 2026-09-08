@@ -13,6 +13,7 @@ type Props = ThemeArchiveProps;
 
 const {
   options, urls, user, isLoggedIn, pages, sidebarData, currentPath, pluginCtx,
+  i18n,
   archiveTitle, archiveType, posts, pagination,
 } = Astro.props;
 
@@ -25,6 +26,7 @@ const isIndex = currentPath === '/';
   user={user}
   isLoggedIn={isLoggedIn}
   pluginCtx={pluginCtx}
+  i18n={i18n}
 >
   <header id="header" class="clearfix">
     <div class="container">

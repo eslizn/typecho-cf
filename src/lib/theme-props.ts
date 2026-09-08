@@ -11,6 +11,7 @@ import type { PaginationInfo } from '@/lib/pagination';
 import type { UserRow } from '@/lib/context';
 import type { HookContext } from '@/lib/plugin';
 import type { CommentPagination } from '@/lib/comment-page';
+import type { I18n } from '@/lib/i18n';
 
 // ─── Base Props (shared by all theme components) ────────────────────────
 
@@ -36,6 +37,8 @@ export interface ThemeBaseProps {
    * manifest `config`). Empty object when the theme declares no config.
    */
   themeConfig: Record<string, unknown>;
+  /** Theme-scoped translator; theme messages fall back to global messages. */
+  i18n: I18n;
 }
 
 // ─── Post list item (used by Index & Archive) ───────────────────────────

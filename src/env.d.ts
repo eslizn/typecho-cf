@@ -25,6 +25,7 @@ declare module 'virtual:typecho-theme-registry' {
     packageName: string;
     manifest: ThemeManifest;
     cssPath: string;
+    locales?: Record<string, Record<string, string>>;
   }>;
 }
 

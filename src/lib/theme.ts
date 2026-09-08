@@ -13,6 +13,8 @@
  */
 import { getConfigDefaults, loadConfig, type ConfigField } from '@/lib/config';
 import { themeRegistryEntries } from 'virtual:typecho-theme-registry';
+import { createI18n, type I18n, type TranslationCatalog } from '@/lib/i18n';
+import { getGlobalTranslationCatalogs } from '@/lib/i18n-registry';
 
 export interface ThemeManifest {
   /** Unique theme identifier */
@@ -61,6 +63,8 @@ export interface ThemeInfo {
   isActive: boolean;
   /** Resolved CSS content (for serving) */
   cssPath: string;
+  /** Build-time static theme-local translation catalogs. */
+  locales: Record<string, TranslationCatalog>;
 }
 
 /** Built-in fallback theme definition (when no themes are discovered) */
@@ -126,6 +130,7 @@ export function getAvailableThemes(activeThemeId: string): ThemeInfo[] {
       isDefault: true,
       isActive: true,
       cssPath: '/themes/typecho-theme-minimal/style.css',
+      locales: {},
     });
   }
 
@@ -155,6 +160,7 @@ export function getActiveTheme(activeThemeId: string): ThemeInfo {
     isDefault: true,
     isActive: true,
     cssPath: '/themes/typecho-theme-minimal/style.css',
+    locales: {},
   };
 }
 
@@ -173,6 +179,7 @@ export function registerTheme(
   packageName: string,
   manifest: ThemeManifest,
   cssPath: string,
+  locales: Record<string, TranslationCatalog> = {},
 ): void {
   const id = manifest.id || packageName;
   themeRegistry.set(id, {
@@ -182,6 +189,24 @@ export function registerTheme(
     isDefault: false,
     isActive: false,
     cssPath,
+    locales,
+  });
+}
+
+/**
+ * Create a theme-local translator. Theme messages win over global messages,
+ * but the theme catalog is never registered in the global registry.
+ */
+export function createThemeI18n(
+  themeId: string,
+  globalI18n: I18n,
+  activePluginIds: Iterable<string> = [],
+): I18n {
+  const theme = getActiveTheme(themeId);
+  return createI18n({
+    locale: globalI18n.locale,
+    catalogs: getGlobalTranslationCatalogs(activePluginIds),
+    scopedCatalogs: theme.locales,
   });
 }
 
@@ -256,5 +281,5 @@ export function getThemeCount(): number {
 // is evaluated. Server entrypoints that need theme data import this module
 // directly; no page-level registration script is required.
 for (const entry of themeRegistryEntries) {
-  registerTheme(entry.packageName, entry.manifest, entry.cssPath);
+  registerTheme(entry.packageName, entry.manifest, entry.cssPath, entry.locales || {});
 }

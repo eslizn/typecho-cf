@@ -5,6 +5,7 @@ import type { UserRow } from '@/lib/context';
 import { hasPermission } from '@/lib/auth';
 import { applyFilterSafely, doHook, type HookContext } from '@/lib/plugin';
 import { clearAdminFlash, readAdminFlash } from '@/lib/admin-flash';
+import type { I18n } from '@/lib/i18n';
 
 interface Props {
   title: string;
@@ -14,10 +15,13 @@ interface Props {
   activeMenu?: string;
   bodyClass?: string;
   pluginCtx?: HookContext;
+  i18n?: I18n;
 }
 
-const { title, options, urls, user, activeMenu, bodyClass, pluginCtx } = Astro.props;
+const { title, options, urls, user, activeMenu, bodyClass, pluginCtx, i18n } = Astro.props;
 const _pluginCtx: HookContext = pluginCtx ?? { activatedPlugins: new Set<string>() };
+const pageI18n = i18n ?? pluginCtx?.i18n;
+const documentLocale = pageI18n?.locale || (options.lang === 'zh_CN' ? 'zh-CN' : 'en');
 
 const userGroup = user?.group || 'visitor';
 const isAdmin = hasPermission(userGroup, 'administrator');
@@ -91,6 +95,7 @@ const adminHookContext = {
   user,
   activeMenu,
   title,
+  i18n: pageI18n,
 };
 await doHook(_pluginCtx, 'admin:begin', adminHookContext);
 
@@ -148,13 +153,13 @@ const safeMenuGroups = normalizeMenuGroups(filteredMenuGroups, menuGroups);
 const visibleGroups = safeMenuGroups.filter(g => g.show);
 const focusGroupIdx = visibleGroups.findIndex(g => g.children.some(c => c.active));
 const adminHeadHtml = await applyFilterSafely(_pluginCtx, 'admin:head', '', adminHookContext);
-const adminFooterHtml = await applyFilterSafely(_pluginCtx, 'admin:footer', '', { options, urls, user, activeMenu, title });
+const adminFooterHtml = await applyFilterSafely(_pluginCtx, 'admin:footer', '', { options, urls, user, activeMenu, title, i18n: pageI18n });
 const flashError = user ? await readAdminFlash(Astro.request, options, user.uid) : null;
 if (flashError) Astro.response.headers.append('Set-Cookie', clearAdminFlash(Astro.request));
 await doHook(_pluginCtx, 'admin:end', { ...adminHookContext, menuGroups: safeMenuGroups });
 ---
 <!DOCTYPE html>
-<html lang={options.lang === 'zh_CN' ? 'zh-CN' : 'en'}>
+<html lang={documentLocale}>
 <head>
   <meta charset={options.charset || 'UTF-8'} />
   <meta name="renderer" content="webkit" />

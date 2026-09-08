@@ -9,7 +9,7 @@ import { eq, and, desc, asc, lt, gt, or, sql } from 'drizzle-orm';
 import { schema, type Database } from '@/db';
 import type { SiteOptions } from '@/lib/options';
 import { loadSidebarData, loadNavPages, type SidebarData } from '@/lib/sidebar';
-import { loadThemeConfig } from '@/lib/theme';
+import { createThemeI18n, loadThemeConfig } from '@/lib/theme';
 import { buildFtsMatchExpression, contentsFtsTableRef, FTS_MIN_CHARS, isFtsAvailable } from '@/lib/fulltext';
 import {
   buildPermalink, buildAuthorLink,
@@ -75,6 +75,7 @@ async function loadCommon(ctx: RequestContext, requestUrl: string, withSidebar =
     currentPath,
     pluginCtx: ctx,
     themeConfig: loadThemeConfig(options, options.theme),
+    i18n: createThemeI18n(options.theme, ctx.i18n, ctx.activatedPlugins),
   };
 }
 

@@ -11,9 +11,10 @@
  * that maps theme IDs to their template components.
  */
 import type { AstroIntegration } from 'astro';
-import { readFileSync, existsSync, mkdirSync, cpSync, statSync } from 'node:fs';
+import { readFileSync, existsSync, mkdirSync, cpSync, statSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { discoverDeclaredPackages } from './declared-packages';
+import { normalizeLocale } from '../lib/i18n';
 
 interface DiscoveredTheme {
   id: string;
@@ -22,6 +23,7 @@ interface DiscoveredTheme {
   manifest: Record<string, any>;
   cssFile: string;
   screenshotFile?: string;
+  locales: Record<string, Record<string, string>>;
   /** Astro component files found in components/ directory */
   components: Record<string, string>; // e.g. { Index: '/abs/path/Index.astro' }
 }
@@ -119,6 +121,7 @@ function buildTheme(packageName: string, packageDir: string, manifest: Record<st
 
   // Scan for Astro template components
   const components = scanThemeComponents(packageDir);
+  const locales = scanThemeLocales(packageDir);
 
   return {
     id,
@@ -128,6 +131,7 @@ function buildTheme(packageName: string, packageDir: string, manifest: Record<st
     cssFile,
     screenshotFile: findScreenshot(packageDir, manifest.screenshot),
     components,
+    locales,
   };
 }
 
@@ -238,12 +242,42 @@ ${entries.join(',\n')}
 `;
 }
 
+/** Discover static JSON catalogs under a theme's local locales/ directory. */
+function scanThemeLocales(packageDir: string): Record<string, Record<string, string>> {
+  const localesDir = join(packageDir, 'locales');
+  if (!existsSync(localesDir) || !statSync(localesDir).isDirectory()) return {};
+
+  const locales: Record<string, Record<string, string>> = {};
+  for (const filename of readdirSync(localesDir)) {
+    if (!filename.endsWith('.json')) continue;
+    const locale = normalizeLocale(filename.slice(0, -'.json'.length));
+    if (!locale) {
+      console.warn(`[theme-loader] Ignoring invalid locale catalog ${filename} in ${packageDir}`);
+      continue;
+    }
+    try {
+      const parsed = JSON.parse(readFileSync(join(localesDir, filename), 'utf-8')) as unknown;
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('catalog must be an object');
+      const messages: Record<string, string> = {};
+      for (const [key, value] of Object.entries(parsed)) {
+        if (!key || typeof value !== 'string') throw new Error(`invalid message ${key}`);
+        messages[key] = value;
+      }
+      locales[locale] = messages;
+    } catch (error) {
+      console.warn(`[theme-loader] Failed to parse locale catalog ${filename} in ${packageDir}:`, error);
+    }
+  }
+  return locales;
+}
+
 /** Generate data-only theme registrations for every server entrypoint. */
 function generateThemeRegistryModule(discoveredThemes: DiscoveredTheme[]): string {
   const entries = discoveredThemes.map((theme) => ({
     packageName: theme.packageName,
     manifest: theme.manifest,
     cssPath: `/themes/${theme.id}/style.css`,
+    locales: theme.locales,
   }));
   return `export const themeRegistryEntries = ${JSON.stringify(entries)};\n`;
 }

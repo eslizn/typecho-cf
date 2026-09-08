@@ -3,9 +3,11 @@ import { createContext } from '@/lib/context';
 import { LOGIN_ERROR_FLASH_COOKIE, REGISTER_NOTICE_FLASH_COOKIE, clearFlashCookieHeader, getFlashCookieValue } from '@/lib/flash';
 import { applyFilterSafely } from '@/lib/plugin';
 import { safeAdminRedirectUrl } from '@/lib/admin-auth';
+import { createCoreRequestI18n } from '@/lib/i18n-runtime';
 
 let options: any = { title: 'Blog', charset: 'UTF-8', lang: 'zh_CN', description: '' };
 let urls: any = { siteUrl: '' };
+let i18n = createCoreRequestI18n(Astro.request).i18n;
 let loginHeadHtml = '';
 let loginFormHtml = '';
 
@@ -13,6 +15,7 @@ try {
   const ctx = await createContext(Astro.locals, Astro.request);
   options = ctx.options;
   urls = ctx.urls;
+  i18n = ctx.i18n;
 
   // If already logged in, redirect to admin
   if (ctx.isLoggedIn) {
@@ -48,7 +51,7 @@ const refererAbsolute = (() => {
 const refererValue = safeAdminRedirectUrl(refererAbsolute, urls.siteUrl || Astro.url.origin, '/admin/');
 ---
 <!DOCTYPE html>
-<html lang={options.lang === 'zh_CN' ? 'zh-CN' : 'en'}>
+<html lang={i18n.locale}>
 <head>
   <meta charset={options.charset || 'UTF-8'} />
   <meta name="renderer" content="webkit" />

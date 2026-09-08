@@ -4,6 +4,7 @@ import { getDb, schema } from '@/db';
 import { loadOptions } from '@/lib/options';
 import { env } from 'cloudflare:workers';
 import { PASSWORD_MIN_LENGTH } from '@/lib/constants';
+import { createCoreRequestI18n } from '@/lib/i18n-runtime';
 
 const db = getDb(env.DB);
 let installed = false;
@@ -29,8 +30,9 @@ const defaultOptions = {
   siteUrl: new URL(Astro.request.url).origin,
 };
 const urls = { siteUrl: defaultOptions.siteUrl };
+const i18n = createCoreRequestI18n(Astro.request).i18n;
 ---
-<Base title="安装 Typecho" options={defaultOptions as any} urls={urls as any}>
+<Base title="安装 Typecho" options={defaultOptions as any} urls={urls as any} i18n={i18n}>
   <Fragment slot="head">
     <link rel="stylesheet" href="/css/admin.css" />
     <style>

@@ -6,7 +6,11 @@ import { discoverThemes } from '@/integrations/theme-loader';
 
 const temporaryRoots: string[] = [];
 
-function writeTheme(directory: string, config: Record<string, unknown> | undefined): void {
+function writeTheme(
+  directory: string,
+  config: Record<string, unknown> | undefined,
+  locales?: Record<string, Record<string, string>>,
+): void {
   mkdirSync(directory, { recursive: true });
   writeFileSync(join(directory, 'package.json'), JSON.stringify({
     name: 'typecho-theme-fixture',
@@ -18,6 +22,13 @@ function writeTheme(directory: string, config: Record<string, unknown> | undefin
     ...(config ? { config } : {}),
   }));
   writeFileSync(join(directory, 'style.css'), 'body {}');
+  if (locales) {
+    const localesDir = join(directory, 'locales');
+    mkdirSync(localesDir, { recursive: true });
+    for (const [locale, messages] of Object.entries(locales)) {
+      writeFileSync(join(localesDir, `${locale}.json`), JSON.stringify(messages));
+    }
+  }
 }
 
 afterEach(() => {
@@ -57,5 +68,27 @@ describe('theme loader local file dependencies', () => {
     writeFileSync(join(root, 'package.json'), JSON.stringify({ dependencies: {} }));
 
     expect(discoverThemes(root)).toEqual([]);
+  });
+
+  it('discovers theme-local translation catalogs and normalizes locale names', () => {
+    const root = mkdtempSync(join(tmpdir(), 'typecho-theme-loader-'));
+    temporaryRoots.push(root);
+
+    writeTheme(join(root, 'src', 'themes', 'typecho-theme-fixture'), undefined, {
+      zh_CN: { 'theme.greeting': '你好' },
+      en: { 'theme.greeting': 'Hello' },
+    });
+    writeFileSync(join(root, 'package.json'), JSON.stringify({
+      dependencies: {
+        'typecho-theme-fixture': 'file:src/themes/typecho-theme-fixture',
+      },
+    }));
+
+    const [theme] = discoverThemes(root);
+
+    expect(theme.locales).toEqual({
+      'zh-CN': { 'theme.greeting': '你好' },
+      en: { 'theme.greeting': 'Hello' },
+    });
   });
 });

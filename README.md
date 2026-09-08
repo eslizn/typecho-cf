@@ -79,6 +79,7 @@ pnpm run deploy
 | `pnpm run dev` | 本地开发服务器 |
 | `pnpm run build` | 生产构建 |
 | `pnpm run deploy` | 构建 + 部署到 Cloudflare Workers |
+| `pnpm run reinstall:extensions` | 刷新所有已声明插件和主题的本地依赖快照 |
 | `pnpm run lint` | 类型感知静态检查（含浮空 Promise） |
 | `pnpm run types:workers` | 按 Wrangler 配置生成 Worker 绑定与运行时类型 |
 | `pnpm run typecheck` | 生成 Workers / Astro 类型并运行 TypeScript 检查 |
@@ -92,6 +93,12 @@ pnpm run deploy
 | `pnpm run db:migrate:dry-run` | 预览迁移（不写入） |
 | `pnpm run reset-password` | 重置用户密码（本地） |
 | `pnpm run reset-password:cloudflare` | 重置用户密码（Cloudflare） |
+
+修改 `src/plugins/` 或 `src/themes/` 下的源码后，如果对应依赖使用 `file:` 协议，运行
+`pnpm run reinstall:extensions` 刷新已声明的插件/主题依赖快照，再运行
+`pnpm run build`。该命令只删除项目生成的 `node_modules`，然后执行
+`pnpm install --force --frozen-lockfile`，不删除源码，也不会通过 `pnpm update`
+升级无关依赖或改写锁文件。
 
 修改 `wrangler.toml` 中的绑定后，运行 `pnpm run types:workers`。生成的 `worker-configuration.d.ts` 仅供本地与 CI 使用，不纳入版本控制。
 

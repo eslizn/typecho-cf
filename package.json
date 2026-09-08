@@ -27,6 +27,7 @@
     "dev": "astro dev",
     "build": "astro build",
     "deploy": "pnpm build && wrangler deploy",
+    "reinstall:extensions": "node scripts/reinstall-extensions.mjs",
     "lint": "eslint \"src/**/*.ts\"",
     "types:workers": "node scripts/generate-worker-types.mjs",
     "typecheck": "pnpm run types:workers && astro sync && tsc --noEmit",

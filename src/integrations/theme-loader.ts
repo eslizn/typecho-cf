@@ -1,17 +1,19 @@
 /**
  * Astro integration: Theme Loader
  * 
- * Scans node_modules for packages whose package.json keywords contain
- * both "typecho" and "theme", reads their theme.json, copies CSS and
- * assets to public/themes/{id}/, and registers all themes at startup.
+ * Scans packages declared by the root package.json whose package.json
+ * keywords contain both "typecho" and "theme", reads their theme.json,
+ * copies CSS and assets to public/themes/{id}/, and registers all themes at
+ * startup.
  *
  * NEW: Also scans for Astro template components in each theme's components/
  * directory and generates a Vite virtual module `virtual:theme-templates`
  * that maps theme IDs to their template components.
  */
 import type { AstroIntegration } from 'astro';
-import { readFileSync, existsSync, readdirSync, mkdirSync, cpSync, statSync, realpathSync } from 'node:fs';
+import { readFileSync, existsSync, mkdirSync, cpSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { discoverDeclaredPackages } from './declared-packages';
 
 interface DiscoveredTheme {
   id: string;
@@ -46,65 +48,13 @@ function deriveThemeId(packageName: string, manifest?: Record<string, any>): str
 
 export function discoverThemes(rootDir: string): DiscoveredTheme[] {
   const themes = new Map<string, DiscoveredTheme>();
-  const nodeModulesDir = join(rootDir, 'node_modules');
 
   const addTheme = (theme: DiscoveredTheme | null): void => {
     if (theme) themes.set(theme.id, theme);
   };
 
-  if (existsSync(nodeModulesDir)) {
-    const entries = readdirSync(nodeModulesDir);
-    for (const entry of entries) {
-      if (entry.startsWith('.')) continue;
-
-      if (entry.startsWith('@')) {
-        // Scoped packages
-        const scopeDir = join(nodeModulesDir, entry);
-        try {
-          const realScopeDir = realpathSync(scopeDir);
-          if (!statSync(realScopeDir).isDirectory()) continue;
-          const scopedEntries = readdirSync(realScopeDir);
-          for (const scopedEntry of scopedEntries) {
-            if (scopedEntry.startsWith('.')) continue;
-            try {
-              const pkgDir = realpathSync(join(scopeDir, scopedEntry));
-              addTheme(tryLoadTheme(`${entry}/${scopedEntry}`, pkgDir));
-            } catch { continue; }
-          }
-        } catch { continue; }
-      } else {
-        try {
-          const pkgDir = realpathSync(join(nodeModulesDir, entry));
-          addTheme(tryLoadTheme(entry, pkgDir));
-        } catch { continue; }
-      }
-    }
-  }
-
-  // pnpm snapshots `file:` dependencies under node_modules. During local theme
-  // development that snapshot can lag behind src/themes until pnpm install is
-  // run again, hiding newly-added manifest fields such as `config`. Prefer the
-  // declared source directory so builds always observe the current workspace.
-  const rootPackagePath = join(rootDir, 'package.json');
-  if (existsSync(rootPackagePath)) {
-    try {
-      const rootPackage = JSON.parse(readFileSync(rootPackagePath, 'utf-8')) as Record<string, any>;
-      const dependencySpecs = {
-        ...rootPackage.devDependencies,
-        ...rootPackage.optionalDependencies,
-        ...rootPackage.dependencies,
-      } as Record<string, unknown>;
-
-      for (const [packageName, spec] of Object.entries(dependencySpecs)) {
-        if (typeof spec !== 'string' || !spec.startsWith('file:')) continue;
-        try {
-          const sourceDir = realpathSync(join(rootDir, spec.slice('file:'.length)));
-          addTheme(tryLoadTheme(packageName, sourceDir));
-        } catch { continue; }
-      }
-    } catch (err) {
-      console.warn('[theme-loader] Failed to inspect local file dependencies:', err);
-    }
+  for (const dependency of discoverDeclaredPackages(rootDir)) {
+    addTheme(tryLoadTheme(dependency.packageName, dependency.packageDir));
   }
 
   return [...themes.values()];
@@ -304,7 +254,7 @@ export default function themeLoaderIntegration(): AstroIntegration {
   return {
     name: 'typecho-theme-loader',
     hooks: {
-      'astro:config:setup': ({ config, updateConfig, injectScript }) => {
+      'astro:config:setup': ({ config, updateConfig }) => {
         const rootDir = config.root ? config.root.pathname.replace(/^\/([A-Z]:)/, '$1') : process.cwd();
         const publicDir = join(rootDir, 'public');
 
@@ -344,20 +294,6 @@ export default function themeLoaderIntegration(): AstroIntegration {
           },
         });
 
-        // Inject theme registration script that runs on server startup
-        // This registers all discovered themes into the theme registry
-        if (discoveredThemes.length > 0) {
-          const registrations = discoveredThemes.map((theme) => {
-            const manifest = JSON.stringify(theme.manifest);
-            const cssPath = `/themes/${theme.id}/style.css`;
-            return `registerTheme(${JSON.stringify(theme.packageName)}, ${manifest}, ${JSON.stringify(cssPath)});`;
-          }).join('\n');
-
-          injectScript(
-            'page-ssr',
-            `import { registerTheme } from '@/lib/theme';\n${registrations}`
-          );
-        }
       },
 
       'astro:build:done': () => {

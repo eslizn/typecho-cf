@@ -48,4 +48,14 @@ describe('theme loader local file dependencies', () => {
       footerText: { type: 'text', label: 'Footer text' },
     });
   });
+
+  it('ignores an unlisted theme that only exists in node_modules', () => {
+    const root = mkdtempSync(join(tmpdir(), 'typecho-theme-loader-'));
+    temporaryRoots.push(root);
+
+    writeTheme(join(root, 'node_modules', 'typecho-theme-unlisted'), undefined);
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ dependencies: {} }));
+
+    expect(discoverThemes(root)).toEqual([]);
+  });
 });

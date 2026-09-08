@@ -16,10 +16,8 @@ import { CONTENT_ROUTE_PATHS, isContentPathAllowed } from '@/lib/content-path';
 
 // Plugin loader registration (generated at build time by plugin-loader.ts).
 // Statically imported so the lazy plugin loader table exists before the first
-// request of a cold isolate runs setActivatedPlugins. Page-ssr scripts only
-// execute after a page chunk loads, which may never happen before a plugin
-// route like /webdav is requested. Vitest resolves this to a stub that
-// mirrors the generated registry.
+// request of a cold isolate runs setActivatedPlugins. Vitest resolves this to
+// a stub that mirrors the generated registry.
 import 'virtual:typecho-plugin-registry';
 
 // Routes that must never enter the permalink-rewrite branch (rewrite targets

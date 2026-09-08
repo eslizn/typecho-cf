@@ -4,9 +4,8 @@
  * In production the plugin-loader Astro integration generates this module:
  * registerPluginLoaders() with one lazy dynamic import per plugin. The
  * middleware statically imports it so plugin loaders are registered before
- * the first request of a cold isolate runs setActivatedPlugins — page-ssr
- * scripts only execute after a page chunk loads, which never happens for a
- * plugin route like /webdav.
+ * the first request of a cold isolate runs setActivatedPlugins. Production
+ * gets the equivalent generated module from plugin-loader.ts.
  *
  * Vitest does not run Astro integrations, so this file mirrors the generated
  * registry for the workspace plugins. Keep it in sync with src/plugins/*.

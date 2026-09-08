@@ -526,9 +526,8 @@ export function pluginExists(pluginId: string): boolean {
  * @param handler - The handler function
  * @param priority - Execution priority (lower = earlier, default 10)
  *
- * G6-1: dedupes (pluginId, handler-by-reference) so middleware
- * bootstrap + plugin-loader injectScript registering the same plugin
- * twice doesn't end up running the handler twice on every request.
+ * G6-1: dedupes (pluginId, handler-by-reference) so repeated hook
+ * registration does not run the handler twice on every request.
  */
 export function addHook(
   hookPoint: string,

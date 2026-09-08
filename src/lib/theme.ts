@@ -252,8 +252,9 @@ export function getThemeCount(): number {
   return themeRegistry.size;
 }
 
-// Register themes in every server entrypoint, including API endpoints that do
-// not execute Astro's page-ssr registration script.
+// Register themes from the build-time virtual registry when this shared module
+// is evaluated. Server entrypoints that need theme data import this module
+// directly; no page-level registration script is required.
 for (const entry of themeRegistryEntries) {
   registerTheme(entry.packageName, entry.manifest, entry.cssPath);
 }

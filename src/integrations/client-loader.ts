@@ -3,7 +3,8 @@
  *
  * Scans for TypeScript browser-side source files in:
  *   - src/client/*.ts          → compiled to public/js/
- *   - src/plugins/<id>/client/*.ts → compiled to public/plugin-assets/<id>/
+ *   - client/*.ts in a declared plugin package → compiled to
+ *     public/plugin-assets/<id>/
  *
  * Uses esbuild to compile TypeScript to IIFE JavaScript, then copies
  * the output into public/ so Astro serves it as static files.
@@ -12,8 +13,9 @@
  * no runtime overhead beyond <script src="...">.
  */
 import type { AstroIntegration } from 'astro';
-import { existsSync, readdirSync, mkdirSync, writeFileSync, statSync, cpSync } from 'node:fs';
-import { join, relative, dirname } from 'node:path';
+import { existsSync, readdirSync, mkdirSync, writeFileSync, statSync } from 'node:fs';
+import { join, relative } from 'node:path';
+import { discoverPlugins, type DiscoveredPlugin } from './plugin-loader';
 
 interface ClientSource {
   sourcePath: string;
@@ -45,20 +47,14 @@ function discoverCoreClients(rootDir: string): ClientSource[] {
 }
 
 /**
- * Discover plugin client sources (src/plugins/<name>/client/*.ts).
+ * Discover client sources only for plugins declared by the root package.json.
  */
-function discoverPluginClients(rootDir: string): ClientSource[] {
-  const pluginsDir = join(rootDir, 'src', 'plugins');
-  if (!existsSync(pluginsDir) || !statSync(pluginsDir).isDirectory()) return [];
-
+export function discoverPluginClients(rootDir: string): ClientSource[] {
   const sources: ClientSource[] = [];
-  const pluginDirs = readdirSync(pluginsDir).filter(d => {
-    if (d.startsWith('.')) return false;
-    return statSync(join(pluginsDir, d)).isDirectory();
-  });
+  const plugins: DiscoveredPlugin[] = discoverPlugins(rootDir);
 
-  for (const pluginId of pluginDirs) {
-    const clientDir = join(pluginsDir, pluginId, 'client');
+  for (const plugin of plugins) {
+    const clientDir = join(plugin.packageDir, 'client');
     if (!existsSync(clientDir) || !statSync(clientDir).isDirectory()) continue;
 
     const entries = readdirSync(clientDir);
@@ -66,11 +62,11 @@ function discoverPluginClients(rootDir: string): ClientSource[] {
       if (!entry.endsWith('.ts')) continue;
       const sourcePath = join(clientDir, entry);
       const jsName = entry.replace(/\.ts$/, '.js');
-      const outDir = join(rootDir, 'public', 'plugin-assets', pluginId);
+      const outDir = join(rootDir, 'public', 'plugin-assets', plugin.id);
       sources.push({
         sourcePath,
         outDir,
-        publicUrl: `/plugin-assets/${pluginId}/${jsName}`,
+        publicUrl: `/plugin-assets/${plugin.id}/${jsName}`,
       });
     }
   }
@@ -127,7 +123,7 @@ export default function clientLoaderIntegration(): AstroIntegration {
           }
           await compileAll(allSources);
         } else {
-          console.log('[client-loader] No client sources found (src/client/ + src/plugins/*/client/)');
+          console.log('[client-loader] No client sources found (src/client/ + declared plugin packages)');
         }
       },
 

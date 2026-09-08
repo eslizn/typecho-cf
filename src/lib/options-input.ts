@@ -11,7 +11,7 @@ export class SiteOptionsInputError extends Error {
 }
 
 const OPTION_KEYS = new Set([
-  'title', 'description', 'keywords', 'siteUrl', 'timezone',
+  'title', 'description', 'keywords', 'siteUrl', 'timezone', 'lang',
   'allowRegister', 'pageSize', 'postsListSize', 'commentsListSize',
   'defaultAllowComment', 'defaultAllowPing', 'defaultAllowFeed',
   'feedFullText', 'markdown', 'postDateFormat', 'commentDateFormat',

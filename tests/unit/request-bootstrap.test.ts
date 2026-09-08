@@ -49,6 +49,19 @@ describe('finalizeRequestResponse()', () => {
     put.mockRestore();
   });
 
+  it('adds Accept-Language to cached variants in automatic mode', async () => {
+    const put = vi.spyOn(caches.default, 'put');
+    const request = new Request('https://example.com/');
+    await finalizeRequestResponse(new Response('ok'), {
+      request,
+      cacheKey: new Request('https://example.com/?__typecho_i18n=en@catalog-test'),
+      autoLocale: true,
+    });
+
+    expect(put.mock.calls[0]?.[1].headers.get('vary')).toContain('Accept-Language');
+    put.mockRestore();
+  });
+
   it('fires request:end once when middleware finalizes the same request repeatedly', async () => {
     const pluginId = 'request-end-test';
     const pluginCtx: HookContext = { activatedPlugins: new Set([pluginId]) };

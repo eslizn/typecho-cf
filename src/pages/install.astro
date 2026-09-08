@@ -25,7 +25,7 @@ if (installed) {
 const installTokenConfigured = typeof (env as any).INSTALL_TOKEN === 'string' && (env as any).INSTALL_TOKEN.length > 0;
 
 const defaultOptions = {
-  title: 'Blog', charset: 'UTF-8', lang: 'zh_CN', description: '',
+  title: 'Blog', charset: 'UTF-8', lang: '', description: '',
   siteUrl: new URL(Astro.request.url).origin,
 };
 const urls = { siteUrl: defaultOptions.siteUrl };

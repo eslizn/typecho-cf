@@ -6,6 +6,8 @@ import { ensureSecret, loadOptions } from '@/lib/options';
 import { parsePageNumber } from '@/lib/input';
 import { doHook, parseActivatedPlugins, setActivatedPlugins, type HookContext } from '@/lib/plugin';
 import { applySecurityHeaders } from '@/lib/security-headers';
+import { createCoreRequestI18n, createRequestI18n } from '@/lib/i18n-runtime';
+import type { I18n, ResolvedLocale } from '@/lib/i18n';
 
 export interface RequestTarget {
   originalUrl: URL;
@@ -33,6 +35,9 @@ export interface ResponseFinalization {
   pluginCtx?: HookContext;
   cacheKey?: Request | null;
   executionContext?: { waitUntil(promise: Promise<unknown>): void } | null;
+  i18n?: I18n;
+  resolvedLocale?: ResolvedLocale;
+  autoLocale?: boolean;
 }
 
 // A request can pass through several early-return branches in middleware
@@ -88,7 +93,8 @@ export async function bootstrapRequestCore(
       return { ok: false, response: new Response(null, { status: 302, headers: { Location: '/install' } }) };
     }
     console.error({ event: 'request_bootstrap_failed', stage: 'database_ready', error: safeError(error) });
-    return { ok: false, response: new Response('Service unavailable', { status: 500 }) };
+    const runtime = createCoreRequestI18n(request);
+    return { ok: false, response: new Response(runtime.i18n.t('core.error.serviceUnavailable'), { status: 500 }) };
   }
 
   const db = getDb(d1);
@@ -109,7 +115,21 @@ export async function bootstrapRequestCore(
         parseActivatedPlugins(options.activatedPlugins as string | undefined),
       );
     }
-    const core = { db, options, pluginCtx };
+    const runtime = createRequestI18n(
+      options.lang,
+      request,
+      pluginCtx.activatedPlugins,
+    );
+    pluginCtx.i18n = runtime.i18n;
+    pluginCtx.resolvedLocale = runtime.resolvedLocale;
+    const core = {
+      db,
+      options,
+      pluginCtx,
+      i18n: runtime.i18n,
+      resolvedLocale: runtime.resolvedLocale,
+      autoLocale: runtime.autoLocale,
+    };
     setRequestCoreContext(locals, core, request);
     return { ok: true, core };
   } catch (error) {
@@ -125,13 +145,15 @@ export async function finalizeRequestResponse(
 ): Promise<Response> {
   const finalized = await applySecurityHeaders(
     response,
-    { request: finalization.request },
+    { request: finalization.request, i18n: finalization.i18n },
     finalization.pluginCtx,
   );
   if (finalization.cacheKey && finalized.status === 200) {
     const cacheHeaders = new Headers(finalized.headers);
     if (!cacheHeaders.has('Cache-Control')) cacheHeaders.set('Cache-Control', 'public, s-maxage=300');
-    cacheHeaders.set('Vary', mergeVary(cacheHeaders.get('Vary'), ['Cookie', 'Accept-Encoding']));
+    const vary = ['Cookie', 'Accept-Encoding'];
+    if (finalization.autoLocale) vary.push('Accept-Language');
+    cacheHeaders.set('Vary', mergeVary(cacheHeaders.get('Vary'), vary));
     cacheHeaders.delete('Set-Cookie');
     const cacheable = new Response(finalized.clone().body, {
       status: finalized.status,
@@ -148,6 +170,8 @@ export async function finalizeRequestResponse(
     await doHook(finalization.pluginCtx, 'request:end', {
       request: finalization.request,
       response: finalized,
+      i18n: finalization.i18n,
+      resolvedLocale: finalization.resolvedLocale,
     });
   }
   return finalized;

@@ -30,6 +30,7 @@ import {
   resetPluginTranslationRegistry,
   stagePluginTranslation,
 } from '@/lib/i18n-registry';
+import type { I18n, ResolvedLocale } from '@/lib/i18n';
 export {
   getAvailableTranslationLocales,
   getGlobalTranslationCatalogs,
@@ -99,6 +100,9 @@ export type FilterHandler = (value: any, ...args: any[]) => any | Promise<any>;
 
 export interface HookContext {
   activatedPlugins: Set<string>;
+  /** Request-local translator. Minimal test/plugin contexts may omit it. */
+  i18n?: I18n;
+  resolvedLocale?: ResolvedLocale;
 }
 
 export interface PluginInitContext {

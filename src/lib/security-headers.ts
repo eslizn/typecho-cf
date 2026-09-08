@@ -8,6 +8,7 @@
  */
 import { isRequestHttps } from '@/lib/auth';
 import { applyFilterSafely, type HookContext } from '@/lib/plugin';
+import type { I18n } from '@/lib/i18n';
 
 /**
  * The default Content-Security-Policy. Tuned for the bundled minimal
@@ -57,6 +58,8 @@ export function serializeCsp(directives: CspDirectives): string {
 
 export interface SecurityHeaderContext {
   request?: Request;
+  /** Request-local translator for plugins that need localized diagnostics. */
+  i18n?: I18n;
   /**
    * Set when the response is for an upload-served file. We tighten the
    * policy considerably because user-uploaded assets shouldn't be able
@@ -86,7 +89,10 @@ export async function applySecurityHeaders(
   } else if (pluginCtx) {
     let directives = defaultCspDirectives();
     try {
-      const filtered = await applyFilterSafely(pluginCtx, 'csp:directives', directives, { request: secCtx.request });
+      const filtered = await applyFilterSafely(pluginCtx, 'csp:directives', directives, {
+        request: secCtx.request,
+        i18n: secCtx.i18n,
+      });
       if (filtered && typeof filtered === 'object') {
         directives = filtered as CspDirectives;
       }
@@ -125,4 +131,3 @@ export async function applySecurityHeaders(
     headers,
   });
 }
-

@@ -10,6 +10,7 @@ import {
   getClientIp,
   setRequestCoreContext,
 } from '@/lib/context';
+import { createRequestI18n } from '@/lib/i18n-runtime';
 
 function makeRequest(headers: Record<string, string>): Request {
   return new Request('https://example.com/', { headers });
@@ -75,9 +76,16 @@ describe('request context reuse', () => {
       activatedPlugins: '[]',
     } as any;
     const pluginCtx = { activatedPlugins: new Set(['active-plugin']) };
-    setRequestCoreContext(locals, { db, options, pluginCtx });
-
     const request = makeRequest({});
+    const runtime = createRequestI18n(options.lang, request, pluginCtx.activatedPlugins);
+    setRequestCoreContext(locals, {
+      db,
+      options,
+      pluginCtx,
+      i18n: runtime.i18n,
+      resolvedLocale: runtime.resolvedLocale,
+      autoLocale: runtime.autoLocale,
+    });
     const firstPromise = createContext(locals, request);
     const secondPromise = createContext(locals, request);
     const [first, second] = await Promise.all([firstPromise, secondPromise]);
@@ -93,14 +101,19 @@ describe('request context reuse', () => {
     const locals = {} as App.Locals;
     const db = { marker: 'shared-db' } as any;
     const options = { siteUrl: 'https://example.com', secret: '', activatedPlugins: '[]' } as any;
+    const request = makeRequest({});
+    const runtime = createRequestI18n(options.lang, request, []);
     setRequestCoreContext(locals, {
       db,
       options,
       pluginCtx: { activatedPlugins: new Set<string>() },
+      i18n: runtime.i18n,
+      resolvedLocale: runtime.resolvedLocale,
+      autoLocale: runtime.autoLocale,
     });
 
     let started = false;
-    const pending = createContextAlongside(locals, makeRequest({}), async receivedDb => {
+    const pending = createContextAlongside(locals, request, async receivedDb => {
       started = true;
       expect(receivedDb).toBe(db);
       return 'loaded';

@@ -1,6 +1,6 @@
 import { defineMiddleware } from 'astro:middleware';
 import { schema } from '@/db';
-import { applyFilter, doHook, isPluginAdminPath, isPluginRoute, parseActivatedPlugins, setActivatedPlugins } from '@/lib/plugin';
+import { applyFilter, doHook, isPluginAdminPath, isPluginRoute } from '@/lib/plugin';
 import { hasAuthCookies } from '@/lib/auth';
 import { createAdminErrorRedirect, getAdminUserForFlash, isAdminHtmlFormRequest, adminFallbackForApiPath } from '@/lib/admin-flash';
 import { compilePermalinkPattern, DEFAULT_PERMALINK_PATTERNS } from '@/lib/permalink-pattern';
@@ -59,17 +59,13 @@ export const onRequest = defineMiddleware(async (context, next) => {
     return await finalizeRequestResponse(await next(), { request: context.request });
   }
 
-  // Defer plugin init until after a possible edge-cache hit when no plugins
-  // are activated — avoids paying import/init cost on every public cache hit.
   const bootstrap = await bootstrapRequestCore(context.request, context.locals, {
-    plugins: false,
     executionContext: context.locals.cfContext,
   });
   if (!bootstrap.ok) {
     return finalizeRequestResponse(bootstrap.response, { request: context.request });
   }
-  const { db, options, pluginCtx } = bootstrap.core;
-  const activatedIds = parseActivatedPlugins(options.activatedPlugins as string | undefined);
+  const { db, options, pluginCtx, i18n, resolvedLocale, autoLocale } = bootstrap.core;
 
   // ── Edge Cache Layer ──────────────────────────────────────────────────────
   const isGetRequest = context.request.method === 'GET';
@@ -92,20 +88,15 @@ export const onRequest = defineMiddleware(async (context, next) => {
     isCacheablePublicPath(path, options);
 
   // Reuse a single Request for both cache.match and cache.put
+  // Plugin activation has already completed in bootstrap. The locale and
+  // catalog bundle must be known before the first cache lookup so plugin
+  // overrides cannot be bypassed by a core-only cache hit.
   const cacheKey = isCacheable
-    ? new Request(withCacheVersion(context.request.url, options.cacheVersion), { method: 'GET' })
+    ? new Request(withCacheVersion(context.request.url, options.cacheVersion, resolvedLocale.bundleName), {
+      method: 'GET',
+      headers: { 'Accept-Language': resolvedLocale.bundleName },
+    })
     : null;
-
-  // Safe early hit: no activated plugins means no request:route overrides and
-  // no csp:directives filter contributions on the cached response.
-  if (cacheKey && activatedIds.length === 0) {
-    const cached = await caches.default.match(cacheKey);
-    if (cached) {
-      return await finalizeRequestResponse(cached, { request: context.request, pluginCtx });
-    }
-  }
-
-  await setActivatedPlugins(pluginCtx, activatedIds);
 
   // ── Permalink URL Rewriting ────────────────────────────────────────────────
   // After a rewrite the middleware runs again on the NEW path.
@@ -248,6 +239,8 @@ export const onRequest = defineMiddleware(async (context, next) => {
       db,
       options,
       env,
+      i18n,
+      resolvedLocale,
     });
     if (pluginRoute?.handled && pluginRoute.response instanceof Response) {
       // G6-4: hard-block plugins from claiming reserved core paths.
@@ -256,7 +249,13 @@ export const onRequest = defineMiddleware(async (context, next) => {
       if (isReservedCorePath(path)) {
         console.warn({ event: 'plugin_reserved_path_rejected', path });
       } else {
-        return await finalizeRequestResponse(pluginRoute.response, { request: context.request, pluginCtx });
+        return await finalizeRequestResponse(pluginRoute.response, {
+          request: context.request,
+          pluginCtx,
+          i18n,
+          resolvedLocale,
+          autoLocale,
+        });
       }
     }
   }
@@ -280,13 +279,22 @@ export const onRequest = defineMiddleware(async (context, next) => {
     return finalizeRequestResponse(new Response('Not Found', { status: 404 }), {
       request: context.request,
       pluginCtx,
+      i18n,
+      resolvedLocale,
+      autoLocale,
     });
   }
 
   if (cacheKey) {
     const cached = await caches.default.match(cacheKey);
     if (cached) {
-      return await finalizeRequestResponse(cached, { request: context.request, pluginCtx });
+      return await finalizeRequestResponse(cached, {
+        request: context.request,
+        pluginCtx,
+        i18n,
+        resolvedLocale,
+        autoLocale,
+      });
     }
   }
 
@@ -297,6 +305,8 @@ export const onRequest = defineMiddleware(async (context, next) => {
     path,
     options,
     pluginCtx,
+    i18n,
+    resolvedLocale,
   };
   if (shouldRunArchiveRenderHooks) {
     await doHook(pluginCtx, 'archive:beforeRender', archiveRenderContext);
@@ -364,6 +374,9 @@ export const onRequest = defineMiddleware(async (context, next) => {
     pluginCtx,
     cacheKey,
     executionContext: context.locals.cfContext,
+    i18n,
+    resolvedLocale,
+    autoLocale,
   });
 });
 
@@ -382,9 +395,10 @@ function isReservedCorePath(path: string): boolean {
   return false;
 }
 
-function withCacheVersion(requestUrl: string, cacheVersion?: number): string {
+function withCacheVersion(requestUrl: string, cacheVersion?: number, bundleName?: string): string {
   const url = new URL(requestUrl);
   url.searchParams.set('__typecho_cache', String(cacheVersion || 0));
+  if (bundleName) url.searchParams.set('__typecho_i18n', bundleName);
   return url.toString();
 }
 

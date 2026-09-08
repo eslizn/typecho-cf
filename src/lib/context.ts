@@ -10,6 +10,8 @@ import { setActivatedPlugins, parseActivatedPlugins, doHook, type HookContext } 
 import { getThemePreviewId, THEME_PREVIEW_OPTION } from '@/lib/theme-preview';
 import { schema } from '@/db';
 import { env } from 'cloudflare:workers';
+import { createRequestI18n, type RequestI18nRuntime } from '@/lib/i18n-runtime';
+import type { I18n, ResolvedLocale } from '@/lib/i18n';
 export { getClientIp } from '@/lib/client-ip';
 
 /** Drizzle-inferred user row type */
@@ -22,12 +24,18 @@ export interface RequestContext extends HookContext {
   user: UserRow | null;
   isLoggedIn: boolean;
   csrfToken: string | null;
+  i18n: I18n;
+  resolvedLocale: ResolvedLocale;
+  autoLocale: boolean;
 }
 
 export interface RequestCoreContext {
   db: Database;
   options: SiteOptions;
   pluginCtx: HookContext;
+  i18n: I18n;
+  resolvedLocale: ResolvedLocale;
+  autoLocale: boolean;
 }
 
 type InternalLocals = App.Locals & {
@@ -106,9 +114,33 @@ async function buildContext(locals: InternalLocals, request: Request): Promise<R
     ? []
     : parseActivatedPlugins(options.activatedPlugins as string | undefined);
   const activatedPlugins = core?.pluginCtx.activatedPlugins ?? new Set<string>();
-  const ctx: RequestContext = { db, options, urls, user: null, isLoggedIn: false, csrfToken: null, activatedPlugins };
+  let runtime: RequestI18nRuntime = core
+    ? {
+      i18n: core.i18n,
+      resolvedLocale: core.resolvedLocale,
+      autoLocale: core.autoLocale,
+    }
+    : createRequestI18n(options.lang, request, []);
+  const ctx: RequestContext = {
+    db,
+    options,
+    urls,
+    user: null,
+    isLoggedIn: false,
+    csrfToken: null,
+    activatedPlugins,
+    i18n: runtime.i18n,
+    resolvedLocale: runtime.resolvedLocale,
+    autoLocale: runtime.autoLocale,
+  };
 
-  if (!core) await setActivatedPlugins(ctx, activatedIds);
+  if (!core) {
+    await setActivatedPlugins(ctx, activatedIds);
+    runtime = createRequestI18n(options.lang, request, ctx.activatedPlugins);
+    ctx.i18n = runtime.i18n;
+    ctx.resolvedLocale = runtime.resolvedLocale;
+    ctx.autoLocale = runtime.autoLocale;
+  }
 
   // Check auth
   const cookieHeader = request.headers.get('cookie');

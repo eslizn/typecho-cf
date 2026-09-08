@@ -7,9 +7,8 @@ import { publishedPostCondition } from '@/lib/content-visibility';
 
 export const GET: APIRoute = async ({ request, locals, params }) => {
   const uid = parseInt(params.uid || '0', 10);
-  if (!uid) return new Response('Not Found', { status: 404 });
-
   const { db, options, urls, pluginCtx, i18n, autoLocale } = await getFeedRuntime(locals, request);
+  if (!uid) return new Response(i18n.t('core.error.notFound', {}, 'Not Found'), { status: 404 });
 
   const author = await db.query.users.findFirst({
     columns: { name: true, screenName: true },

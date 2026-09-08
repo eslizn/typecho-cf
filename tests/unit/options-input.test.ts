@@ -29,6 +29,12 @@ describe('parseSiteOptionsInput()', () => {
       .toMatchObject({ commentsPostTimeout: '604800', commentsPostInterval: '300' });
   });
 
+  it('preserves an explicit empty language and accepts legacy locale aliases', () => {
+    expect(parse({ lang: '' })).toMatchObject({ lang: '' });
+    expect(parse({ lang: 'zh_CN' })).toMatchObject({ lang: 'zh_CN' });
+    expect(parse({ lang: 'en-US' })).toMatchObject({ lang: 'en-US' });
+  });
+
   it.each([
     ['siteUrl', 'javascript:alert(1)'],
     ['siteUrl', 'https://user:secret@example.com'],
@@ -38,6 +44,7 @@ describe('parseSiteOptionsInput()', () => {
     ['timezone', 'Infinity'],
     ['allowRegister', 'true'],
     ['commentsOrder', 'RANDOM'],
+    ['lang', '../en'],
   ])('rejects invalid %s without returning a partial result', (field, value) => {
     expect(() => parse({ title: 'must-not-save', [field]: value }))
       .toThrow(SiteOptionsInputError);

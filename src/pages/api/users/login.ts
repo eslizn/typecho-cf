@@ -18,11 +18,13 @@ import {
   recordLoginFailure,
 } from '@/lib/login-rate-limit';
 import { safeAdminRedirectUrl } from '@/lib/admin-auth';
-import { getClientIp, getRequestCoreContextFromLocals } from '@/lib/context';
+import { getClientIp, getRequestCoreContextFromLocals, getRequestI18n } from '@/lib/context';
 import { eq } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 import { REQUEST_BODY_LIMITS } from '@/lib/constants';
-import { InputError, readBoundedFormData } from '@/lib/input';
+import { InputError, inputErrorMessage, readBoundedFormData } from '@/lib/input';
+import { i18nMessage, type I18nMessage } from '@/lib/i18n';
+import { textError } from '@/lib/http';
 
 const LOGIN_URL = '/admin/login';
 
@@ -41,7 +43,7 @@ const LOGIN_URL = '/admin/login';
 const DUMMY_PASSWORD_HASH =
   '$PBKDF2$100000$0123456789abcdef0123456789abcdef$0000000000000000000000000000000000000000000000000000000000000000';
 
-function redirectWithLoginError(message: string, request?: Request): Response {
+function redirectWithLoginError(message: string | I18nMessage, request?: Request): Response {
   return new Response(null, {
     status: 302,
     headers: createFlashRedirectHeaders(LOGIN_URL, LOGIN_ERROR_FLASH_COOKIE, message, LOGIN_URL, request),
@@ -91,21 +93,24 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const core = getRequestCoreContextFromLocals(locals);
   const db = core?.db ?? getDb(env.DB);
   const options = core?.options ?? await loadOptions(db);
+  let i18n = core?.i18n ?? getRequestI18n(request, options);
   const pluginCtx: HookContext = core?.pluginCtx ?? { activatedPlugins: new Set<string>() };
   if (!core) {
     const activatedIds = parseActivatedPlugins(options.activatedPlugins as string | undefined);
     await setActivatedPlugins(pluginCtx, activatedIds);
+    i18n = getRequestI18n(request, options, pluginCtx.activatedPlugins);
   }
+  pluginCtx.i18n = i18n;
 
   if (!isSameOriginRequest(request, options.siteUrl)) {
-    return new Response('Forbidden', { status: 403 });
+    return textError(403, i18nMessage('core.error.forbidden', 'Forbidden'), undefined, i18n);
   }
 
   let formData: FormData;
   try {
     formData = await readBoundedFormData(request, REQUEST_BODY_LIMITS.auth);
   } catch (error) {
-    if (error instanceof InputError) return new Response(error.message, { status: error.status });
+    if (error instanceof InputError) return textError(error.status, inputErrorMessage(error), undefined, i18n);
     throw error;
   }
   const name = formData.get('name')?.toString() || '';
@@ -124,11 +129,11 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
   if (!name) {
     await notifyLoginFailure(pluginCtx, request, 'missing_input');
-    return redirectWithLoginError('请输入用户名', request);
+    return redirectWithLoginError(i18nMessage('auth.usernameRequired', 'Please enter your username.'), request);
   }
   if (!password) {
     await notifyLoginFailure(pluginCtx, request, 'missing_input');
-    return redirectWithLoginError('请输入密码', request);
+    return redirectWithLoginError(i18nMessage('auth.passwordRequired', 'Please enter your password.'), request);
   }
 
   // ── Brute-force throttle ────────────────────────────────────────────────
@@ -142,7 +147,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
   ]);
   if (lockedUntil > 0) {
     const remaining = Math.max(1, Math.ceil((lockedUntil - Date.now()) / 1000));
-    const headers = createFlashRedirectHeaders(LOGIN_URL, LOGIN_ERROR_FLASH_COOKIE, `登录失败次数过多，请 ${remaining} 秒后再试`, LOGIN_URL, request);
+    const headers = createFlashRedirectHeaders(LOGIN_URL, LOGIN_ERROR_FLASH_COOKIE, i18nMessage('auth.loginLocked', 'Too many failed login attempts. Try again in {seconds} seconds.', { seconds: remaining }), LOGIN_URL, request);
     headers.set('Retry-After', String(remaining));
     await notifyLoginFailure(pluginCtx, request, 'locked');
     return new Response(null, { status: 302, headers });
@@ -152,6 +157,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     request,
     formData: buildLoginHookFormData(formData),
     options: { ...options, secret: undefined },
+    i18n,
   });
   const rejectedReason = loginContext && typeof loginContext === 'object'
     ? (loginContext as { _rejected?: unknown })._rejected
@@ -169,19 +175,19 @@ export const POST: APIRoute = async ({ request, locals }) => {
     await verifyPassword(password, DUMMY_PASSWORD_HASH);
     await recordLoginFailure(db, ip, rateConfig);
     await notifyLoginFailure(pluginCtx, request, 'invalid');
-    return redirectWithLoginError('用户名或密码无效', request);
+    return redirectWithLoginError(i18nMessage('auth.invalidCredentials', 'Invalid username or password.'), request);
   }
 
   const valid = await verifyPassword(password, user.password || '');
   if (valid === 'needs_reset') {
     await recordLoginFailure(db, ip, rateConfig);
     await notifyLoginFailure(pluginCtx, request, 'invalid');
-    return redirectWithLoginError('密码格式已升级，请使用忘记密码功能重置密码', request);
+    return redirectWithLoginError(i18nMessage('auth.passwordNeedsReset', 'This password format must be upgraded. Use password reset to continue.'), request);
   }
   if (valid !== true) {
     await recordLoginFailure(db, ip, rateConfig);
     await notifyLoginFailure(pluginCtx, request, 'invalid');
-    return redirectWithLoginError('用户名或密码无效', request);
+    return redirectWithLoginError(i18nMessage('auth.invalidCredentials', 'Invalid username or password.'), request);
   }
 
   // Successful login → reset failure counter for this IP.

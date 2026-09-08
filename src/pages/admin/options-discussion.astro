@@ -8,7 +8,7 @@ const authCheck = requireAuth(ctx);
 if (authCheck) return authCheck;
 
 if (!hasPermission(ctx.user!.group || 'visitor', 'administrator')) {
-  return new Response('Forbidden', { status: 403 });
+  return new Response(ctx.i18n.t('core.error.forbidden', {}, 'Forbidden'), { status: 403 });
 }
 
 const { options, urls, user, csrfToken } = ctx;
@@ -23,86 +23,86 @@ const commentsPostIntervalMinutes = options.commentsPostInterval
   ? Math.round(Number(options.commentsPostInterval) / 60)
   : 1;
 ---
-<Admin title="评论设置" options={options} urls={urls} user={user} activeMenu="options-discussion" pluginCtx={ctx}>
+<Admin title={ctx.i18n.t('admin.page.discussionOptions', {}, 'Discussion settings')} options={options} urls={urls} user={user} activeMenu="options-discussion" pluginCtx={ctx}>
   <div class="col-mb-12 col-tb-8 col-tb-offset-2" role="form">
     <form method="post" action="/api/admin/options">
       <input type="hidden" name="_" value={csrfToken} />
       <ul class="typecho-option">
         <li>
-          <label class="typecho-label" for="commentsListSize">评论列表数目</label>
+          <label class="typecho-label" for="commentsListSize">{ctx.i18n.t('admin.field.commentsListSize', {}, 'Comment list size')}</label>
           <input type="text" id="commentsListSize" name="commentsListSize" class="w-20"
             value={options.commentsListSize || '10'} />
           <p class="description">
-            此数目用于指定显示在侧边栏中的评论列表数目
+            {ctx.i18n.t('admin.description.commentsListSize', {}, 'Number of comments shown in the sidebar.')}
           </p>
         </li>
       </ul>
 
       <ul class="typecho-option">
         <li>
-          <label class="typecho-label">评论显示</label>
+          <label class="typecho-label">{ctx.i18n.t('admin.option.commentsDisplay', {}, 'Comment display')}</label>
           <ul>
             <li>
               <input type="checkbox" id="commentsShowCommentOnly" name="commentsShowCommentOnly" value="1"
                 checked={!!options.commentsShowCommentOnly && options.commentsShowCommentOnly !== '0'} />
-              <label for="commentsShowCommentOnly">仅显示评论, 不显示 Pingback/Trackback</label>
+              <label for="commentsShowCommentOnly">{ctx.i18n.t('admin.description.commentsOnly', {}, 'Show comments only; hide Pingbacks and Trackbacks.')}</label>
             </li>
             <li>
               <input type="checkbox" id="commentsMarkdown" name="commentsMarkdown" value="1"
                 checked={!!options.commentsMarkdown && options.commentsMarkdown !== '0'} />
-              <label for="commentsMarkdown">在评论中使用 Markdown 语法</label>
+              <label for="commentsMarkdown">{ctx.i18n.t('admin.description.commentsMarkdown', {}, 'Use Markdown syntax in comments.')}</label>
             </li>
             <li>
               <input type="checkbox" id="commentsShowUrl" name="commentsShowUrl" value="1"
                 checked={!!options.commentsShowUrl} />
-              <label for="commentsShowUrl">评论者名称自动加上其个人主页链接</label>
+              <label for="commentsShowUrl">{ctx.i18n.t('admin.description.commentsShowUrl', {}, 'Automatically link commenter names to their websites.')}</label>
             </li>
             <li>
               <input type="checkbox" id="commentsUrlNofollow" name="commentsUrlNofollow" value="1"
                 checked={!!options.commentsUrlNofollow && options.commentsUrlNofollow !== '0'} />
-              <label for="commentsUrlNofollow">对评论者个人主页链接使用 <code>nofollow</code> 属性</label>
+              <label for="commentsUrlNofollow">{ctx.i18n.t('admin.description.commentsNofollow', {}, 'Add the nofollow attribute to commenter website links.')}</label>
             </li>
             <li>
               <input type="checkbox" id="commentsAvatar" name="commentsAvatar" value="1"
                 checked={!!options.commentsAvatar} />
-              <label for="commentsAvatar">启用 <a href="http://www.gravatar.com">Gravatar</a> 头像服务, 最高显示评级为</label>
+              <label for="commentsAvatar">{ctx.i18n.t('admin.description.commentsAvatar', {}, 'Enable Gravatar avatars. Maximum rating:')}</label>
               <select name="commentsAvatarRating" id="commentsAvatarRating">
-                <option value="G" selected={!options.commentsAvatarRating || options.commentsAvatarRating === 'G'}>G - 普遍级</option>
-                <option value="PG" selected={options.commentsAvatarRating === 'PG'}>PG - 辅导级</option>
-                <option value="R" selected={options.commentsAvatarRating === 'R'}>R - 限制级</option>
-                <option value="X" selected={options.commentsAvatarRating === 'X'}>X - 更高限制</option>
+                <option value="G" selected={!options.commentsAvatarRating || options.commentsAvatarRating === 'G'}>{ctx.i18n.t('admin.option.ratingG', {}, 'G - General')}</option>
+                <option value="PG" selected={options.commentsAvatarRating === 'PG'}>{ctx.i18n.t('admin.option.ratingPg', {}, 'PG - Parental guidance')}</option>
+                <option value="R" selected={options.commentsAvatarRating === 'R'}>{ctx.i18n.t('admin.option.ratingR', {}, 'R - Restricted')}</option>
+                <option value="X" selected={options.commentsAvatarRating === 'X'}>{ctx.i18n.t('admin.option.ratingX', {}, 'X - Highly restricted')}</option>
               </select>
             </li>
             <li>
               <input type="checkbox" id="commentsPageBreak" name="commentsPageBreak" value="1"
                 checked={!!options.commentsPageBreak && options.commentsPageBreak !== '0'} />
-              <label for="commentsPageBreak">启用评论分页, 每页显示</label>
+              <label for="commentsPageBreak">{ctx.i18n.t('admin.description.commentsPaginationLabel', {}, 'Enable comment pagination. Show')}</label>
               <input type="text" id="commentsPageSize" name="commentsPageSize" class="text-s"
                 value={options.commentsPageSize || '20'} style="width: 40px;" />
-              篇评论, 在列出时将
+              {ctx.i18n.t('admin.unit.commentsPerPage', {}, 'comments per page; use the')}
               <select name="commentsPageDisplay" id="commentsPageDisplay">
-                <option value="last" selected={!options.commentsPageDisplay || options.commentsPageDisplay === 'last'}>最后</option>
-                <option value="first" selected={options.commentsPageDisplay === 'first'}>最前</option>
+                <option value="last" selected={!options.commentsPageDisplay || options.commentsPageDisplay === 'last'}>{ctx.i18n.t('admin.option.last', {}, 'Last')}</option>
+                <option value="first" selected={options.commentsPageDisplay === 'first'}>{ctx.i18n.t('admin.option.first', {}, 'First')}</option>
               </select>
-              的页面作为默认显示
+              {ctx.i18n.t('admin.unit.pageAsDefault', {}, 'page as the default view.')}
             </li>
             <li>
               <input type="checkbox" id="commentsThreaded" name="commentsThreaded" value="1"
                 checked={!!options.commentsThreaded && options.commentsThreaded !== '0'} />
-              <label for="commentsThreaded">启用对评论的回复, 以</label>
+              <label for="commentsThreaded">{ctx.i18n.t('admin.description.commentsThreadedLabel', {}, 'Allow comment replies with')}</label>
               <select id="commentsMaxNestingLevels" name="commentsMaxNestingLevels">
                 {[2, 3, 4, 5, 6, 7].map(n => (
                   <option value={String(n)} selected={Number(options.commentsMaxNestingLevels) === n}>{n}</option>
                 ))}
               </select>
-              层作为每个评论最多的回复层数
+              {ctx.i18n.t('admin.unit.nestingLevels', {}, 'nesting levels.')}
               <br />
-              将
+              {ctx.i18n.t('admin.unit.showComments', {}, 'Show')}
               <select name="commentsOrder" id="commentsOrder">
-                <option value="DESC" selected={options.commentsOrder === 'DESC'}>较新的</option>
-                <option value="ASC" selected={!options.commentsOrder || options.commentsOrder === 'ASC'}>较旧的</option>
+                <option value="DESC" selected={options.commentsOrder === 'DESC'}>{ctx.i18n.t('admin.option.newer', {}, 'Newer')}</option>
+                <option value="ASC" selected={!options.commentsOrder || options.commentsOrder === 'ASC'}>{ctx.i18n.t('admin.option.older', {}, 'Older')}</option>
               </select>
-              评论显示在前面
+              {ctx.i18n.t('admin.unit.commentsFirst', {}, 'comments first.')}
             </li>
           </ul>
         </li>
@@ -110,53 +110,53 @@ const commentsPostIntervalMinutes = options.commentsPostInterval
 
       <ul class="typecho-option">
         <li>
-          <label class="typecho-label">评论提交</label>
+          <label class="typecho-label">{ctx.i18n.t('admin.option.commentsSubmit', {}, 'Comment submission')}</label>
           <ul>
             <li>
               <input type="checkbox" id="commentsRequireModeration" name="commentsRequireModeration" value="1"
                 checked={!!options.commentsRequireModeration && options.commentsRequireModeration !== '0'} />
-              <label for="commentsRequireModeration">所有评论必须经过审核</label>
+              <label for="commentsRequireModeration">{ctx.i18n.t('admin.description.commentsModeration', {}, 'All comments must be approved before publication.')}</label>
             </li>
             <li>
               <input type="checkbox" id="commentsWhitelist" name="commentsWhitelist" value="1"
                 checked={!!options.commentsWhitelist && options.commentsWhitelist !== '0'} />
-              <label for="commentsWhitelist">评论者之前须有评论通过了审核</label>
+              <label for="commentsWhitelist">{ctx.i18n.t('admin.description.commentsWhitelist', {}, 'The commenter must have a previously approved comment.')}</label>
             </li>
             <li>
               <input type="checkbox" id="commentsRequireMail" name="commentsRequireMail" value="1"
                 checked={!!options.commentsRequireMail && options.commentsRequireMail !== '0'} />
-              <label for="commentsRequireMail">评论者必须填写邮箱</label>
+              <label for="commentsRequireMail">{ctx.i18n.t('admin.description.commentsRequireMail', {}, 'Commenters must provide an email address.')}</label>
             </li>
             <li>
               <input type="checkbox" id="commentsRequireURL" name="commentsRequireURL" value="1"
                 checked={!!options.commentsRequireURL && options.commentsRequireURL !== '0'} />
-              <label for="commentsRequireURL">评论者必须填写网址</label>
+              <label for="commentsRequireURL">{ctx.i18n.t('admin.description.commentsRequireUrl', {}, 'Commenters must provide a website URL.')}</label>
             </li>
             <li>
               <input type="checkbox" id="commentsCheckReferer" name="commentsCheckReferer" value="1"
                 checked={!!options.commentsCheckReferer && options.commentsCheckReferer !== '0'} />
-              <label for="commentsCheckReferer">检查评论来源页 URL 是否与文章链接一致</label>
+              <label for="commentsCheckReferer">{ctx.i18n.t('admin.description.commentsReferer', {}, 'Verify that the comment source URL matches the post URL.')}</label>
             </li>
             <li>
               <input type="checkbox" id="commentsAntiSpam" name="commentsAntiSpam" value="1"
                 checked={!!options.commentsAntiSpam && options.commentsAntiSpam !== '0'} />
-              <label for="commentsAntiSpam">开启反垃圾保护</label>
+              <label for="commentsAntiSpam">{ctx.i18n.t('admin.description.commentsAntiSpam', {}, 'Enable anti-spam protection.')}</label>
             </li>
             <li>
               <input type="checkbox" id="commentsAutoClose" name="commentsAutoClose" value="1"
                 checked={!!options.commentsAutoClose && options.commentsAutoClose !== '0'} />
-              <label for="commentsAutoClose">在文章发布</label>
+              <label for="commentsAutoClose">{ctx.i18n.t('admin.description.commentsAutoCloseLabel', {}, 'Automatically close comments')}</label>
               <input type="text" id="commentsPostTimeout" name="commentsPostTimeout" class="text-s"
                 value={String(commentsPostTimeoutDays)} style="width: 40px;" />
-              天以后自动关闭评论
+              {ctx.i18n.t('admin.unit.daysAfter', {}, 'days after publication.')}
             </li>
             <li>
               <input type="checkbox" id="commentsPostIntervalEnable" name="commentsPostIntervalEnable" value="1"
                 checked={!!options.commentsPostIntervalEnable && options.commentsPostIntervalEnable !== '0'} />
-              <label for="commentsPostIntervalEnable">同一 IP 发布评论的时间间隔限制为</label>
+              <label for="commentsPostIntervalEnable">{ctx.i18n.t('admin.description.commentsIntervalLabel', {}, 'Limit comments from the same IP to one every')}</label>
               <input type="text" id="commentsPostInterval" name="commentsPostInterval" class="text-s"
                 value={String(commentsPostIntervalMinutes)} style="width: 40px;" />
-              分钟
+              {ctx.i18n.t('admin.unit.minutes', {}, 'minutes.')}
             </li>
           </ul>
         </li>
@@ -164,27 +164,27 @@ const commentsPostIntervalMinutes = options.commentsPostInterval
 
       <ul class="typecho-option">
         <li>
-          <label for="commentsHTMLTagAllowed" class="typecho-label">允许使用的 HTML 标签和属性</label>
+          <label for="commentsHTMLTagAllowed" class="typecho-label">{ctx.i18n.t('admin.field.htmlAllowed', {}, 'Allowed HTML tags and attributes')}</label>
           <p><textarea id="commentsHTMLTagAllowed" name="commentsHTMLTagAllowed" class="w-100 mono" rows="3">{options.commentsHTMLTagAllowed ?? '<a href=""> <img src=""> <em> <strong> <cite> <blockquote> <code> <pre>'}</textarea></p>
-          <p class="description">默认的用户评论不允许填写任何的 HTML 标签, 你可以在这里填写允许使用的 HTML 标签.<br />例如: <code>&lt;a href=&quot;&quot;&gt; &lt;img src=&quot;&quot;&gt; &lt;em&gt; &lt;strong&gt;</code></p>
+          <p class="description">{ctx.i18n.t('admin.description.commentsHtml', {}, 'User comments do not allow HTML by default. List allowed tags and attributes here.')}</p>
         </li>
       </ul>
 
       <ul class="typecho-option">
         <li>
-          <label class="typecho-label">邮件通知</label>
+          <label class="typecho-label">{ctx.i18n.t('admin.option.commentsEmail', {}, 'Email notifications')}</label>
           <ul>
             <li>
               <input type="checkbox" id="commentEmailEnabled" name="commentEmailEnabled" value="1"
                 checked={!!options.commentEmailEnabled && options.commentEmailEnabled !== 0} />
-              <label for="commentEmailEnabled">有新评论时发送邮件通知</label>
-              <p class="description">通知文章作者和父评论作者（需先在基本设置中启用邮件发送）</p>
+              <label for="commentEmailEnabled">{ctx.i18n.t('admin.description.commentEmailLabel', {}, 'Send an email when a new comment is posted.')}</label>
+              <p class="description">{ctx.i18n.t('admin.description.commentEmail', {}, 'Notify the post author and parent commenter (mail must be enabled in General settings).')}</p>
             </li>
             <li>
               <input type="checkbox" id="commentEmailReplyEnabled" name="commentEmailReplyEnabled" value="1"
                 checked={!options.commentEmailReplyEnabled || options.commentEmailReplyEnabled !== 0} />
-              <label for="commentEmailReplyEnabled">包含评论回复通知</label>
-              <p class="description">当有人回复评论时，通知被回复者</p>
+              <label for="commentEmailReplyEnabled">{ctx.i18n.t('admin.description.commentEmailReplyLabel', {}, 'Include comment reply notifications.')}</label>
+              <p class="description">{ctx.i18n.t('admin.description.commentEmailReply', {}, 'Notify the person whose comment received a reply.')}</p>
             </li>
           </ul>
         </li>
@@ -192,7 +192,7 @@ const commentsPostIntervalMinutes = options.commentsPostInterval
 
       <ul class="typecho-option typecho-option-submit">
         <li>
-          <button type="submit" class="btn primary">保存设置</button>
+          <button type="submit" class="btn primary">{ctx.i18n.t('admin.action.save', {}, 'Save settings')}</button>
         </li>
       </ul>
     </form>

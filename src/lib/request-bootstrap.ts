@@ -134,7 +134,8 @@ export async function bootstrapRequestCore(
     return { ok: true, core };
   } catch (error) {
     console.error({ event: 'request_bootstrap_failed', stage: 'site_options', error: safeError(error) });
-    return { ok: false, response: new Response('Service unavailable', { status: 500 }) };
+    const runtime = createCoreRequestI18n(request);
+    return { ok: false, response: new Response(runtime.i18n.t('core.error.serviceUnavailable', {}, 'Service unavailable'), { status: 500 }) };
   }
 }
 

@@ -15,6 +15,9 @@ export const MAX_MESSAGE_KEY_LENGTH = 200;
 export const MAX_MESSAGE_VARIABLES = 20;
 export const MAX_MESSAGE_VALUE_LENGTH = 2000;
 export const MAX_MESSAGE_FALLBACK_LENGTH = 5000;
+export const MAX_TRANSLATION_KEY_LENGTH = 200;
+export const MAX_TRANSLATION_VALUE_LENGTH = 50_000;
+export const MAX_TRANSLATION_ENTRIES = 10_000;
 
 export type MessageVariable = string | number;
 export type MessageVariables = Record<string, MessageVariable>;

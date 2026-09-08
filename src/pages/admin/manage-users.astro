@@ -12,7 +12,7 @@ const authCheck = requireAuth(ctx);
 if (authCheck) return authCheck;
 
 if (!hasPermission(ctx.user!.group || 'visitor', 'administrator')) {
-  return new Response('Forbidden', { status: 403 });
+  return new Response(ctx.i18n.t('core.error.forbidden', {}, 'Forbidden'), { status: 403 });
 }
 
 const { db, options, urls, user, csrfToken } = ctx;
@@ -48,31 +48,31 @@ const totalPages = Math.max(1, Math.ceil(totalUsers / pageSize));
 const postCountMap = new Map(userRows.map(row => [row.user.uid, row.postCount]));
 
 const groupNames: Record<string, string> = {
-  administrator: '管理员',
-  editor: '编辑',
-  contributor: '贡献者',
-  subscriber: '关注者',
-  visitor: '访问者',
+  administrator: ctx.i18n.t('admin.option.administrator', {}, 'Administrator'),
+  editor: ctx.i18n.t('admin.option.editor', {}, 'Editor'),
+  contributor: ctx.i18n.t('admin.option.contributor', {}, 'Contributor'),
+  subscriber: ctx.i18n.t('admin.option.subscriber', {}, 'Subscriber'),
+  visitor: ctx.i18n.t('admin.option.visitor', {}, 'Visitor'),
 };
 ---
-<Admin title="用户" options={options} urls={urls} user={user} activeMenu="manage-users" pluginCtx={ctx}>
+<Admin title={ctx.i18n.t('admin.page.manageUsers', {}, 'Manage users')} options={options} urls={urls} user={user} activeMenu="manage-users" pluginCtx={ctx}>
   <div class="col-mb-12 typecho-list">
     <div class="typecho-list-operate clearfix">
       <form method="get">
         <div class="operate">
-          <label><i class="sr-only">全选</i><input type="checkbox" class="typecho-table-select-all" /></label>
+          <label><i class="sr-only">{ctx.i18n.t('admin.action.selectAll', {}, 'Select all')}</i><input type="checkbox" class="typecho-table-select-all" /></label>
           <div class="btn-group btn-drop">
-            <button class="btn dropdown-toggle btn-s" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="user-actions"><i class="sr-only">操作</i>选中项 <i class="i-caret-down"></i></button>
+            <button class="btn dropdown-toggle btn-s" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="user-actions"><i class="sr-only">{ctx.i18n.t('admin.action.actions', {}, 'Actions')}</i>{ctx.i18n.t('admin.notice.selectAction', {}, 'Select an action')} <i class="i-caret-down"></i></button>
             <ul class="dropdown-menu" id="user-actions" role="menu">
-              <li><a href="/api/admin/user-batch?do=delete">删除</a></li>
+              <li><a href="/api/admin/user-batch?do=delete">{ctx.i18n.t('admin.action.delete', {}, 'Delete')}</a></li>
             </ul>
           </div>
-          <a class="btn btn-s" href="/admin/user">新增用户</a>
+          <a class="btn btn-s" href="/admin/user">{ctx.i18n.t('admin.action.add', {}, 'Add')} {ctx.i18n.t('admin.field.user', {}, 'user')}</a>
         </div>
         <div class="search" role="search">
-          {keywords && <a href="/admin/manage-users">&laquo; 取消筛选</a>}
-          <input type="text" class="text-s" placeholder="请输入关键字" value={keywords} name="keywords" />
-          <button type="submit" class="btn btn-s">筛选</button>
+          {keywords && <a href="/admin/manage-users">&laquo; {ctx.i18n.t('admin.action.clearFilter', {}, 'Clear filter')}</a>}
+          <input type="text" class="text-s" placeholder={ctx.i18n.t('admin.search.placeholder', {}, 'Enter keywords')} value={keywords} name="keywords" />
+          <button type="submit" class="btn btn-s">{ctx.i18n.t('admin.action.filter', {}, 'Filter')}</button>
         </div>
       </form>
     </div>
@@ -92,17 +92,17 @@ const groupNames: Record<string, string> = {
           <thead>
             <tr>
               <th class="kit-hidden-mb"></th>
-              <th>用户名</th>
-              <th class="kit-hidden-mb">昵称</th>
-              <th class="kit-hidden-mb">邮箱</th>
-              <th class="kit-hidden-mb">文章</th>
-              <th>用户组</th>
+              <th>{ctx.i18n.t('admin.field.username', {}, 'Username')}</th>
+              <th class="kit-hidden-mb">{ctx.i18n.t('admin.field.nickname', {}, 'Nickname')}</th>
+              <th class="kit-hidden-mb">{ctx.i18n.t('admin.field.email', {}, 'Email')}</th>
+              <th class="kit-hidden-mb">{ctx.i18n.t('admin.field.posts', {}, 'Posts')}</th>
+              <th>{ctx.i18n.t('admin.field.userGroup', {}, 'User group')}</th>
             </tr>
           </thead>
           <tbody>
             {users.length === 0 ? (
               <tr>
-                <td colspan="6"><h6 class="typecho-list-table-title">没有任何用户</h6></td>
+                <td colspan="6"><h6 class="typecho-list-table-title">{ctx.i18n.t('admin.notice.noUsers', {}, 'No users')}</h6></td>
               </tr>
             ) : (
               users.map((u) => (
@@ -114,7 +114,7 @@ const groupNames: Record<string, string> = {
                   </td>
                   <td>
                     <a href={`/admin/user?uid=${u.uid}`}>{u.name}</a>
-                    <a href={`/admin/user?uid=${u.uid}`} title={`编辑 ${u.name}`}><i class="i-edit"></i></a>
+                    <a href={`/admin/user?uid=${u.uid}`} title={`${ctx.i18n.t('admin.action.edit', {}, 'Edit')} ${u.name}`}><i class="i-edit"></i></a>
                   </td>
                   <td class="kit-hidden-mb">{u.screenName || u.name}</td>
                   <td class="kit-hidden-mb">{u.mail ? <a href={`mailto:${u.mail}`}>{u.mail}</a> : '-'}</td>

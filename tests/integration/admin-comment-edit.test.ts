@@ -55,7 +55,7 @@ describe('POST /api/admin/comment', () => {
   });
 
   it.each([
-    ['missing comment', '999', 'Not Found'],
+    ['missing comment', '999', '页面不存在'],
     ['empty author', '1', '作者和内容不能为空'],
   ])('rejects %s', async (_name, coid, expected) => {
     const comment = await seedComment();

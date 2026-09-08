@@ -769,8 +769,9 @@ export async function getClientSnippets(
   options: Record<string, any>,
   pageContext?: PageContext,
 ): Promise<{ headHtml: string; bodyHtml: string }> {
-  let headHtml = await applyFilterSafely(ctx, 'frontend:head', '', { options, pageContext });
-  let bodyHtml = await applyFilterSafely(ctx, 'frontend:footer', '', { options, pageContext });
+  const extra = { options, pageContext, i18n: ctx.i18n, resolvedLocale: ctx.resolvedLocale };
+  let headHtml = await applyFilterSafely(ctx, 'frontend:head', '', extra);
+  let bodyHtml = await applyFilterSafely(ctx, 'frontend:footer', '', extra);
   return { headHtml, bodyHtml };
 }
 

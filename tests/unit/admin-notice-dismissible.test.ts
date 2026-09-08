@@ -31,14 +31,14 @@ describe('admin dismissible notices', () => {
 
       expect(source, page).toContain('notice typecho-dismissible');
       expect(source, page).toContain('class="typecho-notice-close"');
-      expect(source, page).toContain('aria-label="关闭提示"');
+      expect(source, page).toContain("admin.action.closeNotice");
     }
 
     // Both config pages (plugin + theme) render the banner through the shared form.
     const form = readProjectFile('src/components/admin/ConfigForm.astro');
     expect(form).toContain('notice typecho-dismissible');
     expect(form).toContain('class="typecho-notice-close"');
-    expect(form).toContain('aria-label="关闭提示"');
+    expect(form).toContain("admin.action.closeNotice");
   });
 
   it('keeps login flash errors dismissible outside the admin layout', () => {
@@ -54,7 +54,7 @@ describe('admin dismissible notices', () => {
 
     expect(source).toContain('notice typecho-dismissible');
     expect(source).toContain("closeButton.className = 'typecho-notice-close'");
-    expect(source).toContain("closeButton.setAttribute('aria-label', '关闭提示')");
+    expect(source).toContain("closeButton.setAttribute('aria-label', messages.close || '关闭提示')");
   });
 
   it('does not leak Turnstile plugin styles into global admin CSS', () => {

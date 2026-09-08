@@ -58,7 +58,7 @@ const pluginSnippets = await getClientSnippets(pluginCtx ?? { activatedPlugins: 
   {themeStylesheets.map((href) => (
     <link rel="stylesheet" href={href} />
   ))}
-  <link rel="alternate" type="application/rss+xml" title={`${options.title} RSS`} href={urls.feedUrl} />
+  <link rel="alternate" type="application/rss+xml" title={`${options.title} ${pageI18n?.t('core.frontend.postsRss', {}, 'Posts RSS') || 'Posts RSS'}`} href={urls.feedUrl} />
   <slot name="head" />
   <Fragment set:html={pluginSnippets.headHtml} />
 </head>

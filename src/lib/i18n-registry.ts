@@ -1,5 +1,8 @@
 import { coreCatalogs } from '@/i18n/catalogs';
 import {
+  MAX_TRANSLATION_ENTRIES,
+  MAX_TRANSLATION_KEY_LENGTH,
+  MAX_TRANSLATION_VALUE_LENGTH,
   normalizeLocale,
   type TranslationCatalog,
 } from '@/lib/i18n';
@@ -15,10 +18,6 @@ export interface AvailableTranslationLocale {
   locale: string;
   displayName?: string;
 }
-
-const MAX_TRANSLATION_KEY_LENGTH = 200;
-const MAX_TRANSLATION_VALUE_LENGTH = 50_000;
-const MAX_TRANSLATION_ENTRIES = 10_000;
 
 const committedTranslations = new Map<string, PluginTranslationRegistration[]>();
 const stagedTranslations = new Map<string, PluginTranslationRegistration[]>();

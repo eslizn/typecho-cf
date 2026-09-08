@@ -8,9 +8,12 @@ import {
   purgeCommentModerationCache,
 } from '@/lib/comment-moderation';
 import { readAdminFormOrError } from '@/lib/input';
+import { createCoreRequestI18n } from '@/lib/i18n-runtime';
+import { i18nMessage } from '@/lib/i18n';
+import { textError } from '@/lib/http';
 
-export const GET: APIRoute = async () =>
-  new Response('Method Not Allowed', { status: 405 });
+export const GET: APIRoute = async ({ request }) =>
+  textError(405, i18nMessage('core.error.methodNotAllowed', 'Method Not Allowed'), undefined, createCoreRequestI18n(request).i18n);
 export const POST: APIRoute = handler;
 
 async function handler({ request, locals, url }: { request: Request; locals: App.Locals; url: URL }) {
@@ -33,12 +36,14 @@ async function handler({ request, locals, url }: { request: Request; locals: App
   }
 
   const normalizedAction = normalizeCommentAction(action);
-  if (!normalizedAction) return new Response('Invalid action', { status: 400 });
+  if (!normalizedAction) {
+    return textError(400, i18nMessage('admin.batch.invalidAction', 'Invalid action.'), undefined, auth.i18n);
+  }
 
   // Get selected coids from form body
   let coids: number[] = [];
   if (request.method === 'POST') {
-    const formData = await readAdminFormOrError(request);
+    const formData = await readAdminFormOrError(request, undefined, auth.i18n);
     if (formData instanceof Response) return formData;
     coids = [...new Set(
       formData.getAll('coid[]').map(v => parseInt(v.toString(), 10)).filter(Boolean),
@@ -56,7 +61,7 @@ async function handler({ request, locals, url }: { request: Request; locals: App
 
   const pluginCtx = auth.pluginCtx;
 
-  const comments = await getModeratableComments(auth.db, coids, auth.user);
+  const comments = await getModeratableComments(auth.db, coids, auth.user, auth.i18n);
   if (comments instanceof Response) return comments;
   await applyCommentActions(pluginCtx, auth.db, comments, normalizedAction, auth.options);
 

@@ -6,6 +6,8 @@ import { doHook } from '@/lib/plugin';
 import { bumpCacheVersion, purgeContentCache } from '@/lib/cache';
 import { readAdminFormOrError } from '@/lib/input';
 import { eq, sql } from 'drizzle-orm';
+import { i18nMessage } from '@/lib/i18n';
+import { textError } from '@/lib/http';
 
 export const POST: APIRoute = handler;
 
@@ -24,12 +26,12 @@ async function handler({ request, locals, url }: { request: Request; locals: App
   const markStatus = VALID_STATUSES.includes(markStatusInput) ? markStatusInput : '';
   const type = url.searchParams.get('type') || 'post';
   if (action !== 'delete' && !(action === 'mark' && markStatus)) {
-    return new Response('Invalid action', { status: 400 });
+    return textError(400, i18nMessage('admin.batch.invalidAction', 'Invalid action.'), undefined, auth.i18n);
   }
 
   let cids: number[] = [];
   if (request.method === 'POST') {
-    const formData = await readAdminFormOrError(request);
+    const formData = await readAdminFormOrError(request, undefined, auth.i18n);
     if (formData instanceof Response) return formData;
     cids = formData.getAll('cid[]').map(v => parseInt(v.toString(), 10)).filter(Boolean);
   }
@@ -109,7 +111,7 @@ async function handler({ request, locals, url }: { request: Request; locals: App
     }
   } else if (action === 'mark' && markStatus) {
     if (!isEditor) {
-      return new Response('Forbidden', { status: 403 });
+      return textError(403, i18nMessage('core.error.forbidden', 'Forbidden'), undefined, auth.i18n);
     }
 
     const contents = await auth.db.select().from(schema.contents)

@@ -4,6 +4,8 @@
  * Decision #23: Canonical + description + OG + Twitter Card only (no JSON-LD).
  */
 
+import type { I18n } from '@/lib/i18n';
+
 export interface SeoProps {
   canonical: string;
   description?: string;
@@ -28,6 +30,7 @@ export interface SeoBuildContext {
   siteTitle: string;
   siteDescription: string;
   siteLogo?: string;
+  i18n?: I18n;
 }
 
 function firstImageUrl(html: string | null | undefined): string | undefined {
@@ -97,7 +100,11 @@ export function buildArchiveSeo(
   const title = `${name} - ${ctx.siteTitle}`;
   return {
     canonical: pageUrl,
-    description: `浏览${kind}分类「${name}」下的文章`,
+    description: ctx.i18n?.t(
+      'core.seo.archiveDescription',
+      { kind, name },
+      'Browse the {kind} archive for "{name}".',
+    ) ?? `Browse the ${kind} archive for "${name}".`,
     og: {
       type: 'website',
       title,

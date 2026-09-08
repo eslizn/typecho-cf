@@ -11,7 +11,7 @@ const authCheck = requireAuth(ctx);
 if (authCheck) return authCheck;
 
 if (!hasPermission(ctx.user!.group || 'visitor', 'editor')) {
-  return new Response('Forbidden', { status: 403 });
+  return new Response(ctx.i18n.t('core.error.forbidden', {}, 'Forbidden'), { status: 403 });
 }
 
 const { db, options, urls, user, csrfToken } = ctx;
@@ -31,18 +31,18 @@ const editCat: any = editRows[0] ?? null;
 
 const isDefault = (mid: number) => options.defaultCategory === mid;
 ---
-<Admin title="管理分类" options={options} urls={urls} user={user} activeMenu="manage-categories" pluginCtx={ctx}>
+<Admin title={ctx.i18n.t('admin.page.manageCategories', {}, 'Manage categories')} options={options} urls={urls} user={user} activeMenu="manage-categories" pluginCtx={ctx}>
   <div class="col-mb-12 typecho-list" role="main">
     <form method="post" name="manage_categories" class="operate-form">
       <input type="hidden" name="_" value={csrfToken} />
       <div class="typecho-list-operate clearfix">
         <div class="operate">
-          <label><i class="sr-only">全选</i><input type="checkbox" class="typecho-table-select-all" /></label>
+          <label><i class="sr-only">{ctx.i18n.t('admin.action.selectAll', {}, 'Select all')}</i><input type="checkbox" class="typecho-table-select-all" /></label>
           <div class="btn-group btn-drop">
-            <button class="btn dropdown-toggle btn-s" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="category-actions"><i class="sr-only">操作</i>选中项 <i class="i-caret-down"></i></button>
+            <button class="btn dropdown-toggle btn-s" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="category-actions"><i class="sr-only">{ctx.i18n.t('admin.action.actions', {}, 'Actions')}</i>{ctx.i18n.t('admin.notice.selectAction', {}, 'Select an action')} <i class="i-caret-down"></i></button>
             <ul class="dropdown-menu" id="category-actions" role="menu">
-              <li><a href="/api/admin/meta?action=delete&type=category">删除</a></li>
-              <li><a href="/api/admin/meta?action=refresh&type=category">刷新</a></li>
+              <li><a href="/api/admin/meta?action=delete&type=category">{ctx.i18n.t('admin.action.delete', {}, 'Delete')}</a></li>
+              <li><a href="/api/admin/meta?action=refresh&type=category">{ctx.i18n.t('admin.action.refresh', {}, 'Refresh')}</a></li>
             </ul>
           </div>
         </div>
@@ -60,16 +60,16 @@ const isDefault = (mid: number) => options.defaultCategory === mid;
           <thead>
             <tr class="nodrag">
               <th class="kit-hidden-mb"></th>
-              <th>名称</th>
-              <th class="kit-hidden-mb">缩略名</th>
+              <th>{ctx.i18n.t('admin.field.name', {}, 'Name')}</th>
+              <th class="kit-hidden-mb">{ctx.i18n.t('admin.field.slug', {}, 'Slug')}</th>
               <th></th>
-              <th class="kit-hidden-mb">文章数</th>
+              <th class="kit-hidden-mb">{ctx.i18n.t('admin.field.posts', {}, 'Posts')}</th>
             </tr>
           </thead>
           <tbody>
             {categories.length === 0 ? (
               <tr>
-                <td colspan="5"><h6 class="typecho-list-table-title">没有任何分类</h6></td>
+                <td colspan="5"><h6 class="typecho-list-table-title">{ctx.i18n.t('admin.notice.noCategories', {}, 'No categories')}</h6></td>
               </tr>
             ) : (
               categories.map((cat) => (
@@ -77,18 +77,18 @@ const isDefault = (mid: number) => options.defaultCategory === mid;
                   <td class="kit-hidden-mb"><input type="checkbox" value={String(cat.mid)} name="mid[]" /></td>
                   <td>
                     <a href={`/admin/manage-categories?mid=${cat.mid}`}>{cat.name}</a>
-                    <a href={buildCategoryLink(cat.slug, urls.siteUrl, options.categoryPattern as string | undefined)} title={`浏览 ${cat.name}`}><i class="i-exlink"></i></a>
+                    <a href={buildCategoryLink(cat.slug, urls.siteUrl, options.categoryPattern as string | undefined)} title={`${ctx.i18n.t('admin.action.browse', {}, 'Browse')} ${cat.name}`}><i class="i-exlink"></i></a>
                   </td>
                   <td class="kit-hidden-mb">{cat.slug}</td>
                   <td>
                     {isDefault(cat.mid) ? (
-                      <span>默认</span>
+                      <span>{ctx.i18n.t('admin.status.default', {}, 'Default')}</span>
                     ) : (
                       <button type="submit"
                         class="hidden-by-mouse"
                         formaction={`/api/admin/meta?action=default&mid=${cat.mid}&type=category`}
                         formmethod="post"
-                        title="设为默认">默认</button>
+                        title={ctx.i18n.t('admin.action.setDefault', {}, 'Set as default')}>{ctx.i18n.t('admin.status.default', {}, 'Default')}</button>
                     )}
                   </td>
                   <td class="kit-hidden-mb">
@@ -109,28 +109,28 @@ const isDefault = (mid: number) => options.defaultCategory === mid;
         <input type="hidden" name="type" value="category" />
         {editCat && <input type="hidden" name="mid" value={String(editCat.mid)} />}
 
-        <h4>{editCat ? '编辑分类' : '新增分类'}</h4>
+        <h4>{editCat ? ctx.i18n.t('admin.form.editCategory', {}, 'Edit category') : ctx.i18n.t('admin.form.newCategory', {}, 'Add category')}</h4>
 
         <ul class="typecho-option">
           <li>
-            <label for="name" class="typecho-label">名称 *</label>
+            <label for="name" class="typecho-label">{ctx.i18n.t('admin.field.name', {}, 'Name')} *</label>
             <input type="text" id="name" name="name" class="text w-100" value={editCat?.name || ''} required />
           </li>
           <li>
-            <label for="slug" class="typecho-label">缩略名</label>
-            <input type="text" id="slug" name="slug" class="text w-100" value={editCat?.slug || ''} placeholder="留空自动生成" />
-            <p class="description">分类缩略名用于创建友好的链接形式, 建议使用字母、数字、下划线和连字符</p>
+            <label for="slug" class="typecho-label">{ctx.i18n.t('admin.field.slug', {}, 'Slug')}</label>
+            <input type="text" id="slug" name="slug" class="text w-100" value={editCat?.slug || ''} placeholder={ctx.i18n.t('admin.description.autoGenerateSlug', {}, 'Leave blank to generate automatically')} />
+            <p class="description">{ctx.i18n.t('admin.description.categorySlug', {}, 'The category slug is used for friendly links. Use letters, numbers, underscores, and hyphens.')}</p>
           </li>
           <li>
-            <label for="description" class="typecho-label">描述</label>
+            <label for="description" class="typecho-label">{ctx.i18n.t('admin.field.description', {}, 'Description')}</label>
             <textarea id="description" name="description" class="w-100 mono" rows="3">{editCat?.description || ''}</textarea>
-            <p class="description">此文字用于描述分类, 在有些主题中它会被显示</p>
+            <p class="description">{ctx.i18n.t('admin.description.categoryDescription', {}, 'This text describes the category and may be shown by some themes.')}</p>
           </li>
         </ul>
 
         <p>
-          <button type="submit" class="btn primary">{editCat ? '更新分类' : '增加分类'}</button>
-          {editCat && <a href="/admin/manage-categories" class="btn">取消</a>}
+          <button type="submit" class="btn primary">{editCat ? ctx.i18n.t('admin.action.update', {}, 'Update') : ctx.i18n.t('admin.action.add', {}, 'Add')}</button>
+          {editCat && <a href="/admin/manage-categories" class="btn">{ctx.i18n.t('admin.action.cancel', {}, 'Cancel')}</a>}
         </p>
       </form>
     </div>

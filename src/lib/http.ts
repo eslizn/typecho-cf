@@ -19,7 +19,18 @@ const JSON_HEADERS = { 'Content-Type': 'application/json' } as const;
 export type HttpMessage = string | I18nMessage;
 
 export function textError(status: number, message: HttpMessage, extraHeaders?: HeadersInit, i18n?: I18n): Response {
-  return new Response(resolveI18nMessage(message, i18n), { status, headers: extraHeaders });
+  const descriptor = typeof message === 'string' ? null : normalizeI18nMessage(message);
+  const headers = new Headers(extraHeaders);
+  // Native admin form submissions are redirected by middleware. Preserve the
+  // stable descriptor in bounded headers so the redirect can re-render the
+  // message in the next request's locale instead of freezing translated text.
+  if (descriptor) {
+    headers.set('X-Typecho-I18n-Code', descriptor.key);
+    if (descriptor.variables && Object.keys(descriptor.variables).length > 0) {
+      headers.set('X-Typecho-I18n-Params', JSON.stringify(descriptor.variables));
+    }
+  }
+  return new Response(resolveI18nMessage(message, i18n), { status, headers });
 }
 
 export function jsonError(status: number, message: HttpMessage, extraHeaders?: Record<string, string>, i18n?: I18n): Response {

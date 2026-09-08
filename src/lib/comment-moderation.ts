@@ -4,6 +4,7 @@ import { hasPermission } from '@/lib/auth';
 import { bumpCacheVersion, purgeContentCache } from '@/lib/cache';
 import type { SiteOptions } from '@/lib/options';
 import { doHook, type HookContext } from '@/lib/plugin';
+import type { I18n } from '@/lib/i18n';
 
 export const COMMENT_ACTIONS = ['approve', 'approved', 'waiting', 'spam', 'delete'] as const;
 export type CommentAction = typeof COMMENT_ACTIONS[number];
@@ -42,12 +43,15 @@ export async function getModeratableComment(
   db: Database,
   coid: number,
   user: UserRow,
+  i18n?: I18n,
 ): Promise<CommentRow | Response> {
   const comment = await db.query.comments.findFirst({
     where: eq(schema.comments.coid, coid),
   });
-  if (!comment) return new Response('Not Found', { status: 404 });
-  if (!(await canModerateComment(db, user, comment))) return new Response('Forbidden', { status: 403 });
+  if (!comment) return new Response(i18n ? i18n.t('core.error.notFound', {}, 'Not Found') : 'Not Found', { status: 404 });
+  if (!(await canModerateComment(db, user, comment))) {
+    return new Response(i18n ? i18n.t('core.error.forbidden', {}, 'Forbidden') : 'Forbidden', { status: 403 });
+  }
   return comment;
 }
 
@@ -60,6 +64,7 @@ export async function getModeratableComments(
   db: Database,
   coids: number[],
   user: UserRow,
+  i18n?: I18n,
 ): Promise<CommentRow[] | Response> {
   if (coids.length === 0) return [];
   const idList = sql.join(coids.map(coid => sql`${coid}`), sql`, `);
@@ -75,7 +80,7 @@ export async function getModeratableComments(
     const row = byId.get(coid);
     if (!row) continue;
     if (!isAdmin && row.contentAuthorId !== user.uid) {
-      return new Response('Forbidden', { status: 403 });
+      return new Response(i18n ? i18n.t('core.error.forbidden', {}, 'Forbidden') : 'Forbidden', { status: 403 });
     }
     comments.push(row.comment);
   }

@@ -102,20 +102,20 @@ const avatarEntries = await Promise.all(commentsList.map(async c => [
 ] as const));
 for (const [coid, avatar] of avatarEntries) avatarMap.set(coid, avatar);
 ---
-<Admin title="管理评论" options={options} urls={urls} user={user} activeMenu="manage-comments" pluginCtx={ctx}>
+<Admin title={ctx.i18n.t('admin.page.manageComments', {}, 'Manage comments')} options={options} urls={urls} user={user} activeMenu="manage-comments" pluginCtx={ctx}>
   <div class="col-mb-12 typecho-list">
     <div class="clearfix">
       <ul class="typecho-option-tabs">
         <li class:list={[{ current: status === 'approved' }]}>
-          <a href={`/admin/manage-comments${cid ? '?cid=' + cid : ''}`}>已通过</a>
+          <a href={`/admin/manage-comments${cid ? '?cid=' + cid : ''}`}>{ctx.i18n.t('admin.comment.approved', {}, 'Approved')}</a>
         </li>
         <li class:list={[{ current: status === 'waiting' }]}>
-          <a href={`/admin/manage-comments?status=waiting${cid ? '&cid=' + cid : ''}`}>待审核
+          <a href={`/admin/manage-comments?status=waiting${cid ? '&cid=' + cid : ''}`}>{ctx.i18n.t('admin.comment.waiting', {}, 'Pending')}
             {(waitingCount[0]?.count || 0) > 0 && <span class="balloon">{waitingCount[0]?.count}</span>}
           </a>
         </li>
         <li class:list={[{ current: status === 'spam' }]}>
-          <a href={`/admin/manage-comments?status=spam${cid ? '&cid=' + cid : ''}`}>垃圾
+          <a href={`/admin/manage-comments?status=spam${cid ? '&cid=' + cid : ''}`}>{ctx.i18n.t('admin.comment.spam', {}, 'Spam')}
             {(spamCount[0]?.count || 0) > 0 && <span class="balloon">{spamCount[0]?.count}</span>}
           </a>
         </li>
@@ -125,31 +125,31 @@ for (const [coid, avatar] of avatarEntries) avatarMap.set(coid, avatar);
     <div class="typecho-list-operate clearfix">
       <form method="get">
         <div class="operate">
-          <label><i class="sr-only">全选</i><input type="checkbox" class="typecho-table-select-all" /></label>
+          <label><i class="sr-only">{ctx.i18n.t('admin.action.selectAll', {}, 'Select all')}</i><input type="checkbox" class="typecho-table-select-all" /></label>
           <div class="btn-group btn-drop">
-            <button class="btn dropdown-toggle btn-s" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="comment-actions-top"><i class="sr-only">操作</i>选中项 <i class="i-caret-down"></i></button>
+            <button class="btn dropdown-toggle btn-s" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="comment-actions-top"><i class="sr-only">{ctx.i18n.t('admin.action.actions', {}, 'Actions')}</i>{ctx.i18n.t('admin.notice.selectAction', {}, 'Select an action')} <i class="i-caret-down"></i></button>
             <ul class="dropdown-menu" id="comment-actions-top" role="menu">
-              <li><a href="/api/admin/comment-batch?do=approved">通过</a></li>
-              <li><a href="/api/admin/comment-batch?do=waiting">待审核</a></li>
-              <li><a href="/api/admin/comment-batch?do=spam">标记垃圾</a></li>
-              <li><a href="/api/admin/comment-batch?do=delete">删除</a></li>
+              <li><a href="/api/admin/comment-batch?do=approved">{ctx.i18n.t('admin.action.approve', {}, 'Approve')}</a></li>
+              <li><a href="/api/admin/comment-batch?do=waiting">{ctx.i18n.t('admin.comment.waiting', {}, 'Pending')}</a></li>
+              <li><a href="/api/admin/comment-batch?do=spam">{ctx.i18n.t('admin.action.markSpam', {}, 'Mark as spam')}</a></li>
+              <li><a href="/api/admin/comment-batch?do=delete">{ctx.i18n.t('admin.action.delete', {}, 'Delete')}</a></li>
             </ul>
             {status === 'spam' && (
               <button class="btn btn-s btn-warn btn-operate" type="submit"
                 formaction="/api/admin/comment-batch?do=delete-spam" formmethod="post"
                 name="_" value={csrfToken}
-                onclick="return confirm('你确认要删除所有垃圾评论吗?')">删除所有垃圾评论</button>
+                onclick={`return confirm(${JSON.stringify(ctx.i18n.t('admin.notice.confirmDeleteSpam', {}, 'Are you sure you want to delete all spam comments?'))})`}>{ctx.i18n.t('admin.action.deleteAllSpam', {}, 'Delete all spam comments')}</button>
             )}
           </div>
         </div>
         <div class="search" role="search">
           {keywords && (
-            <a href={`/admin/manage-comments${status !== 'approved' ? '?status=' + status : ''}${cid ? (status !== 'approved' ? '&' : '?') + 'cid=' + cid : ''}`}>&laquo; 取消筛选</a>
+            <a href={`/admin/manage-comments${status !== 'approved' ? '?status=' + status : ''}${cid ? (status !== 'approved' ? '&' : '?') + 'cid=' + cid : ''}`}>&laquo; {ctx.i18n.t('admin.action.clearFilter', {}, 'Clear filter')}</a>
           )}
-          <input type="text" class="text-s" placeholder="请输入关键字" value={keywords} name="keywords" />
+          <input type="text" class="text-s" placeholder={ctx.i18n.t('admin.search.placeholder', {}, 'Enter keywords')} value={keywords} name="keywords" />
           {status !== 'approved' && <input type="hidden" value={status} name="status" />}
           {cid && <input type="hidden" value={cid} name="cid" />}
-          <button type="submit" class="btn btn-s">筛选</button>
+          <button type="submit" class="btn btn-s">{ctx.i18n.t('admin.action.filter', {}, 'Filter')}</button>
         </div>
       </form>
     </div>
@@ -167,15 +167,15 @@ for (const [coid, avatar] of avatarEntries) avatarMap.set(coid, avatar);
           <thead>
             <tr>
               <th class="kit-hidden-mb"> </th>
-              <th>作者</th>
+              <th>{ctx.i18n.t('admin.field.author', {}, 'Author')}</th>
               <th class="kit-hidden-mb"> </th>
-              <th>内容</th>
+              <th>{ctx.i18n.t('admin.field.content', {}, 'Content')}</th>
             </tr>
           </thead>
           <tbody>
             {commentsList.length === 0 ? (
               <tr>
-                <td colspan="4"><h6 class="typecho-list-table-title">没有评论</h6></td>
+                <td colspan="4"><h6 class="typecho-list-table-title">{ctx.i18n.t('admin.notice.noComments', {}, 'No comments')}</h6></td>
               </tr>
             ) : (
               commentsList.map((comment) => (
@@ -192,8 +192,8 @@ for (const [coid, avatar] of avatarEntries) avatarMap.set(coid, avatar);
                     <div class="comment-meta">
                       <strong class="comment-author">
                         {comment.url
-                          ? <a href={comment.url} target="_blank" rel="noopener noreferrer">{comment.author || '匿名'}</a>
-                          : (comment.author || '匿名')
+                          ? <a href={comment.url} target="_blank" rel="noopener noreferrer">{comment.author || ctx.i18n.t('core.comment.anonymous', {}, 'Anonymous')}</a>
+                          : (comment.author || ctx.i18n.t('core.comment.anonymous', {}, 'Anonymous'))
                         }
                       </strong>
                       {comment.mail && <><br /><span><a href={`mailto:${comment.mail}`}>{comment.mail}</a></span></>}
@@ -202,37 +202,37 @@ for (const [coid, avatar] of avatarEntries) avatarMap.set(coid, avatar);
                   </td>
                   <td valign="top" class="comment-body">
                     <div class="comment-date">
-                      {formatDate(comment.created || 0, 'Y-m-d H:i', options.timezone)} 于
+                      {formatDate(comment.created || 0, 'Y-m-d H:i', options.timezone, ctx.i18n.locale)} {ctx.i18n.t('admin.comment.dateAt', {}, 'at')}
                       <a href={buildPermalink(
                         { cid: comment.cid, slug: comment.contentSlug, type: comment.contentType, created: comment.contentCreated },
                         urls.siteUrl,
                         options.permalinkPattern as string | undefined,
                         options.pagePattern as string | undefined,
-                      )}>{titleMap.get(comment.cid) || `文章 #${comment.cid}`}</a>
+                      )}>{titleMap.get(comment.cid) || ctx.i18n.t('admin.comment.post', { cid: comment.cid || 0 }, 'Post #{cid}')}</a>
                     </div>
                     <div class="comment-content">
                       {(comment.text || '').substring(0, 200)}
                     </div>
                     <div class="comment-action hidden-by-mouse">
-                      <a href={`/admin/comment?coid=${comment.coid}`} class="operate-edit">编辑</a>
+                      <a href={`/admin/comment?coid=${comment.coid}`} class="operate-edit">{ctx.i18n.t('admin.action.edit', {}, 'Edit')}</a>
                       {status === 'approved'
-                        ? <span class="weak">通过</span>
-                        : <button type="submit" formaction={`/api/admin/comment-action?action=approve&coid=${comment.coid}`} formmethod="post" class="operate-approved">通过</button>
+                        ? <span class="weak">{ctx.i18n.t('admin.comment.approved', {}, 'Approved')}</span>
+                        : <button type="submit" formaction={`/api/admin/comment-action?action=approve&coid=${comment.coid}`} formmethod="post" class="operate-approved">{ctx.i18n.t('admin.action.approve', {}, 'Approve')}</button>
                       }
 
                       {status === 'waiting'
-                        ? <span class="weak">待审核</span>
-                        : <button type="submit" formaction={`/api/admin/comment-action?action=waiting&coid=${comment.coid}`} formmethod="post" class="operate-waiting">待审核</button>
+                        ? <span class="weak">{ctx.i18n.t('admin.comment.waiting', {}, 'Pending')}</span>
+                        : <button type="submit" formaction={`/api/admin/comment-action?action=waiting&coid=${comment.coid}`} formmethod="post" class="operate-waiting">{ctx.i18n.t('admin.comment.waiting', {}, 'Pending')}</button>
                       }
 
                       {status === 'spam'
-                        ? <span class="weak">垃圾</span>
-                        : <button type="submit" formaction={`/api/admin/comment-action?action=spam&coid=${comment.coid}`} formmethod="post" class="operate-spam">垃圾</button>
+                        ? <span class="weak">{ctx.i18n.t('admin.comment.spam', {}, 'Spam')}</span>
+                        : <button type="submit" formaction={`/api/admin/comment-action?action=spam&coid=${comment.coid}`} formmethod="post" class="operate-spam">{ctx.i18n.t('admin.action.markSpam', {}, 'Mark as spam')}</button>
                       }
 
                       <button type="submit" formaction={`/api/admin/comment-action?action=delete&coid=${comment.coid}`} formmethod="post"
                         class="operate-delete"
-                        onclick={`return confirm('你确认要删除${(comment.author || '匿名').replace(/'/g, "\\'")}的评论吗?')`}>删除</button>
+                        onclick={`return confirm(${JSON.stringify(ctx.i18n.t('admin.notice.confirmDeleteCommentBy', { author: comment.author || ctx.i18n.t('core.comment.anonymous', {}, 'Anonymous') }, 'Are you sure you want to delete {author}\'s comment?'))})`}>{ctx.i18n.t('admin.action.delete', {}, 'Delete')}</button>
                     </div>
                   </td>
                 </tr>
@@ -246,14 +246,14 @@ for (const [coid, avatar] of avatarEntries) avatarMap.set(coid, avatar);
     <div class="typecho-list-operate clearfix">
       <div class="operate-toolbar">
         <div class="operate">
-          <label><i class="sr-only">全选</i><input type="checkbox" class="typecho-table-select-all" /></label>
+          <label><i class="sr-only">{ctx.i18n.t('admin.action.selectAll', {}, 'Select all')}</i><input type="checkbox" class="typecho-table-select-all" /></label>
           <div class="btn-group btn-drop">
-            <button class="btn dropdown-toggle btn-s" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="comment-actions-bottom"><i class="sr-only">操作</i>选中项 <i class="i-caret-down"></i></button>
+            <button class="btn dropdown-toggle btn-s" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="comment-actions-bottom"><i class="sr-only">{ctx.i18n.t('admin.action.actions', {}, 'Actions')}</i>{ctx.i18n.t('admin.notice.selectAction', {}, 'Select an action')} <i class="i-caret-down"></i></button>
             <ul class="dropdown-menu" id="comment-actions-bottom" role="menu">
-              <li><a href="/api/admin/comment-batch?do=approved">通过</a></li>
-              <li><a href="/api/admin/comment-batch?do=waiting">待审核</a></li>
-              <li><a href="/api/admin/comment-batch?do=spam">标记垃圾</a></li>
-              <li><a href="/api/admin/comment-batch?do=delete">删除</a></li>
+              <li><a href="/api/admin/comment-batch?do=approved">{ctx.i18n.t('admin.action.approve', {}, 'Approve')}</a></li>
+              <li><a href="/api/admin/comment-batch?do=waiting">{ctx.i18n.t('admin.comment.waiting', {}, 'Pending')}</a></li>
+              <li><a href="/api/admin/comment-batch?do=spam">{ctx.i18n.t('admin.action.markSpam', {}, 'Mark as spam')}</a></li>
+              <li><a href="/api/admin/comment-batch?do=delete">{ctx.i18n.t('admin.action.delete', {}, 'Delete')}</a></li>
             </ul>
           </div>
         </div>

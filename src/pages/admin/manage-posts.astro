@@ -114,24 +114,24 @@ for (const row of catData) {
 const titleActionHtml = new Map<number, string>(
   await Promise.all(posts.map(async (post) => [
     post.cid,
-    await applyFilterSafely(ctx, 'admin:managePosts:titleActions', '', { post, options, urls, user }),
+    await applyFilterSafely(ctx, 'admin:managePosts:titleActions', '', { post, options, urls, user, i18n: ctx.i18n }),
   ] as [number, string]))
 );
 ---
-<Admin title="管理文章" options={options} urls={urls} user={user} activeMenu="manage-posts" pluginCtx={ctx}>
+<Admin title={ctx.i18n.t('admin.page.managePosts', {}, 'Manage posts')} options={options} urls={urls} user={user} activeMenu="manage-posts" pluginCtx={ctx}>
   <div class="col-mb-12 typecho-list">
     <div class="clearfix">
       <ul class="typecho-option-tabs">
         <li class:list={[{ current: !status }]}>
-          <a href="/admin/manage-posts">可用</a>
+          <a href="/admin/manage-posts">{ctx.i18n.t('admin.status.available', {}, 'Available')}</a>
         </li>
         <li class:list={[{ current: status === 'waiting' }]}>
-          <a href="/admin/manage-posts?status=waiting">待审核
+          <a href="/admin/manage-posts?status=waiting">{ctx.i18n.t('admin.option.waiting', {}, 'Pending review')}
             {(waitingCount[0]?.count || 0) > 0 && <span class="balloon">{waitingCount[0]?.count}</span>}
           </a>
         </li>
         <li class:list={[{ current: status === 'draft' }]}>
-          <a href="/admin/manage-posts?status=draft">草稿
+          <a href="/admin/manage-posts?status=draft">{ctx.i18n.t('admin.option.draft', {}, 'Draft')}
             {(draftCount[0]?.count || 0) > 0 && <span class="balloon">{draftCount[0]?.count}</span>}
           </a>
         </li>
@@ -141,32 +141,32 @@ const titleActionHtml = new Map<number, string>(
     <div class="typecho-list-operate clearfix">
       <form method="get">
         <div class="operate">
-          <label><i class="sr-only">全选</i><input type="checkbox" class="typecho-table-select-all" /></label>
+          <label><i class="sr-only">{ctx.i18n.t('admin.action.selectAll', {}, 'Select all')}</i><input type="checkbox" class="typecho-table-select-all" /></label>
           <div class="btn-group btn-drop">
-            <button class="btn dropdown-toggle btn-s" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="post-actions-top"><i class="sr-only">操作</i>选中项 <i class="i-caret-down"></i></button>
+            <button class="btn dropdown-toggle btn-s" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="post-actions-top"><i class="sr-only">{ctx.i18n.t('admin.action.actions', {}, 'Actions')}</i>{ctx.i18n.t('admin.notice.selectAction', {}, 'Select an action')} <i class="i-caret-down"></i></button>
             <ul class="dropdown-menu" id="post-actions-top" role="menu">
-              <li><a href="/api/admin/content-batch?do=delete">删除</a></li>
+              <li><a href="/api/admin/content-batch?do=delete">{ctx.i18n.t('admin.action.delete', {}, 'Delete')}</a></li>
               {isEditor && (
                 <>
-                  <li><a href="/api/admin/content-batch?do=mark&status=publish">标记为<strong>公开</strong></a></li>
-                  <li><a href="/api/admin/content-batch?do=mark&status=waiting">标记为<strong>待审核</strong></a></li>
-                  <li><a href="/api/admin/content-batch?do=mark&status=hidden">标记为<strong>隐藏</strong></a></li>
-                  <li><a href="/api/admin/content-batch?do=mark&status=private">标记为<strong>私密</strong></a></li>
+                  <li><a href="/api/admin/content-batch?do=mark&status=publish">{ctx.i18n.t('admin.action.markAs', {}, 'Mark as ')}<strong>{ctx.i18n.t('admin.option.publish', {}, 'Published')}</strong></a></li>
+                  <li><a href="/api/admin/content-batch?do=mark&status=waiting">{ctx.i18n.t('admin.action.markAs', {}, 'Mark as ')}<strong>{ctx.i18n.t('admin.option.waiting', {}, 'Pending review')}</strong></a></li>
+                  <li><a href="/api/admin/content-batch?do=mark&status=hidden">{ctx.i18n.t('admin.action.markAs', {}, 'Mark as ')}<strong>{ctx.i18n.t('admin.option.hidden', {}, 'Hidden')}</strong></a></li>
+                  <li><a href="/api/admin/content-batch?do=mark&status=private">{ctx.i18n.t('admin.action.markAs', {}, 'Mark as ')}<strong>{ctx.i18n.t('admin.option.private', {}, 'Private')}</strong></a></li>
                 </>
               )}
             </ul>
           </div>
         </div>
         <div class="search" role="search">
-          {(keywords || category) && <a href={`/admin/manage-posts${status ? '?status=' + status : ''}`}>&laquo; 取消筛选</a>}
-          <input type="text" class="text-s" placeholder="请输入关键字" value={keywords} name="keywords" />
+          {(keywords || category) && <a href={`/admin/manage-posts${status ? '?status=' + status : ''}`}>&laquo; {ctx.i18n.t('admin.action.clearFilter', {}, 'Clear filter')}</a>}
+          <input type="text" class="text-s" placeholder={ctx.i18n.t('admin.search.placeholder', {}, 'Enter keywords')} value={keywords} name="keywords" />
           <select name="category">
-            <option value="">所有分类</option>
+            <option value="">{ctx.i18n.t('admin.option.allCategories', {}, 'All categories')}</option>
             {allCategories.map(cat => (
               <option value={String(cat.mid)} selected={category === String(cat.mid)}>{cat.name}</option>
             ))}
           </select>
-          <button type="submit" class="btn btn-s">筛选</button>
+          <button type="submit" class="btn btn-s">{ctx.i18n.t('admin.action.filter', {}, 'Filter')}</button>
           {status && <input type="hidden" value={status} name="status" />}
           {requestedUid && <input type="hidden" value={String(requestedUid)} name="uid" />}
         </div>
@@ -189,16 +189,16 @@ const titleActionHtml = new Map<number, string>(
             <tr>
               <th class="kit-hidden-mb"></th>
               <th class="kit-hidden-mb"></th>
-              <th>标题</th>
-              <th class="kit-hidden-mb">作者</th>
-              <th class="kit-hidden-mb">分类</th>
-              <th>日期</th>
+              <th>{ctx.i18n.t('admin.field.title', {}, 'Title')}</th>
+              <th class="kit-hidden-mb">{ctx.i18n.t('admin.field.author', {}, 'Author')}</th>
+              <th class="kit-hidden-mb">{ctx.i18n.t('admin.field.category', {}, 'Category')}</th>
+              <th>{ctx.i18n.t('admin.field.date', {}, 'Date')}</th>
             </tr>
           </thead>
           <tbody>
             {posts.length === 0 ? (
               <tr>
-                <td colspan="6"><h6 class="typecho-list-table-title">没有任何文章</h6></td>
+                <td colspan="6"><h6 class="typecho-list-table-title">{ctx.i18n.t('admin.notice.noPosts', {}, 'No posts')}</h6></td>
               </tr>
             ) : (
               posts.map((post) => {
@@ -211,30 +211,30 @@ const titleActionHtml = new Map<number, string>(
                     <td class="kit-hidden-mb">
                       <a href={`/admin/manage-comments?cid=${post.cid}`}
                         class="balloon-button size-small"
-                        title={`${post.commentsNum || 0} 评论`}>{post.commentsNum || 0}</a>
+                        title={ctx.i18n.tPlural('admin.content.commentsCount', post.commentsNum || 0, {}, '{count} comments')}>{post.commentsNum || 0}</a>
                     </td>
                     <td>
-                      <a href={`/admin/write-post?cid=${post.cid}`}>{post.title || '无标题'}</a>
-                      {isDraft && <em class="status">草稿</em>}
-                      {post.status === 'hidden' && <em class="status">隐藏</em>}
-                      {post.status === 'waiting' && <em class="status">待审核</em>}
-                      {post.status === 'private' && <em class="status">私密</em>}
-                      {post.password && post.status === 'publish' && <em class="status">密码保护</em>}
-                      <a href={`/admin/write-post?cid=${post.cid}`} title={`编辑 ${post.title}`}><i class="i-edit"></i></a>
+                      <a href={`/admin/write-post?cid=${post.cid}`}>{post.title || ctx.i18n.t('core.content.untitled', {}, 'Untitled')}</a>
+                      {isDraft && <em class="status">{ctx.i18n.t('admin.option.draft', {}, 'Draft')}</em>}
+                      {post.status === 'hidden' && <em class="status">{ctx.i18n.t('admin.option.hidden', {}, 'Hidden')}</em>}
+                      {post.status === 'waiting' && <em class="status">{ctx.i18n.t('admin.option.waiting', {}, 'Pending review')}</em>}
+                      {post.status === 'private' && <em class="status">{ctx.i18n.t('admin.option.private', {}, 'Private')}</em>}
+                      {post.password && post.status === 'publish' && <em class="status">{ctx.i18n.t('admin.status.passwordProtected', {}, 'Password protected')}</em>}
+                      <a href={`/admin/write-post?cid=${post.cid}`} title={`${ctx.i18n.t('admin.action.edit', {}, 'Edit')} ${post.title || ctx.i18n.t('core.content.untitled', {}, 'Untitled')}`}><i class="i-edit"></i></a>
                       {!isDraft && (
                         <a href={buildPermalink({ cid: post.cid, slug: post.slug, type: post.type, created: post.created }, urls.siteUrl, options.permalinkPattern as string | undefined)}
-                          title={`浏览 ${post.title}`}><i class="i-exlink"></i></a>
+                          title={`${ctx.i18n.t('admin.action.browse', {}, 'Browse')} ${post.title || ctx.i18n.t('core.content.untitled', {}, 'Untitled')}`}><i class="i-exlink"></i></a>
                       )}
                       {titleActionHtml.get(post.cid) && <Fragment set:html={titleActionHtml.get(post.cid)} />}
                     </td>
-                    <td class="kit-hidden-mb">{author?.screenName || author?.name || '未知'}</td>
+                    <td class="kit-hidden-mb">{author?.screenName || author?.name || ctx.i18n.t('admin.status.unknown', {}, 'Unknown')}</td>
                     <td class="kit-hidden-mb">
                       {cats.map((cat, i) => (
                         <>{i > 0 && ', '}<a href={`/admin/manage-posts?category=${cat.mid}`}>{cat.name}</a></>
                       ))}
-                      {cats.length === 0 && '未分类'}
+                      {cats.length === 0 && ctx.i18n.t('admin.status.uncategorized', {}, 'Uncategorized')}
                     </td>
-                    <td>{formatDate(post.created || 0, 'Y-m-d', options.timezone)}</td>
+                    <td>{formatDate(post.created || 0, 'Y-m-d', options.timezone, ctx.i18n.locale)}</td>
                   </tr>
                 );
               })
@@ -247,17 +247,17 @@ const titleActionHtml = new Map<number, string>(
     <div class="typecho-list-operate clearfix">
       <div class="operate-toolbar">
         <div class="operate">
-          <label><i class="sr-only">全选</i><input type="checkbox" class="typecho-table-select-all" /></label>
+          <label><i class="sr-only">{ctx.i18n.t('admin.action.selectAll', {}, 'Select all')}</i><input type="checkbox" class="typecho-table-select-all" /></label>
           <div class="btn-group btn-drop">
-            <button class="btn dropdown-toggle btn-s" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="post-actions-bottom"><i class="sr-only">操作</i>选中项 <i class="i-caret-down"></i></button>
+            <button class="btn dropdown-toggle btn-s" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="post-actions-bottom"><i class="sr-only">{ctx.i18n.t('admin.action.actions', {}, 'Actions')}</i>{ctx.i18n.t('admin.notice.selectAction', {}, 'Select an action')} <i class="i-caret-down"></i></button>
             <ul class="dropdown-menu" id="post-actions-bottom" role="menu">
-              <li><a href="/api/admin/content-batch?do=delete">删除</a></li>
+              <li><a href="/api/admin/content-batch?do=delete">{ctx.i18n.t('admin.action.delete', {}, 'Delete')}</a></li>
               {isEditor && (
                 <>
-                  <li><a href="/api/admin/content-batch?do=mark&status=publish">标记为<strong>公开</strong></a></li>
-                  <li><a href="/api/admin/content-batch?do=mark&status=waiting">标记为<strong>待审核</strong></a></li>
-                  <li><a href="/api/admin/content-batch?do=mark&status=hidden">标记为<strong>隐藏</strong></a></li>
-                  <li><a href="/api/admin/content-batch?do=mark&status=private">标记为<strong>私密</strong></a></li>
+                  <li><a href="/api/admin/content-batch?do=mark&status=publish">{ctx.i18n.t('admin.action.markAs', {}, 'Mark as ')}<strong>{ctx.i18n.t('admin.option.publish', {}, 'Published')}</strong></a></li>
+                  <li><a href="/api/admin/content-batch?do=mark&status=waiting">{ctx.i18n.t('admin.action.markAs', {}, 'Mark as ')}<strong>{ctx.i18n.t('admin.option.waiting', {}, 'Pending review')}</strong></a></li>
+                  <li><a href="/api/admin/content-batch?do=mark&status=hidden">{ctx.i18n.t('admin.action.markAs', {}, 'Mark as ')}<strong>{ctx.i18n.t('admin.option.hidden', {}, 'Hidden')}</strong></a></li>
+                  <li><a href="/api/admin/content-batch?do=mark&status=private">{ctx.i18n.t('admin.action.markAs', {}, 'Mark as ')}<strong>{ctx.i18n.t('admin.option.private', {}, 'Private')}</strong></a></li>
                 </>
               )}
             </ul>

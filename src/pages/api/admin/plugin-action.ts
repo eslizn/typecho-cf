@@ -1,10 +1,12 @@
 import type { APIRoute } from 'astro';
-import { isAdminActionResponse, requireAdminAction } from '@/lib/admin-auth';
+import { isAdminActionResponse, jsonAdminActionError, requireAdminAction } from '@/lib/admin-auth';
 import { applyFilter, parseActivatedPlugins } from '@/lib/plugin';
 import { hasPermission } from '@/lib/auth';
 import { withTimeout } from '@/lib/timeout';
 import { REQUEST_BODY_LIMITS } from '@/lib/constants';
 import { readBoundedJson } from '@/lib/input';
+import { i18nMessage } from '@/lib/i18n';
+import { jsonError } from '@/lib/http';
 
 const PLUGIN_ACTION_TIMEOUT_MS = 60_000;
 
@@ -27,29 +29,26 @@ const DEFAULT_ACTION_ROLE = 'administrator';
 export const POST: APIRoute = async ({ request }) => {
   const auth = await requireAdminAction(request, BASE_REQUIRED_GROUP);
   if (isAdminActionResponse(auth)) {
-    return new Response(JSON.stringify({ error: auth.status === 401 ? 'Unauthorized' : 'Forbidden' }), {
-      status: auth.status,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return jsonAdminActionError(request, auth);
   }
 
   let body: { plugin?: string; action?: string; payload?: unknown };
   try {
     body = await readBoundedJson(request, REQUEST_BODY_LIMITS.adminForm) as typeof body;
   } catch {
-    return json({ error: '请求格式错误' }, 400);
+    return jsonError(400, i18nMessage('admin.plugin.actionRequestInvalid', 'Invalid request.'), undefined, auth.i18n);
   }
 
   const pluginId = body.plugin || '';
   const action = body.action || '';
   if (!/^[a-z0-9-]+$/.test(pluginId) || !action) {
-    return json({ error: '缺少插件或操作参数' }, 400);
+    return jsonError(400, i18nMessage('admin.plugin.actionParamsRequired', 'A plugin and action are required.'), undefined, auth.i18n);
   }
 
   const pluginCtx = auth.pluginCtx;
   const activatedIds = parseActivatedPlugins(auth.options.activatedPlugins as string | undefined);
   if (!activatedIds.includes(pluginId)) {
-    return json({ error: '插件未启用' }, 403);
+    return jsonError(403, i18nMessage('admin.plugin.inactive', 'The plugin is not enabled.'), undefined, auth.i18n);
   }
 
   // Ask the plugin what role it wants for this action. Plugins can inspect
@@ -62,13 +61,14 @@ export const POST: APIRoute = async ({ request }) => {
       action,
       payload: body.payload || {},
       user: auth.user,
+      i18n: auth.i18n,
     });
     if (typeof declared === 'string' && declared) requiredGroup = declared;
   } catch {
     // Filter threw → keep the safe default.
   }
   if (!hasPermission(auth.user.group || 'visitor', requiredGroup)) {
-    return json({ error: 'Forbidden' }, 403);
+    return jsonError(403, i18nMessage('admin.plugin.actionForbidden', 'Forbidden'), undefined, auth.i18n);
   }
 
   try {
@@ -80,13 +80,14 @@ export const POST: APIRoute = async ({ request }) => {
         options: auth.options,
         user: auth.user,
         request,
+        i18n: auth.i18n,
       }),
       PLUGIN_ACTION_TIMEOUT_MS,
-      '插件操作超时，请稍后重试',
+      auth.i18n.t('admin.plugin.actionTimeout', {}, 'The plugin action timed out. Try again later.'),
     );
 
     if (!result?.handled) {
-      return json({ error: '插件未处理该操作' }, 404);
+      return jsonError(404, i18nMessage('admin.plugin.actionUnhandled', 'The plugin did not handle this action.'), undefined, auth.i18n);
     }
     if (result.response instanceof Response) {
       return result.response;
@@ -96,7 +97,9 @@ export const POST: APIRoute = async ({ request }) => {
   } catch (error) {
     return json({
       success: false,
-      error: error instanceof Error ? error.message : '插件操作失败',
+      error: error instanceof Error
+        ? error.message
+        : auth.i18n.t('admin.plugin.actionFailed', {}, 'The plugin action failed.'),
     }, 500);
   }
 };

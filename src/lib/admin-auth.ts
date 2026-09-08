@@ -5,9 +5,10 @@ import { parseActivatedPlugins, setActivatedPlugins, type HookContext } from '@/
 import { env } from 'cloudflare:workers';
 import { getRequestCoreContext } from '@/lib/context';
 import { REQUEST_BODY_LIMITS } from '@/lib/constants';
-import { assertBoundedContentLength, InputError } from '@/lib/input';
+import { assertBoundedContentLength, InputError, inputErrorResponse } from '@/lib/input';
 import { createRequestI18n } from '@/lib/i18n-runtime';
-import type { I18n } from '@/lib/i18n';
+import { i18nMessage, type I18n } from '@/lib/i18n';
+import { jsonError } from '@/lib/http';
 
 export interface AdminActionContext {
   db: Database;
@@ -73,25 +74,30 @@ export async function requireAdminAction(
   requiredGroup: string,
   { csrf = true, plugins, maxBodyBytes = REQUEST_BODY_LIMITS.adminForm }: RequireAdminActionOptions = {},
 ): Promise<AdminActionContext | Response> {
+  const requestCore = getRequestCoreContext(request);
+  const db = requestCore?.db ?? getDb(env.DB);
+  const options = requestCore?.options ?? await loadOptions(db);
+  const errorI18n = requestCore?.i18n ?? createRequestI18n(
+    typeof options.lang === 'string' ? options.lang : 'zh_CN',
+    request,
+    [],
+  ).i18n;
+
   if (csrf) {
     try {
       assertBoundedContentLength(request, maxBodyBytes);
     } catch (error) {
-      if (error instanceof InputError) return new Response(error.message, { status: error.status });
+      if (error instanceof InputError) return inputErrorResponse(error, errorI18n);
       throw error;
     }
   }
-  const requestCore = getRequestCoreContext(request);
-  const db = requestCore?.db ?? getDb(env.DB);
-  const options = requestCore?.options ?? await loadOptions(db);
-
   const { token } = getAuthCookies(request.headers.get('cookie'));
-  if (!token || !options.secret) return new Response('Unauthorized', { status: 401 });
+  if (!token || !options.secret) return new Response(errorI18n.t('core.error.unauthorized', {}, 'Unauthorized'), { status: 401 });
 
   const auth = await validateAuthToken(token, options.secret, db);
-  if (!auth) return new Response('Unauthorized', { status: 401 });
+  if (!auth) return new Response(errorI18n.t('core.error.unauthorized', {}, 'Unauthorized'), { status: 401 });
   if (!hasPermission(auth.user.group || 'visitor', requiredGroup)) {
-    return new Response('Forbidden', { status: 403 });
+    return new Response(errorI18n.t('core.error.forbidden', {}, 'Forbidden'), { status: 403 });
   }
 
   if (csrf) {
@@ -99,9 +105,9 @@ export async function requireAdminAction(
     // the CSRF token. Even if a token is leaked, cross-site POSTs are
     // rejected at the request boundary.
     if (!isSameOriginRequest(request, options.siteUrl || '')) {
-      return new Response('Forbidden', { status: 403 });
+      return new Response(errorI18n.t('core.error.forbidden', {}, 'Forbidden'), { status: 403 });
     }
-    const csrfError = await requireAdminCSRF(request, options.secret as string, auth.user.authCode!, auth.uid);
+    const csrfError = await requireAdminCSRF(request, options.secret as string, auth.user.authCode!, auth.uid, errorI18n);
     if (csrfError) return csrfError;
   }
 
@@ -125,6 +131,15 @@ export async function requireAdminAction(
 
 export function isAdminActionResponse(value: AdminActionContext | Response): value is Response {
   return value instanceof Response;
+}
+
+/** Keep admin JSON endpoints consistent when authentication fails before an
+ * AdminActionContext can be returned. */
+export function jsonAdminActionError(request: Request, response: Response): Response {
+  const core = getRequestCoreContext(request);
+  const key = response.status === 401 ? 'core.error.unauthorized' : 'core.error.forbidden';
+  const fallback = response.status === 401 ? 'Unauthorized' : 'Forbidden';
+  return jsonError(response.status, i18nMessage(key, fallback), undefined, core?.i18n);
 }
 
 export function safeAdminRedirectUrl(referer: string | null, siteUrl: string, fallback: string): string {

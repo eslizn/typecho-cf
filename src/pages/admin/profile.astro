@@ -29,51 +29,54 @@ const [stats, gravatarUrl] = await Promise.all([
 const [postCount, commentCount, catCount] = stats;
 const profileBottomHtml = await applyFilterSafely(ctx, 'admin:profile:bottom', '', { options, urls, user, csrfToken });
 ---
-<Admin title="个人设置" options={options} urls={urls} user={user} activeMenu="profile" pluginCtx={ctx}>
+<Admin title={ctx.i18n.t('admin.page.profile', {}, 'Profile')} options={options} urls={urls} user={user} activeMenu="profile" pluginCtx={ctx}>
   <div class="col-mb-12 col-tb-3">
     <p>
-      <a href="https://gravatar.com/emails/" title="在 Gravatar 上修改头像">
+      <a href="https://gravatar.com/emails/" title={ctx.i18n.t('admin.profile.changeAvatar', {}, 'Change avatar on Gravatar')}>
         <img class="profile-avatar" src={gravatarUrl} alt={user!.screenName || user!.name || ''} />
       </a>
     </p>
     <h2>{user!.screenName || user!.name}</h2>
     <p>{user!.name}</p>
     <p>
-      目前有 <em>{postCount[0]?.count || 0}</em> 篇日志, 并有 <em>{commentCount[0]?.count || 0}</em>
-      条关于你的评论在 <em>{catCount[0]?.count || 0}</em> 个分类中.
+      {ctx.i18n.t('admin.profile.stats', {
+        posts: postCount[0]?.count || 0,
+        comments: commentCount[0]?.count || 0,
+        categories: catCount[0]?.count || 0,
+      }, 'You have {posts} posts, {comments} comments, in {categories} categories.')}
     </p>
   </div>
 
   <div class="col-mb-12 col-tb-6 col-tb-offset-1 typecho-content-panel" role="form">
     <section>
-      <h3>个人资料</h3>
+      <h3>{ctx.i18n.t('admin.profile.personal', {}, 'Profile')}</h3>
       <form method="post" action="/api/admin/profile">
         <input type="hidden" name="_" value={csrfToken} />
         <ul class="typecho-option">
           <li>
-            <label class="typecho-label">用户名</label>
+            <label class="typecho-label">{ctx.i18n.t('admin.field.username', {}, 'Username')}</label>
             <p><input type="text" class="text w-100" value={user!.name || ''} disabled /></p>
-            <p class="description">用户名作为用户登录标识, 创建后不可修改</p>
+            <p class="description">{ctx.i18n.t('admin.description.usernameImmutable', {}, 'The username is the login identifier and cannot be changed after creation.')}</p>
           </li>
           <li>
-            <label for="screenName" class="typecho-label">昵称</label>
+            <label for="screenName" class="typecho-label">{ctx.i18n.t('admin.field.nickname', {}, 'Nickname')}</label>
             <p><input type="text" id="screenName" name="screenName" class="text w-100" value={user!.screenName || ''} /></p>
-            <p class="description">昵称可以与用户名不同, 用于前台显示</p>
+            <p class="description">{ctx.i18n.t('admin.description.nickname', {}, 'The nickname can differ from the username and is shown publicly.')}</p>
           </li>
           <li>
-            <label for="mail" class="typecho-label">邮件地址</label>
+            <label for="mail" class="typecho-label">{ctx.i18n.t('admin.field.email', {}, 'Email')}</label>
             <p><input type="email" id="mail" name="mail" class="text w-100" value={user!.mail || ''} required /></p>
-            <p class="description">邮件地址将作为此用户的联系方式</p>
+            <p class="description">{ctx.i18n.t('admin.description.userContact', {}, "This email address is used as the user's contact address.")}</p>
           </li>
           <li>
-            <label for="url" class="typecho-label">个人主页地址</label>
+            <label for="url" class="typecho-label">{ctx.i18n.t('admin.field.website', {}, 'Website')}</label>
             <p><input type="url" id="url" name="url" class="text w-100" value={user!.url || ''} /></p>
-            <p class="description">此用户的个人主页地址, 请用 <code>http://</code> 或 <code>https://</code> 开头</p>
+            <p class="description">{ctx.i18n.t('admin.description.website', {}, 'Start with http:// or https://.')}</p>
           </li>
         </ul>
         <ul class="typecho-option typecho-option-submit">
           <li>
-            <button type="submit" class="btn primary">更新我的档案</button>
+            <button type="submit" class="btn primary">{ctx.i18n.t('admin.profile.updateProfile', {}, 'Update profile')}</button>
           </li>
         </ul>
       </form>
@@ -82,31 +85,31 @@ const profileBottomHtml = await applyFilterSafely(ctx, 'admin:profile:bottom', '
     <br />
 
     <section id="change-password">
-      <h3>密码修改</h3>
+      <h3>{ctx.i18n.t('admin.profile.passwordChange', {}, 'Change password')}</h3>
       <form method="post" action="/api/admin/profile">
         <input type="hidden" name="_" value={csrfToken} />
         <ul class="typecho-option">
           <li>
-            <label for="current-password" class="typecho-label">当前密码</label>
+            <label for="current-password" class="typecho-label">{ctx.i18n.t('admin.field.currentPassword', {}, 'Current password')}</label>
             <p><input type="password" id="current-password" name="currentPassword" class="text w-100" autocomplete="current-password" required /></p>
-            <p class="description">修改密码前需要验证当前密码</p>
+            <p class="description">{ctx.i18n.t('admin.description.currentPasswordRequired', {}, 'The current password is required before changing it.')}</p>
           </li>
           <li>
-            <label for="password" class="typecho-label">用户密码</label>
+            <label for="password" class="typecho-label">{ctx.i18n.t('admin.field.password', {}, 'Password')}</label>
             <p><input type="password" id="password" name="password" class="text w-100" autocomplete="new-password" minlength={PASSWORD_MIN_LENGTH} required /></p>
-            <p class="description">新密码至少 {PASSWORD_MIN_LENGTH} 位，请不要使用容易被猜到的密码</p>
+            <p class="description">{ctx.i18n.t('admin.description.passwordStrength', { count: PASSWORD_MIN_LENGTH }, `Use at least ${PASSWORD_MIN_LENGTH} characters and avoid an easy-to-guess password.`)}</p>
           </li>
           <li>
-            <label for="confirm" class="typecho-label">用户密码确认</label>
+            <label for="confirm" class="typecho-label">{ctx.i18n.t('admin.field.confirmPassword', {}, 'Confirm password')}</label>
             <p><input type="password" id="confirm" name="passwordConfirm" class="text w-100" autocomplete="new-password" minlength={PASSWORD_MIN_LENGTH} required /></p>
-            <p class="description">请再次输入你的密码以确认</p>
+            <p class="description">{ctx.i18n.t('admin.description.passwordConfirm', {}, 'Enter the password again to confirm it.')}</p>
           </li>
         </ul>
         <input type="hidden" name="screenName" value={user!.screenName || ''} />
         <input type="hidden" name="mail" value={user!.mail || ''} />
         <ul class="typecho-option typecho-option-submit">
           <li>
-            <button type="submit" class="btn primary">更新密码</button>
+            <button type="submit" class="btn primary">{ctx.i18n.t('admin.profile.updatePassword', {}, 'Update password')}</button>
           </li>
         </ul>
       </form>

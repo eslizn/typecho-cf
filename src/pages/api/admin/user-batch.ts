@@ -3,6 +3,8 @@ import { schema } from '@/db';
 import { isAdminActionResponse, requireAdminAction, safeAdminRedirectUrl } from '@/lib/admin-auth';
 import { readAdminFormOrError } from '@/lib/input';
 import { eq, sql } from 'drizzle-orm';
+import { i18nMessage } from '@/lib/i18n';
+import { textError } from '@/lib/http';
 
 export const POST: APIRoute = handler;
 
@@ -11,12 +13,14 @@ async function handler({ request, locals, url }: { request: Request; locals: App
   if (isAdminActionResponse(auth)) return auth;
 
   const action = url.searchParams.get('do') || '';
-  if (action !== 'delete') return new Response('Invalid action', { status: 400 });
+  if (action !== 'delete') {
+    return textError(400, i18nMessage('admin.batch.invalidAction', 'Invalid action.'), undefined, auth.i18n);
+  }
 
   // Get selected uids from form body
   let uids: number[] = [];
   if (request.method === 'POST') {
-    const formData = await readAdminFormOrError(request);
+    const formData = await readAdminFormOrError(request, undefined, auth.i18n);
     if (formData instanceof Response) return formData;
     uids = formData.getAll('uid[]').map(v => parseInt(v.toString(), 10)).filter(Boolean);
   }

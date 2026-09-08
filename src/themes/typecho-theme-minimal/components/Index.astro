@@ -17,6 +17,7 @@ const {
   posts, pagination,
 } = Astro.props;
 
+const t = i18n.t.bind(i18n);
 const isIndex = currentPath === '/';
 ---
 <Base options={options} urls={urls} user={user} isLoggedIn={isLoggedIn} pluginCtx={pluginCtx} i18n={i18n}>
@@ -29,14 +30,14 @@ const isIndex = currentPath === '/';
         </div>
         <div class="site-search col-3 kit-hidden-tb">
           <form id="search" method="post" action={urls.siteUrl + '/'} role="search">
-            <label for="s" class="sr-only">搜索关键字</label>
-            <input type="text" id="s" name="s" class="text" placeholder="输入关键字搜索" />
-            <button type="submit" class="submit">搜索</button>
+            <label for="s" class="sr-only">{t('theme.search.label', {}, 'Search keywords')}</label>
+            <input type="text" id="s" name="s" class="text" placeholder={t('theme.search.placeholder', {}, 'Search keywords')} />
+            <button type="submit" class="submit">{t('theme.search.submit', {}, 'Search')}</button>
           </form>
         </div>
         <div class="col-mb-12">
           <nav id="nav-menu" class="clearfix" role="navigation">
-            <a class:list={[{ current: isIndex }]} href={urls.siteUrl + '/'}>首页</a>
+            <a class:list={[{ current: isIndex }]} href={urls.siteUrl + '/'}>{t('theme.nav.home', {}, 'Home')}</a>
             {pages.map((page) => (
               <a href={page.permalink} title={page.title}>{page.title}</a>
             ))}
@@ -52,9 +53,9 @@ const isIndex = currentPath === '/';
         <div class="col-mb-12 col-8" id="main" role="main">
           {posts.length === 0 ? (
             <article class="post">
-              <h2 class="post-title">暂时没有文章</h2>
+              <h2 class="post-title">{t('theme.empty.postsTitle', {}, 'No posts yet')}</h2>
               <div class="post-content">
-                <p>这里还没有任何文章，请通过管理后台发布第一篇文章。</p>
+                <p>{t('theme.empty.postsDescription', {}, 'There are no posts yet. Publish the first post from the admin panel.')}</p>
               </div>
             </article>
           ) : (
@@ -65,29 +66,29 @@ const isIndex = currentPath === '/';
                 </h2>
                 <ul class="post-meta">
                   <li itemprop="author" itemscope itemtype="http://schema.org/Person">
-                    作者: <a
+                    {t('theme.meta.author', {}, 'Author:')} <a
                       itemprop="name"
                       href={post.author ? buildAuthorLink(post.author.uid, urls.siteUrl) : '#'}
                       rel="author"
                     >
-                      {post.author?.screenName || post.author?.name || '未知'}
+                      {post.author?.screenName || post.author?.name || t('theme.unknown', {}, 'Unknown')}
                     </a>
                   </li>
                   <li>
-                    时间: <time datetime={new Date((post.created) * 1000).toISOString()} itemprop="datePublished">
-                      {formatDate(post.created, 'Y-m-d', options.timezone)}
+                    {t('theme.meta.time', {}, 'Date:')} <time datetime={new Date((post.created) * 1000).toISOString()} itemprop="datePublished">
+                      {formatDate(post.created, 'Y-m-d', options.timezone, i18n.locale)}
                     </time>
                   </li>
                   {post.categories.length > 0 && (
                     <li>
-                      分类: {post.categories.map((c, i) => (
+                      {t('theme.meta.category', {}, 'Category:')} {post.categories.map((c, i) => (
                         <>{i > 0 && ', '}<a href={c.permalink}>{c.name}</a></>
                       ))}
                     </li>
                   )}
                   <li itemprop="interactionCount">
                     <a itemprop="discussionUrl" href={`${post.permalink}#comments`}>
-                      {post.commentsNum === 0 ? '评论' : `${post.commentsNum} 条评论`}
+                      {post.commentsNum === 0 ? t('theme.comments.label', {}, 'Comments') : i18n.tPlural('theme.comments.count', post.commentsNum, {}, '{count} comments')}
                     </a>
                   </li>
                 </ul>
@@ -99,10 +100,10 @@ const isIndex = currentPath === '/';
           {pagination.totalPages > 1 && (
             <nav class="page-navigator">
               {pagination.hasPrev && (
-                <a class="prev" href={pagination.prevUrl!}>&laquo; 前一页</a>
+                <a class="prev" href={pagination.prevUrl!}>&laquo; {t('theme.comments.previous', {}, 'Previous')}</a>
               )}
               {pagination.hasNext && (
-                <a class="next" href={pagination.nextUrl!}>后一页 &raquo;</a>
+                <a class="next" href={pagination.nextUrl!}>{t('theme.comments.next', {}, 'Next')} &raquo;</a>
               )}
             </nav>
           )}
@@ -112,7 +113,7 @@ const isIndex = currentPath === '/';
           <div class="col-mb-12 col-offset-1 col-3 kit-hidden-tb" id="secondary" role="complementary">
             {sidebarData.recentPosts && sidebarData.recentPosts.length > 0 && (
               <section class="widget">
-                <h3 class="widget-title">最新文章</h3>
+                <h3 class="widget-title">{t('theme.sidebar.recentPosts', {}, 'Recent posts')}</h3>
                 <ul class="widget-list">
                   {sidebarData.recentPosts.map((p) => (
                     <li><a href={p.permalink}>{p.title}</a></li>
@@ -122,7 +123,7 @@ const isIndex = currentPath === '/';
             )}
             {sidebarData.recentComments && sidebarData.recentComments.length > 0 && (
               <section class="widget">
-                <h3 class="widget-title">最近回复</h3>
+                <h3 class="widget-title">{t('theme.sidebar.recentComments', {}, 'Recent comments')}</h3>
                 <ul class="widget-list">
                   {sidebarData.recentComments.map((c) => (
                     <li><a href={c.permalink}>{c.author}</a>: {c.excerpt}</li>
@@ -132,7 +133,7 @@ const isIndex = currentPath === '/';
             )}
             {sidebarData.categories && sidebarData.categories.length > 0 && (
               <section class="widget">
-                <h3 class="widget-title">分类</h3>
+                <h3 class="widget-title">{t('theme.sidebar.categories', {}, 'Categories')}</h3>
                 <ul class="widget-list">
                   {sidebarData.categories.map((cat) => (
                     <li><a href={cat.permalink}>{cat.name} ({cat.count})</a></li>
@@ -142,7 +143,7 @@ const isIndex = currentPath === '/';
             )}
             {sidebarData.archives && sidebarData.archives.length > 0 && (
               <section class="widget">
-                <h3 class="widget-title">归档</h3>
+                <h3 class="widget-title">{t('theme.sidebar.archives', {}, 'Archives')}</h3>
                 <ul class="widget-list">
                   {sidebarData.archives.map((archive) => (
                     <li><a href={archive.permalink}>{archive.date}</a></li>
@@ -151,20 +152,20 @@ const isIndex = currentPath === '/';
               </section>
             )}
             <section class="widget">
-              <h3 class="widget-title">其它</h3>
+              <h3 class="widget-title">{t('theme.sidebar.other', {}, 'Other')}</h3>
               <ul class="widget-list">
                 {isLoggedIn ? (
                   <>
                     <li class="last">
-                      <a href={urls.adminUrl}>进入后台 ({user?.screenName || user?.name})</a>
+                      <a href={urls.adminUrl}>{t('theme.sidebar.admin', {}, 'Go to admin')} ({user?.screenName || user?.name})</a>
                     </li>
-                    <li><form method="post" action={urls.logoutUrl} class="logout-form"><button type="submit">退出</button></form></li>
+                    <li><form method="post" action={urls.logoutUrl} class="logout-form"><button type="submit">{t('theme.sidebar.logout', {}, 'Log out')}</button></form></li>
                   </>
                 ) : (
-                  <li class="last"><a href={urls.loginUrl}>登录</a></li>
+                  <li class="last"><a href={urls.loginUrl}>{t('theme.sidebar.login', {}, 'Log in')}</a></li>
                 )}
-                <li><a href={urls.feedUrl}>文章 RSS</a></li>
-                <li><a href={urls.commentsFeedUrl}>评论 RSS</a></li>
+                <li><a href={urls.feedUrl}>{t('theme.sidebar.postsRss', {}, 'Posts RSS')}</a></li>
+                <li><a href={urls.commentsFeedUrl}>{t('theme.sidebar.commentsRss', {}, 'Comments RSS')}</a></li>
               </ul>
             </section>
           </div>
@@ -175,6 +176,6 @@ const isIndex = currentPath === '/';
 
   <footer id="footer" role="contentinfo">
     &copy; {new Date().getFullYear()} <a href={urls.siteUrl}>{options.title}</a>.
-    由 <a href="https://github.com/eslizn/typecho-cf">Typecho CF</a> 强力驱动.
+    {t('theme.footer.poweredBy', {}, 'Powered by')} <a href="https://github.com/eslizn/typecho-cf">Typecho CF</a>.
   </footer>
 </Base>

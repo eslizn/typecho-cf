@@ -13,6 +13,25 @@ export interface UploadResult {
   url: string;
 }
 
+export type UploadErrorCode =
+  | 'extension_unknown'
+  | 'type_not_allowed'
+  | 'file_too_large'
+  | 'filename_required'
+  | 'filename_invalid'
+  | 'extension_not_allowed';
+
+export class UploadError extends Error {
+  constructor(
+    public readonly code: UploadErrorCode,
+    public readonly variables: Record<string, string | number>,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'UploadError';
+  }
+}
+
 /**
  * Mapping from file extension to MIME type.
  * Used to derive the actual MIME type from the filename extension
@@ -134,15 +153,15 @@ export async function uploadToR2(
   // Derive MIME type from extension — never trust client-provided file.type
   const mimeType = getMimeTypeFromExtension(file.name);
   if (!mimeType) {
-    throw new Error(`无法识别的文件扩展名: ${file.name}`);
+    throw new UploadError('extension_unknown', { name: file.name }, `无法识别的文件扩展名: ${file.name}`);
   }
 
   if (!isAllowedType(mimeType, attachmentTypes)) {
-    throw new Error(`不允许上传此类型的文件: ${mimeType}`);
+    throw new UploadError('type_not_allowed', { type: mimeType }, `不允许上传此类型的文件: ${mimeType}`);
   }
 
   if (file.size > REQUEST_BODY_LIMITS.uploadFile) {
-    throw new Error('文件大小超出限制 (最大 10MB)');
+    throw new UploadError('file_too_large', {}, '文件大小超出限制 (最大 10MB)');
   }
 
   const path = generateUploadPath(file.name);
@@ -201,23 +220,23 @@ function sanitizeFilename(name: string): string {
 
   // Reject empty or whitespace-only filenames
   if (!name || !name.trim()) {
-    throw new Error('文件名不能为空');
+    throw new UploadError('filename_required', {}, '文件名不能为空');
   }
 
   // Reject extension-only filenames (e.g. ".jpg" with no base name)
   const safe = base.replace(/[^a-zA-Z0-9_\-\u4e00-\u9fff]/g, '_').substring(0, 100);
   if (!safe || safe === '_') {
-    throw new Error('文件名无效 (不能仅为扩展名)');
+    throw new UploadError('filename_invalid', {}, '文件名无效 (不能仅为扩展名)');
   }
 
   // Reject dangerous executable extensions
   if (DANGEROUS_EXTENSIONS.has(ext)) {
-    throw new Error(`不允许上传此扩展名的文件: ${ext}`);
+    throw new UploadError('extension_not_allowed', { extension: ext }, `不允许上传此扩展名的文件: ${ext}`);
   }
 
   // Reject unrecognized extensions (must be in the allowlist)
   if (!ext || !EXTENSION_TO_MIME[ext]) {
-    throw new Error(`无法识别的文件扩展名: ${ext || '(无)'}`);
+    throw new UploadError('extension_unknown', { name: ext || '(none)' }, `无法识别的文件扩展名: ${ext || '(无)'}`);
   }
 
   // Add timestamp to avoid conflicts

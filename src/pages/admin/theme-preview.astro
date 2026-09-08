@@ -21,13 +21,13 @@ const authCheck = requireAuth(ctx);
 if (authCheck) return authCheck;
 
 if (!hasPermission(ctx.user!.group || 'visitor', 'administrator')) {
-  return new Response('Forbidden', { status: 403 });
+  return new Response(ctx.i18n.t('core.error.forbidden', {}, 'Forbidden'), { status: 403 });
 }
 
 const themeId = Astro.url.searchParams.get('theme')?.trim() || '';
 const theme = getTheme(themeId);
 if (!theme) {
-  return new Response('Theme not found', { status: 404 });
+  return new Response(ctx.i18n.t('admin.theme.notFound', { id: themeId }, 'Theme "{id}" does not exist'), { status: 404 });
 }
 
 // Use a request-local option copy so Base.astro loads the selected theme's

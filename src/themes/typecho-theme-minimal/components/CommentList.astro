@@ -6,15 +6,17 @@
  */
 import type { CommentNode, CommentOptions } from '@/lib/theme-props';
 import { formatDate } from '@/lib/content';
+import type { I18n } from '@/lib/i18n';
 
 interface Props {
   comments: CommentNode[];
   commentOptions: CommentOptions;
   gravatarMap: Record<number, string>;
   permalink: string;
+  i18n: I18n;
 }
 
-const { comments, commentOptions, gravatarMap, permalink } = Astro.props;
+const { comments, commentOptions, gravatarMap, permalink, i18n } = Astro.props;
 ---
 {comments.map((node) => (
   <li class="comment-body" id={`comment-${node.coid}`}>
@@ -38,14 +40,14 @@ const { comments, commentOptions, gravatarMap, permalink } = Astro.props;
     </div>
     <div class="comment-meta">
       <time datetime={new Date(node.created * 1000).toISOString()}>
-        {formatDate(node.created, commentOptions.dateFormat, commentOptions.timezone)}
+        {formatDate(node.created, commentOptions.dateFormat, commentOptions.timezone, i18n.locale)}
       </time>
     </div>
     <div class="comment-content" set:html={node.text} />
     {commentOptions.allowComment && (
       <div class="comment-reply">
         <a href="#respond" data-coid={node.coid} class="comment-reply-link" rel="nofollow"
-          onclick={`return TypechoComment.reply('comment-${node.coid}', ${node.coid})`}>回复</a>
+          onclick={`return TypechoComment.reply('comment-${node.coid}', ${node.coid})`}>{i18n.t('theme.comments.reply', {}, 'Reply')}</a>
       </div>
     )}
     {node.children.length > 0 && (
@@ -56,6 +58,7 @@ const { comments, commentOptions, gravatarMap, permalink } = Astro.props;
             commentOptions={commentOptions}
             gravatarMap={gravatarMap}
             permalink={permalink}
+            i18n={i18n}
           />
         </ol>
       </div>

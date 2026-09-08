@@ -8,6 +8,7 @@ import { resolveUniqueContentSlug, resolveUniqueMetaSlug } from '@/lib/slug';
 import { applyFilter, doHook } from '@/lib/plugin';
 import { bumpCacheVersion } from '@/lib/cache';
 import { jsonError, jsonOk } from '@/lib/http';
+import { i18nMessage } from '@/lib/i18n';
 import { eq, and, sql } from 'drizzle-orm';
 import { validateFilteredContent, WriteFilterError } from '@/lib/write-filter';
 
@@ -161,8 +162,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const options = admin.options;
   const auth = { uid: admin.uid, user: admin.user };
   const pluginCtx = admin.pluginCtx;
+  const error = (status: number, key: string, variables: Record<string, string | number> = {}, fallback = key) =>
+    jsonError(status, i18nMessage(key, fallback, variables), undefined, admin.i18n);
 
-  const formData = await readAdminFormOrError(request);
+  const formData = await readAdminFormOrError(request, undefined, admin.i18n);
   if (formData instanceof Response) return formData;
   const action = formData.get('do')?.toString() || 'create';
   const typeInput = formData.get('type')?.toString() || 'post';
@@ -208,9 +211,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
     // Autosave rejection: cannot autosave published content
     if (cid) {
       const existing = await db.query.contents.findFirst({ where: eq(schema.contents.cid, cid) });
-      if (!existing) return new Response('not-found', { status: 404 });
-      if (existing.status === 'publish') return jsonError(400, 'autosave-not-allowed-for-published');
-      if (!canManageResource(auth.user, existing)) return new Response('Forbidden', { status: 403 });
+      if (!existing) return error(404, 'admin.content.notFound', {}, 'Not Found');
+      if (existing.status === 'publish') return error(400, 'admin.content.autosaveNotAllowed', {}, 'Autosave is not allowed for published content.');
+      if (!canManageResource(auth.user, existing)) return error(403, 'core.error.forbidden', {}, 'Forbidden');
       await db.update(schema.contents).set({
         title: title || existing.title,
         text: text || existing.text,
@@ -230,7 +233,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       type: type === 'page' ? 'page_draft' : 'post_draft',
       status: 'draft',
     } satisfies Record<string, unknown>).returning({ cid: schema.contents.cid });
-    if (!inserted.length) return new Response('创建失败', { status: 500 });
+    if (!inserted.length) return error(500, 'admin.content.createFailed', {}, 'Content could not be created.');
     const newCid = inserted[0].cid;
     return jsonOk({ cid: newCid, autosaved: true });
   }
@@ -258,7 +261,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     let contentData: Record<string, unknown>;
     try {
       const filtered = await applyFilter(pluginCtx, hookName, { ...protectedContentData }, {
-        request, formData, db, options, user: auth.user, action,
+        request, formData, db, options, user: auth.user, action, i18n: admin.i18n,
       });
       contentData = validateFilteredContent(protectedContentData, filtered);
     } catch (error) {
@@ -273,7 +276,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const result = await db.insert(schema.contents).values(insertData as any).returning({ cid: schema.contents.cid });
 
     const newCid = result[0]?.cid;
-    if (!newCid) return new Response('创建失败', { status: 500 });
+    if (!newCid) return error(500, 'admin.content.createFailed', {}, 'Content could not be created.');
 
     const finalSlug = await resolveUniqueContentSlug(db, (contentData.slug as string) || String(newCid), newCid);
     contentData.slug = finalSlug;
@@ -319,10 +322,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const existing = await db.query.contents.findFirst({
       where: eq(schema.contents.cid, cid),
     });
-    if (!existing) return new Response('Not Found', { status: 404 });
+    if (!existing) return error(404, 'admin.content.notFound', {}, 'Not Found');
 
     if (!canManageResource(auth.user, existing)) {
-      return new Response('Forbidden', { status: 403 });
+      return error(403, 'core.error.forbidden', {}, 'Forbidden');
     }
 
     const existingBaseType = existing.type?.startsWith('page') ? 'page' : 'post';
@@ -355,7 +358,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       let revisionData: Record<string, unknown>;
       try {
         const filtered = await applyFilter(pluginCtx, hookNameForType(existingBaseType), { ...revisionBaseline }, {
-          request, formData, db, options, user: auth.user, action, existing,
+          request, formData, db, options, user: auth.user, action, existing, i18n: admin.i18n,
         });
         revisionData = validateFilteredContent(revisionBaseline, filtered);
         revisionData.parent = cid;
@@ -367,7 +370,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       }
       const revisionCid = revision?.cid ?? (await db.insert(schema.contents).values(revisionData as any)
         .returning({ cid: schema.contents.cid }))[0]?.cid;
-      if (!revisionCid) return new Response('保存修订失败', { status: 500 });
+      if (!revisionCid) return error(500, 'admin.content.revisionSaveFailed', {}, 'The revision could not be saved.');
       if (revision) {
         await db.update(schema.contents).set(revisionData as any)
           .where(eq(schema.contents.cid, revisionCid));
@@ -408,7 +411,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     let contentData: Record<string, unknown>;
     try {
       const filtered = await applyFilter(pluginCtx, hookName, { ...protectedContentData }, {
-        request, formData, db, options, user: auth.user, action, existing,
+        request, formData, db, options, user: auth.user, action, existing, i18n: admin.i18n,
       });
       contentData = validateFilteredContent(protectedContentData, filtered);
     } catch (error) {
@@ -490,10 +493,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const existing = await db.query.contents.findFirst({
       where: eq(schema.contents.cid, cid),
     });
-    if (!existing) return new Response('Not Found', { status: 404 });
+    if (!existing) return error(404, 'admin.content.notFound', {}, 'Not Found');
 
     if (!canManageResource(auth.user, existing)) {
-      return new Response('Forbidden', { status: 403 });
+      return error(403, 'core.error.forbidden', {}, 'Forbidden');
     }
 
     // Trigger pre-delete hook
@@ -540,5 +543,5 @@ export const POST: APIRoute = async ({ request, locals }) => {
     });
   }
 
-  return new Response('Invalid action', { status: 400 });
+  return error(400, 'admin.error.invalidAction', {}, 'Invalid action.');
 };

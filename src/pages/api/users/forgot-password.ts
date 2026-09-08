@@ -5,38 +5,42 @@ import { generateResetToken, hashResetToken, RESET_TOKEN_EXPIRY_SEC } from '@/li
 import { createMailI18n, sendMail } from '@/lib/mail';
 import { escapeHtml } from '@/lib/escape';
 import { trackSlidingWindow } from '@/lib/login-rate-limit';
-import { getClientIp } from '@/lib/context';
+import { getClientIp, getRequestI18n } from '@/lib/context';
 import { setActivatedPlugins, parseActivatedPlugins, type HookContext } from '@/lib/plugin';
 import { and, eq, lte } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 import { REQUEST_BODY_LIMITS } from '@/lib/constants';
-import { InputError, readBoundedFormData } from '@/lib/input';
+import { InputError, inputErrorMessage, readBoundedFormData } from '@/lib/input';
+import { createCoreRequestI18n } from '@/lib/i18n-runtime';
+import { i18nMessage } from '@/lib/i18n';
+import { textError } from '@/lib/http';
 
 export const POST: APIRoute = async ({ request }) => {
+  const coreI18n = createCoreRequestI18n(request).i18n;
   // Origin check — prevent CSRF. Missing origin is rejected outright
   // because browsers send Origin on cross-origin form POSTs; anonymous
   // tools can't bypass without explicit opt-in.
   const origin = request.headers.get('origin');
-  if (!origin) return new Response('Forbidden', { status: 403 });
+  if (!origin) return textError(403, i18nMessage('core.error.forbidden', 'Forbidden'), undefined, coreI18n);
   try {
     const requestUrl = new URL(request.url);
     const originUrl = new URL(origin);
     if (originUrl.origin !== requestUrl.origin) {
-      return new Response('Forbidden', { status: 403 });
+      return textError(403, i18nMessage('core.error.forbidden', 'Forbidden'), undefined, coreI18n);
     }
-  } catch { return new Response('Forbidden', { status: 403 }); }
+  } catch { return textError(403, i18nMessage('core.error.forbidden', 'Forbidden'), undefined, coreI18n); }
 
   let formData: FormData;
   try {
     formData = await readBoundedFormData(request, REQUEST_BODY_LIMITS.publicForm);
   } catch (error) {
-    if (error instanceof InputError) return new Response(error.message, { status: error.status });
+    if (error instanceof InputError) return textError(error.status, inputErrorMessage(error), undefined, coreI18n);
     throw error;
   }
 
   const ip = getClientIp(request);
   if (!trackSlidingWindow(`forgot-pw:${ip}`, { windowSeconds: 3600, maxRequests: 3 })) {
-    return new Response('请求过于频繁，请稍后再试', { status: 429, headers: { 'Retry-After': '3600' } });
+    return textError(429, i18nMessage('auth.resetRateLimited', 'Too many requests. Please try again later.'), { 'Retry-After': '3600' }, coreI18n);
   }
 
   const email = formData.get('email')?.toString()?.trim() || '';
@@ -44,10 +48,11 @@ export const POST: APIRoute = async ({ request }) => {
   const db = getDb(env.DB);
   const options = await loadOptions(db);
   const urls = computeUrls(options);
+  const i18n = getRequestI18n(request, options);
 
   // Always return the same success page — don't leak whether email exists
   const successPage = new Response(
-    `<!DOCTYPE html><html><head><meta charset="utf-8"><title>密码重置</title></head><body><p>如果该邮箱已注册，我们已发送重置链接。请检查收件箱。</p><p><a href="/admin/login">返回登录</a></p></body></html>`,
+    `<!DOCTYPE html><html lang="${escapeHtml(i18n.locale)}"><head><meta charset="utf-8"><title>${escapeHtml(i18n.t('admin.page.resetPassword', {}, 'Set a new password'))}</title></head><body><p>${escapeHtml(i18n.t('auth.resetEmailSent', {}, 'If the email is registered, a reset link has been sent. Check your inbox.'))}</p><p><a href="/admin/login">${escapeHtml(i18n.t('admin.auth.backToLogin', {}, 'Back to login'))}</a></p></body></html>`,
     { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } },
   );
 

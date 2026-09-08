@@ -126,9 +126,9 @@ export async function readAdminFlash(
 }
 
 function normalizeAdminFlashMessage(message: string | I18nMessage): string | I18nMessage {
-  if (typeof message === 'string') return message.trim().slice(0, MAX_MESSAGE_LENGTH) || '操作失败';
+  if (typeof message === 'string') return message.trim().slice(0, MAX_MESSAGE_LENGTH) || 'Operation failed';
   const descriptor = normalizeI18nMessage(message);
-  if (!descriptor) return '操作失败';
+  if (!descriptor) return 'Operation failed';
   if (JSON.stringify(descriptor).length <= MAX_MESSAGE_LENGTH) return descriptor;
   return (descriptor.fallbackText || descriptor.key).slice(0, MAX_MESSAGE_LENGTH);
 }

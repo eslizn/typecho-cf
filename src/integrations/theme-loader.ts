@@ -14,7 +14,12 @@ import type { AstroIntegration } from 'astro';
 import { readFileSync, existsSync, mkdirSync, cpSync, statSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { discoverDeclaredPackages } from './declared-packages';
-import { normalizeLocale } from '../lib/i18n';
+import {
+  MAX_TRANSLATION_ENTRIES,
+  MAX_TRANSLATION_KEY_LENGTH,
+  MAX_TRANSLATION_VALUE_LENGTH,
+  normalizeLocale,
+} from '../lib/i18n';
 
 interface DiscoveredTheme {
   id: string;
@@ -258,9 +263,13 @@ function scanThemeLocales(packageDir: string): Record<string, Record<string, str
     try {
       const parsed = JSON.parse(readFileSync(join(localesDir, filename), 'utf-8')) as unknown;
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('catalog must be an object');
+      const entries = Object.entries(parsed);
+      if (entries.length > MAX_TRANSLATION_ENTRIES) throw new Error('catalog is too large');
       const messages: Record<string, string> = {};
-      for (const [key, value] of Object.entries(parsed)) {
-        if (!key || typeof value !== 'string') throw new Error(`invalid message ${key}`);
+      for (const [key, value] of entries) {
+        if (!key || key.length > MAX_TRANSLATION_KEY_LENGTH || typeof value !== 'string' || value.length > MAX_TRANSLATION_VALUE_LENGTH) {
+          throw new Error(`invalid message ${key}`);
+        }
         messages[key] = value;
       }
       locales[locale] = messages;

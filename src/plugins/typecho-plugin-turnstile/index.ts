@@ -1,5 +1,7 @@
-import { escapeAttr, fetchWithTimeout, getClientIp, parsePluginOption } from 'typecho/plugin-sdk';
-import type { PluginInitContext } from 'typecho/plugin-sdk';
+import { escapeAttr, fetchWithTimeout, getClientIp, parsePluginOption, safeJsonForScript } from 'typecho/plugin-sdk';
+import type { I18n, PluginInitContext } from 'typecho/plugin-sdk';
+import en from './locales/en.json';
+import zhCN from './locales/zh-CN.json';
 
 interface TurnstileConfig {
   sitekey: string;
@@ -25,6 +27,7 @@ interface VerificationExtra {
   request?: Request;
   isLoggedIn?: boolean;
   skipIfLoggedIn?: boolean;
+  i18n?: I18n;
 }
 
 type CspDirectives = Record<string, string[]>;
@@ -76,7 +79,7 @@ async function verifyTurnstile(token: string, secret: string, remoteIp: string):
   return await resp.json() as TurnstileVerifyResponse;
 }
 
-function buildSnippet(options: Record<string, unknown> | undefined, formId: string): { headHtml: string; bodyHtml: string } {
+function buildSnippet(options: Record<string, unknown> | undefined, formId: string, i18n?: I18n): { headHtml: string; bodyHtml: string } {
   const config = getPluginConfig(options);
   if (!config.sitekey) {
     return { headHtml: '', bodyHtml: '' };
@@ -154,6 +157,11 @@ function buildSnippet(options: Record<string, unknown> | undefined, formId: stri
   const containerIdValue = `typecho-turnstile-${formId}`;
   const containerIdAttr = escapeAttr(containerIdValue);
   const statusIdAttr = escapeAttr(`${containerIdValue}-status`);
+  const messages = safeJsonForScript({
+    loadingTimeout: i18n?.t('plugin.typecho-plugin-turnstile.message.loadingTimeout', undefined, '人机验证加载超时，请检查网络后重试') ?? '人机验证加载超时，请检查网络后重试',
+    loading: i18n?.t('plugin.typecho-plugin-turnstile.message.loading', undefined, '正在加载人机验证，请稍候...') ?? '正在加载人机验证，请稍候...',
+    complete: i18n?.t('plugin.typecho-plugin-turnstile.message.complete', undefined, '请完成人机验证') ?? '请完成人机验证',
+  });
 
   const widgetHtml = `<div class="typecho-turnstile">
 <div
@@ -211,6 +219,7 @@ function buildSnippet(options: Record<string, unknown> | undefined, formId: stri
 (function() {
   var inputName = ${input};
   var containerId = ${JSON.stringify(containerIdValue)};
+  var messages = ${messages};
 
   function getTokenField(form) {
     return form.querySelector('input[name="' + inputName + '"]');
@@ -222,7 +231,7 @@ function buildSnippet(options: Record<string, unknown> | undefined, formId: stri
   }
 
   function resetPending() {
-    window.__typechoTurnstileResetPending("人机验证加载超时，请检查网络后重试");
+    window.__typechoTurnstileResetPending(messages.loadingTimeout);
   }
 
   function initTurnstile() {
@@ -233,7 +242,7 @@ function buildSnippet(options: Record<string, unknown> | undefined, formId: stri
       e.preventDefault();
       var button = form.querySelector('[type="submit"]');
       if (button) button.disabled = true;
-      window.__typechoTurnstileSetStatus(containerId, "正在加载人机验证，请稍候...", "loading");
+      window.__typechoTurnstileSetStatus(containerId, messages.loading, "loading");
       window.__typechoTurnstilePending = {
         form: form,
         inputName: inputName,
@@ -242,7 +251,7 @@ function buildSnippet(options: Record<string, unknown> | undefined, formId: stri
         timer: setTimeout(resetPending, 15000)
       };
       window.__typechoTurnstileReady(function() {
-        window.__typechoTurnstileSetStatus(containerId, "请完成人机验证", "loading");
+        window.__typechoTurnstileSetStatus(containerId, messages.complete, "loading");
         turnstile.execute("#" + containerId);
       });
     });
@@ -267,19 +276,32 @@ async function checkTurnstile(config: TurnstileConfig, extra: VerificationExtra)
 
   const token = extra.formData?.get(config.input)?.toString() || '';
   if (!token) {
-    return '请完成人机验证';
+    return extra.i18n?.t(
+      'plugin.typecho-plugin-turnstile.message.required',
+      undefined,
+      '请完成人机验证',
+    ) ?? '请完成人机验证';
   }
 
   try {
     const result = await verifyTurnstile(token, config.secret, getClientIp(extra.request));
-    return result.success ? null : '人机验证失败';
+    return result.success
+      ? null
+      : extra.i18n?.t('plugin.typecho-plugin-turnstile.message.failed', undefined, '人机验证失败') ?? '人机验证失败';
   } catch (err) {
     console.error('[turnstile] Verification API error:', err);
-    return '验证服务异常，请稍后重试';
+    return extra.i18n?.t(
+      'plugin.typecho-plugin-turnstile.message.serviceError',
+      undefined,
+      '验证服务异常，请稍后重试',
+    ) ?? '验证服务异常，请稍后重试';
   }
 }
 
-export default function init({ addHook, pluginId }: PluginInitContext): void {
+export default function init({ addHook, pluginId, registerTranslations }: PluginInitContext): void {
+  registerTranslations?.('en', en);
+  registerTranslations?.('zh-CN', zhCN);
+
   addHook('csp:directives', pluginId, (directives: CspDirectives) => {
     addCspSource(directives, 'script-src', [
       'https://challenges.cloudflare.com',
@@ -305,25 +327,25 @@ export default function init({ addHook, pluginId }: PluginInitContext): void {
     return commentData;
   });
 
-  addHook('frontend:head', pluginId, (headHtml: string, extra?: { options?: Record<string, unknown>; pageContext?: { hasComments?: boolean } }) => {
+  addHook('frontend:head', pluginId, (headHtml: string, extra?: { options?: Record<string, unknown>; pageContext?: { hasComments?: boolean }; i18n?: I18n }) => {
     if (!extra?.pageContext?.hasComments) return headHtml;
-    const snippet = buildSnippet(extra?.options, 'comment-form');
+    const snippet = buildSnippet(extra?.options, 'comment-form', extra.i18n);
     return headHtml + snippet.headHtml;
   });
 
-  addHook('frontend:footer', pluginId, (bodyHtml: string, extra?: { options?: Record<string, unknown>; pageContext?: { hasComments?: boolean } }) => {
+  addHook('frontend:footer', pluginId, (bodyHtml: string, extra?: { options?: Record<string, unknown>; pageContext?: { hasComments?: boolean }; i18n?: I18n }) => {
     if (!extra?.pageContext?.hasComments) return bodyHtml;
-    const snippet = buildSnippet(extra?.options, 'comment-form');
+    const snippet = buildSnippet(extra?.options, 'comment-form', extra.i18n);
     return bodyHtml + snippet.bodyHtml;
   });
 
-  addHook('admin:login:head', pluginId, (headHtml: string, extra?: { options?: Record<string, unknown> }) => {
-    const snippet = buildSnippet(extra?.options, 'login-form');
+  addHook('admin:login:head', pluginId, (headHtml: string, extra?: { options?: Record<string, unknown>; i18n?: I18n }) => {
+    const snippet = buildSnippet(extra?.options, 'login-form', extra?.i18n);
     return headHtml + snippet.headHtml;
   });
 
-  addHook('admin:login:form', pluginId, (formHtml: string, extra?: { options?: Record<string, unknown> }) => {
-    const snippet = buildSnippet(extra?.options, 'login-form');
+  addHook('admin:login:form', pluginId, (formHtml: string, extra?: { options?: Record<string, unknown>; i18n?: I18n }) => {
+    const snippet = buildSnippet(extra?.options, 'login-form', extra?.i18n);
     return formHtml + snippet.bodyHtml;
   });
 

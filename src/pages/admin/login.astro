@@ -23,8 +23,8 @@ try {
   }
 
   [loginHeadHtml, loginFormHtml] = await Promise.all([
-    applyFilterSafely(ctx, 'admin:login:head', '', { options }),
-    applyFilterSafely(ctx, 'admin:login:form', '', { options }),
+    applyFilterSafely(ctx, 'admin:login:head', '', { options, i18n: ctx.i18n }),
+    applyFilterSafely(ctx, 'admin:login:form', '', { options, i18n: ctx.i18n }),
   ]);
 } catch {
   // DB not initialized - redirect to install
@@ -32,11 +32,11 @@ try {
 }
 
 const cookieHeader = Astro.request.headers.get('cookie');
-const error = getFlashCookieValue(cookieHeader, LOGIN_ERROR_FLASH_COOKIE);
+const error = getFlashCookieValue(cookieHeader, LOGIN_ERROR_FLASH_COOKIE, i18n);
 if (error) {
   Astro.response.headers.append('Set-Cookie', clearFlashCookieHeader(LOGIN_ERROR_FLASH_COOKIE, { path: '/admin/login', request: Astro.request }));
 }
-const notice = getFlashCookieValue(cookieHeader, REGISTER_NOTICE_FLASH_COOKIE);
+const notice = getFlashCookieValue(cookieHeader, REGISTER_NOTICE_FLASH_COOKIE, i18n);
 if (notice) {
   Astro.response.headers.append('Set-Cookie', clearFlashCookieHeader(REGISTER_NOTICE_FLASH_COOKIE, { path: '/admin/login', request: Astro.request }));
 }
@@ -56,7 +56,7 @@ const refererValue = safeAdminRedirectUrl(refererAbsolute, urls.siteUrl || Astro
   <meta charset={options.charset || 'UTF-8'} />
   <meta name="renderer" content="webkit" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>{`登录 - ${options.title}`}</title>
+  <title>{`${i18n.t('admin.page.login', {}, 'Log in')} - ${options.title}`}</title>
   <meta name="robots" content="noindex, nofollow" />
   <link rel="stylesheet" href="/css/normalize.css" />
   {loginHeadHtml && <Fragment set:html={loginHeadHtml} />}
@@ -70,39 +70,39 @@ const refererValue = safeAdminRedirectUrl(refererAbsolute, urls.siteUrl || Astro
       {error && (
         <p class="message error typecho-dismissible">
           {error}
-          <button type="button" class="typecho-notice-close" aria-label="关闭提示">&times;</button>
+          <button type="button" class="typecho-notice-close" aria-label={i18n.t('admin.action.closeNotice', {}, 'Close notice')}>&times;</button>
         </p>
       )}
       {notice && (
         <p class="message success typecho-dismissible">
           {notice}
-          <button type="button" class="typecho-notice-close" aria-label="关闭提示">&times;</button>
+          <button type="button" class="typecho-notice-close" aria-label={i18n.t('admin.action.closeNotice', {}, 'Close notice')}>&times;</button>
         </p>
       )}
       <form action="/api/users/login" method="post" name="login" id="login-form" role="form">
         <p>
-          <label for="name" class="sr-only">用户名</label>
-          <input type="text" id="name" name="name" placeholder="用户名" class="text-l w-100" autofocus required />
+          <label for="name" class="sr-only">{i18n.t('admin.field.username', {}, 'Username')}</label>
+          <input type="text" id="name" name="name" placeholder={i18n.t('admin.field.username', {}, 'Username')} class="text-l w-100" autofocus required />
         </p>
         <p>
-          <label for="password" class="sr-only">密码</label>
-          <input type="password" id="password" name="password" placeholder="密码" class="text-l w-100" required />
+          <label for="password" class="sr-only">{i18n.t('admin.field.password', {}, 'Password')}</label>
+          <input type="password" id="password" name="password" placeholder={i18n.t('admin.field.password', {}, 'Password')} class="text-l w-100" required />
         </p>
         {loginFormHtml && <Fragment set:html={loginFormHtml} />}
         <p class="submit">
-          <button type="submit" class="btn btn-l w-100 primary">登录</button>
+          <button type="submit" class="btn btn-l w-100 primary">{i18n.t('admin.auth.login', {}, 'Log in')}</button>
           <input type="hidden" name="referer" value={refererValue} />
         </p>
         <p>
           <label for="remember">
-            <input type="checkbox" name="remember" class="checkbox" value="1" id="remember" /> 下次自动登录
+            <input type="checkbox" name="remember" class="checkbox" value="1" id="remember" /> {i18n.t('admin.auth.rememberMe', {}, 'Remember me')}
           </label>
         </p>
       </form>
       <p class="more-link">
-        <a href="/admin/forgot-password">忘记密码？</a>
+        <a href="/admin/forgot-password">{i18n.t('admin.auth.forgotPassword', {}, 'Forgot password?')}</a>
         &nbsp;·&nbsp;
-        <a href={urls.siteUrl + '/'}>返回首页</a>
+        <a href={urls.siteUrl + '/'}>{i18n.t('admin.auth.returnHome', {}, 'Return to home')}</a>
       </p>
     </div>
   </div>

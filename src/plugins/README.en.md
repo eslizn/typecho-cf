@@ -133,6 +133,34 @@ export default function init({ addHook, pluginId }: PluginInitContext): void {
 
 ---
 
+## Translations
+
+A plugin can register static catalogs from its `init()` function. Keep the catalogs in the plugin's own `locales/` directory and register them synchronously during initialization:
+
+```ts
+import type { PluginInitContext } from 'typecho/plugin-sdk';
+import en from './locales/en.json';
+import zhCN from './locales/zh-CN.json';
+
+export default function init({ addHook, pluginId, registerTranslations }: PluginInitContext): void {
+  registerTranslations('en', en, 'English');
+  registerTranslations('zh-CN', zhCN, '中文（简体）');
+
+  addHook('frontend:footer', pluginId, (html, extra) => {
+    const label = extra?.i18n?.t('plugin.typecho-plugin-example.label', {}, 'Example');
+    return html + `<span>${label}</span>`; // escape before inserting into HTML
+  });
+}
+```
+
+`registerTranslations(locale, messages, displayName?)` supports new locales, additional keys, full overrides, and partial overrides of core or other plugin keys. Merge order is core catalogs → plugin order in `options.activatedPlugins` → registration-call order within each plugin; a later registration wins for duplicate keys, with no separate translation `priority`. Only active plugins contribute to the global catalog. Missing keys continue through the current locale, language-family, and `en` fallback chain. Prefer the `plugin.<pluginId>.*` namespace; document intentional overrides of system keys.
+
+`extra.i18n` is the request-local translator for the current request. Use `i18n.t(key, variables, fallbackText)` or `i18n.tPlural(...)`. Catalog values are plain text with simple `{name}` / `{count}` interpolation; ICU is not parsed and translations do not carry HTML semantics.
+
+For inline scripts rendered by the server, do not read `navigator.language` or scan the DOM. Inject only a finite message bag resolved for the current request and serialize it with the SDK's `safeJsonForScript()`; the script should use those values directly for prompts.
+
+---
+
 ## Reading Plugin Config
 
 Inside a filter/call handler, read config from the `extra.options` object passed in:

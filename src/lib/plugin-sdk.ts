@@ -19,6 +19,7 @@ export {
   registerPluginRoute,
 } from './plugin';
 export { getClientIp } from './client-ip';
+export { safeJsonForScript } from './escape';
 
 // ── Auth ──
 export { hasPermission, verifyPassword } from './auth';

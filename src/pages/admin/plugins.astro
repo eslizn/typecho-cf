@@ -2,14 +2,15 @@
 import Admin from '@/layouts/Admin.astro';
 import { createContext, requireAuth } from '@/lib/context';
 import { hasPermission, requireAdminCSRF } from '@/lib/auth';
-import { getAvailablePlugins, getPluginCount, getPluginInitFailures, isPluginActive, pluginHasConfig, parseActivatedPlugins } from '@/lib/plugin';
+import { getAvailablePlugins, getPluginCount, getPluginInitFailures, pluginHasConfig, parseActivatedPlugins } from '@/lib/plugin';
+import { createRequestI18n } from '@/lib/i18n-runtime';
 
 const ctx = await createContext(Astro.locals, Astro.request);
 const authCheck = requireAuth(ctx);
 if (authCheck) return authCheck;
 
 if (!hasPermission(ctx.user!.group || 'visitor', 'administrator')) {
-  return new Response('Forbidden', { status: 403 });
+  return new Response(ctx.i18n.t('core.error.forbidden', {}, 'Forbidden'), { status: 403 });
 }
 
 const { options, urls, user, db, csrfToken } = ctx;
@@ -19,7 +20,7 @@ let message = '';
 let messageType = '';
 
 if (Astro.request.method === 'POST') {
-  const csrfError = await requireAdminCSRF(Astro.request, options.secret as string, user!.authCode!, user!.uid);
+  const csrfError = await requireAdminCSRF(Astro.request, options.secret as string, user!.authCode!, user!.uid, ctx.i18n);
   if (csrfError) return csrfError;
   try {
     const formData = await Astro.request.formData();
@@ -31,7 +32,7 @@ if (Astro.request.method === 'POST') {
       const { setOption, deleteOption } = await import('@/lib/options');
 
       if (!pluginExists(pluginId)) {
-        message = `插件 "${pluginId}" 不存在`;
+        message = ctx.i18n.t('admin.plugin.notFound', { id: pluginId }, `Plugin "${pluginId}" does not exist`);
         messageType = 'error';
       } else {
         // Get current activated list
@@ -54,7 +55,7 @@ if (Astro.request.method === 'POST') {
             }
           }
 
-          message = `插件 "${pluginId}" 已启用`;
+          message = ctx.i18n.t('admin.plugin.activated', { id: pluginId }, `Plugin "${pluginId}" enabled`);
           messageType = 'success';
         } else {
           idSet.delete(pluginId);
@@ -63,7 +64,7 @@ if (Astro.request.method === 'POST') {
           await deleteOption(db, `plugin:${pluginId}`);
           delete (options as any)[`plugin:${pluginId}`];
 
-          message = `插件 "${pluginId}" 已禁用`;
+          message = ctx.i18n.t('admin.plugin.deactivated', { id: pluginId }, `Plugin "${pluginId}" disabled`);
           messageType = 'success';
         }
 
@@ -73,6 +74,14 @@ if (Astro.request.method === 'POST') {
         const serialized = JSON.stringify(newIds);
         await setOption(db, 'activatedPlugins', serialized);
         (options as any).activatedPlugins = serialized;
+        // The current response must observe the new active catalog set too;
+        // otherwise a just-deactivated plugin could still translate this
+        // page, while a just-activated plugin would not be visible until the
+        // next request.
+        const runtime = createRequestI18n(options.lang, Astro.request, ctx.activatedPlugins);
+        ctx.i18n = runtime.i18n;
+        ctx.resolvedLocale = runtime.resolvedLocale;
+        ctx.autoLocale = runtime.autoLocale;
 
         // Bump cache version so public pages and other isolates see plugin changes.
         const { bumpCacheVersion, purgeSiteCache } = await import('@/lib/cache');
@@ -81,7 +90,7 @@ if (Astro.request.method === 'POST') {
       }
     }
   } catch (e) {
-    message = '操作失败';
+    message = ctx.i18n.t('admin.error.operationFailed', {}, 'Operation failed');
     messageType = 'error';
   }
 }
@@ -89,39 +98,45 @@ if (Astro.request.method === 'POST') {
 const plugins = getAvailablePlugins(ctx);
 const pluginCount = getPluginCount();
 const initFailures = getPluginInitFailures();
+const pluginName = (plugin: typeof plugins[number]): string => plugin.isActive
+  ? ctx.i18n.t(`plugin.${plugin.id}.name`, {}, plugin.manifest.name || plugin.id)
+  : (plugin.manifest.name || plugin.id);
+const pluginDescription = (plugin: typeof plugins[number]): string => plugin.isActive
+  ? ctx.i18n.t(`plugin.${plugin.id}.description`, {}, plugin.manifest.description || '')
+  : (plugin.manifest.description || '');
 ---
-<Admin title="插件管理" options={options} urls={urls} user={user} activeMenu="plugins" pluginCtx={ctx}>
+<Admin title={ctx.i18n.t('admin.page.plugins', {}, 'Plugin management')} options={options} urls={urls} user={user} activeMenu="plugins" pluginCtx={ctx}>
   <div class="col-mb-12" role="main">
     {message && (
       <div class={`typecho-option-tabs notice typecho-dismissible ${messageType === 'error' ? 'notice-error' : 'notice-success'}`}
         style={`padding: 10px 15px; margin-bottom: 20px; border-radius: 3px; ${messageType === 'error' ? 'background: #ffeaea; color: #c33;' : 'background: #e7f5e7; color: #3a3;'}`}>
         <p>{message}</p>
-        <button type="button" class="typecho-notice-close" aria-label="关闭提示">&times;</button>
+        <button type="button" class="typecho-notice-close" aria-label={ctx.i18n.t('admin.action.closeNotice', {}, 'Close notice')}>&times;</button>
       </div>
     )}
     {Object.keys(initFailures).length > 0 && (
       <div class="typecho-option-tabs notice notice-error typecho-dismissible"
         style="padding: 10px 15px; margin-bottom: 20px; border-radius: 3px; background: #ffeaea; color: #c33;">
-        <p>以下已启用插件初始化失败（将按退避策略重试）：</p>
+        <p>{ctx.i18n.t('admin.plugin.initializationFailed', {}, 'The following active plugins failed to initialize (they will be retried):')}</p>
         <ul>
           {Object.entries(initFailures).map(([id, failure]) => (
-            <li><code>{id}</code>：{failure.error}（attempts={failure.attempts}）</li>
+            <li><code>{id}</code>: {failure.error} ({ctx.i18n.t('admin.plugin.attempts', { count: failure.attempts }, 'attempts: {count}')})</li>
           ))}
         </ul>
-        <button type="button" class="typecho-notice-close" aria-label="关闭提示">&times;</button>
+        <button type="button" class="typecho-notice-close" aria-label={ctx.i18n.t('admin.action.closeNotice', {}, 'Close notice')}>&times;</button>
       </div>
     )}
 
     {pluginCount === 0 ? (
       <div class="typecho-mini-panel" style="text-align: center; padding: 40px 20px;">
-        <h3>暂无插件</h3>
+        <h3>{ctx.i18n.t('admin.notice.noPlugins', {}, 'No plugins')}</h3>
       </div>
     ) : (
       <>
 
         <div class="typecho-list-operate clearfix">
           <div class="operate">
-            <span>已发现 {pluginCount} 个插件</span>
+            <span>{ctx.i18n.t('admin.status.discovered', { count: pluginCount }, '{count} items found')}</span>
           </div>
         </div>
 
@@ -135,10 +150,10 @@ const initFailures = getPluginInitFailures();
             </colgroup>
             <thead>
               <tr>
-                <th>插件</th>
-                <th>描述</th>
-                <th>版本</th>
-                <th>操作</th>
+                <th>{ctx.i18n.t('admin.plugin.table', {}, 'Plugin')}</th>
+                <th>{ctx.i18n.t('admin.field.description', {}, 'Description')}</th>
+                <th>{ctx.i18n.t('admin.field.version', {}, 'Version')}</th>
+                <th>{ctx.i18n.t('admin.action.actions', {}, 'Actions')}</th>
               </tr>
             </thead>
             <tbody>
@@ -148,22 +163,22 @@ const initFailures = getPluginInitFailures();
                     <strong>
                       {plugin.manifest.homepage ? (
                         <a href={plugin.manifest.homepage} target="_blank" rel="noopener noreferrer">
-                          {plugin.manifest.name || plugin.id}
+                          {pluginName(plugin)}
                         </a>
                       ) : (
-                        plugin.manifest.name || plugin.id
+                        pluginName(plugin)
                       )}
                     </strong>
                     {plugin.isActive && (
                       <span style="margin-left: 8px; background: #467B96; color: white; padding: 1px 8px; border-radius: 3px; font-size: 11px;">
-                        已启用
+                        {ctx.i18n.t('admin.status.enabled', {}, 'Enabled')}
                       </span>
                     )}
                     <br />
                     <small style="color: #999;">
                       {plugin.manifest.author && (
                         <span>
-                          作者: {plugin.manifest.authorUrl ? (
+                          {ctx.i18n.t('admin.theme.author', {}, 'Author')}: {plugin.manifest.authorUrl ? (
                             <a href={plugin.manifest.authorUrl} target="_blank" rel="noopener noreferrer">{plugin.manifest.author}</a>
                           ) : (
                             plugin.manifest.author
@@ -175,7 +190,7 @@ const initFailures = getPluginInitFailures();
                   </td>
                   <td>
                     <span class="description">
-                      {plugin.manifest.description || '暂无描述'}
+                      {pluginDescription(plugin) || ctx.i18n.t('admin.status.noDescription', {}, 'No description')}
                     </span>
                   </td>
                   <td>
@@ -189,17 +204,17 @@ const initFailures = getPluginInitFailures();
                         <>
                           {pluginHasConfig(plugin.id) && (
                             <>
-                              <a href={`/admin/plugin-config?id=${plugin.id}`}>设置</a>
+                              <a href={`/admin/plugin-config?id=${plugin.id}`}>{ctx.i18n.t('admin.action.settings', {}, 'Settings')}</a>
                               {' · '}
                             </>
                           )}
                           <input type="hidden" name="action" value="deactivate" />
-                          <button type="submit" class="btn btn-s">禁用</button>
+                          <button type="submit" class="btn btn-s">{ctx.i18n.t('admin.action.disable', {}, 'Disable')}</button>
                         </>
                       ) : (
                         <>
                           <input type="hidden" name="action" value="activate" />
-                          <button type="submit" class="btn btn-s primary">启用</button>
+                          <button type="submit" class="btn btn-s primary">{ctx.i18n.t('admin.action.enable', {}, 'Enable')}</button>
                         </>
                       )}
                     </form>

@@ -63,6 +63,22 @@ export function getRequestCoreContextFromLocals(locals: App.Locals): RequestCore
   return (locals as InternalLocals)._typechoCore;
 }
 
+/** Resolve a translator for API routes that may be invoked without middleware
+ * (for example, isolated endpoint tests or direct adapter calls). */
+export function getRequestI18n(
+  request: Request,
+  options: SiteOptions,
+  activePluginIds: Iterable<string> = [],
+): I18n {
+  const core = getRequestCoreContext(request);
+  if (core) return core.i18n;
+  return createRequestI18n(
+    typeof options.lang === 'string' ? options.lang : 'zh_CN',
+    request,
+    activePluginIds,
+  ).i18n;
+}
+
 /**
  * Create request context from Astro locals
  */
@@ -199,7 +215,7 @@ export function requirePermission(ctx: RequestContext, group: string, strict = f
   }
 
   if (!hasPermission(ctx.user.group || 'visitor', group, strict)) {
-    return new Response('Forbidden', { status: 403 });
+    return new Response(ctx.i18n.t('core.error.forbidden', {}, 'Forbidden'), { status: 403 });
   }
   return null;
 }

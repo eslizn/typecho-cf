@@ -9,7 +9,7 @@ const authCheck = requireAuth(ctx);
 if (authCheck) return authCheck;
 
 if (!hasPermission(ctx.user!.group || 'visitor', 'administrator')) {
-  return new Response('Forbidden', { status: 403 });
+  return new Response(ctx.i18n.t('core.error.forbidden', {}, 'Forbidden'), { status: 403 });
 }
 
 const { options, urls, user, csrfToken } = ctx!;
@@ -22,16 +22,20 @@ const pageContent = await applyFilterSafely(ctx, 'admin:page', '', {
   user,
   csrfToken,
   request: Astro.request,
+  i18n: ctx.i18n,
+  resolvedLocale: ctx.resolvedLocale,
 });
 ---
 
-<Admin title={slug === 'webdav' ? 'WebDAV' : (slug ? `${slug} 插件页面` : '插件页面')} options={options} urls={urls} user={user!} activeMenu={slug ?? 'plugins'} pluginCtx={ctx}>
+<Admin title={slug === 'webdav' ? 'WebDAV' : (slug
+  ? ctx.i18n.t('admin.plugin.pageTitle', { slug }, `${slug} plugin page`)
+  : ctx.i18n.t('admin.page.pluginPage', {}, 'Plugin page'))} options={options} urls={urls} user={user!} activeMenu={slug ?? 'plugins'} pluginCtx={ctx}>
   {pageContent ? (
     <Fragment set:html={pageContent} />
   ) : (
     <div class="col-mb-12" style="padding:2em;text-align:center;color:#999">
-      <p>未找到插件页面 "{slug}"</p>
-      <p style="font-size:.92857em">请确认对应插件已启用。</p>
+      <p>{ctx.i18n.t('admin.plugin.pageNotFound', { slug: slug || '' }, 'Plugin page "{slug}" was not found')}</p>
+      <p style="font-size:.92857em">{ctx.i18n.t('admin.plugin.enableHint', {}, 'Make sure the corresponding plugin is enabled.')}</p>
     </div>
   )}
 </Admin>

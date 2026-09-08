@@ -10,6 +10,7 @@ import Admin from '@/layouts/Admin.astro';
 import { createContext, requireAuth } from '@/lib/context';
 import { hasPermission } from '@/lib/auth';
 import { getTheme, themeHasConfig } from '@/lib/theme';
+import { createThemeI18n } from '@/lib/theme';
 import { getThemeConfigurationView } from '@/lib/theme-config';
 import ConfigForm from '@/components/admin/ConfigForm.astro';
 
@@ -18,7 +19,7 @@ const authCheck = requireAuth(ctx);
 if (authCheck) return authCheck;
 
 if (!hasPermission(ctx.user!.group || 'visitor', 'administrator')) {
-  return new Response('Forbidden', { status: 403 });
+  return new Response(ctx.i18n.t('core.error.forbidden', {}, 'Forbidden'), { status: 403 });
 }
 
 const { options, urls, user, csrfToken } = ctx;
@@ -36,9 +37,12 @@ const manifest = theme.manifest;
 const configuration = getThemeConfigurationView(options, themeId);
 const configDef = configuration.fields;
 const configValues = configuration.values;
-const message = Astro.url.searchParams.get('saved') === '1' ? '主题设置已经保存' : '';
+const themeI18n = createThemeI18n(themeId, ctx.i18n, ctx.activatedPlugins);
+const message = Astro.url.searchParams.get('saved') === '1'
+  ? ctx.i18n.t('admin.config.themeSaved', {}, 'Theme settings saved')
+  : '';
 
-const pageTitle = `设置主题 ${manifest.name || themeId}`;
+const pageTitle = ctx.i18n.t('admin.config.themeTitle', { name: manifest.name || themeId }, `Theme settings: ${manifest.name || themeId}`);
 ---
 <Admin title={pageTitle} options={options} urls={urls} user={user} activeMenu="themes" pluginCtx={ctx}>
   <ConfigForm
@@ -50,6 +54,7 @@ const pageTitle = `设置主题 ${manifest.name || themeId}`;
     configValues={configValues}
     message={message}
     backHref="/admin/themes"
-    backLabel="返回主题列表"
+    backLabel={ctx.i18n.t('admin.config.backThemes', {}, 'Back to themes')}
+    i18n={themeI18n}
   />
 </Admin>

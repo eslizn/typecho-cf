@@ -1,9 +1,11 @@
 import type { APIRoute } from 'astro';
 import { schema } from '@/db';
-import { isAdminActionResponse, requireAdminAction } from '@/lib/admin-auth';
+import { isAdminActionResponse, jsonAdminActionError, requireAdminAction } from '@/lib/admin-auth';
 import { resolveUniqueMetaSlug } from '@/lib/slug';
 import { bumpCacheVersion, purgeSiteCache } from '@/lib/cache';
 import { readAdminFormOrError } from '@/lib/input';
+import { i18nMessage } from '@/lib/i18n';
+import { jsonError, textError } from '@/lib/http';
 import { eq, and, sql } from 'drizzle-orm';
 
 type MetaType = 'category' | 'tag';
@@ -18,11 +20,11 @@ export const POST: APIRoute = handler;
 // GET only for reading (JSON list for autocomplete), never for state changes
 export const GET: APIRoute = async ({ request, url }) => {
   const auth = await requireAdminAction(request, 'editor', { csrf: false });
-  if (isAdminActionResponse(auth)) return auth;
+  if (isAdminActionResponse(auth)) return jsonAdminActionError(request, auth);
 
   const type = parseMetaType(url.searchParams.get('type') || 'category');
   if (!type) {
-    return new Response('Invalid meta type', { status: 400 });
+    return jsonError(400, i18nMessage('admin.meta.invalidType', 'Invalid metadata type.'), undefined, auth.i18n);
   }
 
   const metas = await auth.db.select({
@@ -46,7 +48,7 @@ async function handler({ request, url }: { request: Request; locals: App.Locals;
   const db = auth.db;
   const options = auth.options;
 
-  const formData = await readAdminFormOrError(request);
+  const formData = await readAdminFormOrError(request, undefined, auth.i18n);
   if (formData instanceof Response) return formData;
 
   const action = formData.get('action')?.toString() || url.searchParams.get('action') || '';
@@ -54,8 +56,11 @@ async function handler({ request, url }: { request: Request; locals: App.Locals;
     formData.get('type')?.toString() || url.searchParams.get('type') || 'category',
   );
   if (!type) {
-    return new Response('Invalid meta type', { status: 400 });
+    return textError(400, i18nMessage('admin.meta.invalidType', 'Invalid metadata type.'), undefined, auth.i18n);
   }
+
+  const error = (status: number, key: string, variables: Record<string, string | number> = {}, fallback = key) =>
+    textError(status, i18nMessage(key, fallback, variables), undefined, auth.i18n);
 
   const mid = parseInt(formData.get('mid')?.toString() || url.searchParams.get('mid') || '0', 10);
   const name = formData.get('name')?.toString()?.trim() || '';
@@ -66,7 +71,7 @@ async function handler({ request, url }: { request: Request; locals: App.Locals;
   const redirectTo = type === 'tag' ? '/admin/manage-tags' : '/admin/manage-categories';
 
   if (action === 'create') {
-    if (!name) return new Response('名称不能为空', { status: 400 });
+    if (!name) return error(400, 'admin.meta.nameRequired', {}, 'Name is required.');
     const finalSlug = await resolveUniqueMetaSlug(db, slug, type, 0, name);
 
     await db.insert(schema.metas).values({
@@ -84,12 +89,12 @@ async function handler({ request, url }: { request: Request; locals: App.Locals;
   }
 
   if (action === 'update' && mid) {
-    if (!name) return new Response('名称不能为空', { status: 400 });
+    if (!name) return error(400, 'admin.meta.nameRequired', {}, 'Name is required.');
     const existing = await db.query.metas.findFirst({
       where: and(eq(schema.metas.mid, mid), eq(schema.metas.type, type)),
     });
     if (!existing) {
-      return new Response('元数据不存在或类型不匹配', { status: 404 });
+      return error(404, 'admin.meta.notFound', {}, 'The metadata does not exist or has a different type.');
     }
     const finalSlug = await resolveUniqueMetaSlug(db, slug, type, mid, name);
 
@@ -114,7 +119,7 @@ async function handler({ request, url }: { request: Request; locals: App.Locals;
       const defaultMid = parseInt(String(options.defaultCategory ?? '0'), 10);
       for (const id of deleteIds) {
         if (id === defaultMid) {
-          return new Response('不能删除默认分类，请先指定其他分类为默认', { status: 400 });
+          return error(400, 'admin.meta.defaultCategoryProtected', {}, 'The default category cannot be deleted. Choose another default category first.');
         }
       }
       const used = await db.select({ mid: schema.relationships.mid })
@@ -123,7 +128,7 @@ async function handler({ request, url }: { request: Request; locals: App.Locals;
       if (used.length > 0) {
         const inUseSet = new Set(used.map(r => r.mid));
         const targets = deleteIds.filter(id => inUseSet.has(id));
-        return new Response(`分类 #${targets.join(', #')} 下仍有文章，请先迁移内容`, { status: 400 });
+        return error(400, 'admin.meta.categoryHasPosts', { ids: targets.join(', #') }, 'Category #{ids} still contains posts. Move the content first.');
       }
     }
 
@@ -142,7 +147,7 @@ async function handler({ request, url }: { request: Request; locals: App.Locals;
       where: and(eq(schema.metas.mid, mid), eq(schema.metas.type, 'category')),
     });
     if (!existing) {
-      return new Response('分类不存在', { status: 404 });
+      return error(404, 'admin.meta.categoryNotFound', {}, 'The category does not exist.');
     }
     const { setOption } = await import('@/lib/options');
     await setOption(db, 'defaultCategory', String(mid));
@@ -184,5 +189,5 @@ async function handler({ request, url }: { request: Request; locals: App.Locals;
     return new Response(null, { status: 302, headers: { Location: redirectTo } });
   }
 
-  return new Response('Invalid action', { status: 400 });
+  return error(400, 'admin.error.invalidAction', {}, 'Invalid action.');
 }

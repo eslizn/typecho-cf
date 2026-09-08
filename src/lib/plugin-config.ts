@@ -106,6 +106,11 @@ export async function savePluginConfiguration(
   const restored = restoreSecrets(fields, sanitized, previous);
 
   let validation: { success?: boolean; settings?: Record<string, unknown>; error?: string };
+  const validationFallback = auth.i18n.t(
+    'admin.config.validationFailed',
+    {},
+    'Plugin configuration validation failed.',
+  );
   try {
     validation = await withTimeout(
       applyFilter(auth.pluginCtx, 'plugin:config:beforeSave', {
@@ -118,21 +123,26 @@ export async function savePluginConfiguration(
         options: auth.options,
         user: auth.user,
         request: input.request,
+        i18n: auth.i18n,
       }),
       PLUGIN_CONFIG_TIMEOUT_MS,
-      '插件配置校验超时，请稍后重试',
+      auth.i18n.t(
+        'admin.config.validationTimeout',
+        {},
+        'Plugin configuration validation timed out. Try again later.',
+      ),
     );
   } catch (error) {
     throw new PluginConfigurationError(
       'validation_failed',
-      error instanceof Error ? error.message : '插件配置校验失败',
+      error instanceof Error ? error.message : validationFallback,
     );
   }
 
   if (!validation?.success) {
     throw new PluginConfigurationError(
       'validation_failed',
-      validation?.error || '插件配置校验失败',
+      validation?.error || validationFallback,
     );
   }
 
@@ -144,7 +154,7 @@ export async function savePluginConfiguration(
 
   return {
     success: true,
-    message: '插件设置已经保存',
+    message: auth.i18n.t('admin.config.pluginSaved', {}, 'Plugin settings saved'),
     plugin: pluginId,
     settings: maskValues(fields, finalSettings),
   };

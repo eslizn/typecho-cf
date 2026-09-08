@@ -22,12 +22,18 @@ export interface ConfigField {
   type: 'text' | 'textarea' | 'select' | 'radio' | 'checkbox' | 'password' | 'hidden' | 'repeatable';
   /** Display label */
   label: string;
+  /** Optional explicit translation key; convention-based keys are used otherwise. */
+  labelKey?: string;
   /** Help text / description shown below the field */
   description?: string;
+  /** Optional explicit translation key; convention-based keys are used otherwise. */
+  descriptionKey?: string;
   /** Default value */
   default?: unknown;
   /** Options for select / radio / checkbox: { value: label } */
   options?: Record<string, string>;
+  /** Optional explicit translation keys for option labels, keyed by option value. */
+  optionKeys?: Record<string, string>;
   /** Dynamic option source for select fields */
   optionsSource?: 'r2Bindings';
   /** Conditional visibility inside repeatable config groups */

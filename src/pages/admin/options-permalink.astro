@@ -8,17 +8,17 @@ const authCheck = requireAuth(ctx);
 if (authCheck) return authCheck;
 
 if (!hasPermission(ctx.user!.group || 'visitor', 'administrator')) {
-  return new Response('Forbidden', { status: 403 });
+  return new Response(ctx.i18n.t('core.error.forbidden', {}, 'Forbidden'), { status: 403 });
 }
 
 const { options, urls, user, csrfToken } = ctx;
 
 // Typecho post permalink patterns
 const postPatterns = [
-  { value: '/archives/{cid}/', label: '默认风格', example: '/archives/1/' },
-  { value: '/archives/{slug}.html', label: '文件名风格', example: '/archives/hello-world.html' },
-  { value: '/{year}/{month}/{day}/{slug}.html', label: '日期和文件名风格', example: '/2026/03/23/hello-world.html' },
-  { value: '/{category}/{slug}.html', label: '分类和文件名风格', example: '/coding/hello-world.html' },
+  { value: '/archives/{cid}/', labelKey: 'admin.permalink.defaultStyle', example: '/archives/1/' },
+  { value: '/archives/{slug}.html', labelKey: 'admin.permalink.filenameStyle', example: '/archives/hello-world.html' },
+  { value: '/{year}/{month}/{day}/{slug}.html', labelKey: 'admin.permalink.dateFilenameStyle', example: '/2026/03/23/hello-world.html' },
+  { value: '/{category}/{slug}.html', labelKey: 'admin.permalink.categoryFilenameStyle', example: '/coding/hello-world.html' },
 ];
 
 const currentPostPattern = options.permalinkPattern || '/archives/{cid}/';
@@ -27,13 +27,13 @@ const isCustomPost = !postPatterns.some(p => p.value === currentPostPattern);
 const currentPagePattern = (options.pagePattern as string) || '/{slug}';
 const currentCategoryPattern = (options.categoryPattern as string) || '/category/{slug}/';
 ---
-<Admin title="永久链接设置" options={options} urls={urls} user={user} activeMenu="options-permalink" pluginCtx={ctx}>
+<Admin title={ctx.i18n.t('admin.page.permalinkOptions', {}, 'Permalink settings')} options={options} urls={urls} user={user} activeMenu="options-permalink" pluginCtx={ctx}>
   <div class="col-mb-12 col-tb-8 col-tb-offset-2" role="form">
     <form method="post" action="/api/admin/options">
       <input type="hidden" name="_" value={csrfToken} />
       <ul class="typecho-option">
         <li>
-          <label class="typecho-label">自定义文章路径</label>
+          <label class="typecho-label">{ctx.i18n.t('admin.field.customPostPath', {}, 'Custom post path')}</label>
           <div>
             {postPatterns.map((p) => (
               <p>
@@ -41,7 +41,7 @@ const currentCategoryPattern = (options.categoryPattern as string) || '/category
                   id={`post-pattern-${p.value}`}
                   checked={currentPostPattern === p.value} />
                 <label for={`post-pattern-${p.value}`}>
-                  {p.label}: <code>{p.example}</code>
+                  {ctx.i18n.t(p.labelKey, {}, p.labelKey)}: <code>{p.example}</code>
                 </label>
               </p>
             ))}
@@ -49,44 +49,44 @@ const currentCategoryPattern = (options.categoryPattern as string) || '/category
               <input type="radio" name="permalinkPattern" value="custom"
                 id="post-pattern-custom"
                 checked={isCustomPost} />
-              <label for="post-pattern-custom">自定义:</label>
+              <label for="post-pattern-custom">{ctx.i18n.t('admin.permalink.custom', {}, 'Custom')}:</label>
               <input type="text" name="customPattern" class="text mono"
                 value={isCustomPost ? currentPostPattern : ''} style="width: 300px;" />
             </p>
           </div>
           <p class="description">
-            可用变量: <code>{'{cid}'}</code> 文章 ID, <code>{'{slug}'}</code> 缩略名,
-            <code>{'{category}'}</code> 分类, <code>{'{year}'}</code> 年,
-            <code>{'{month}'}</code> 月, <code>{'{day}'}</code> 日
+            {ctx.i18n.t('admin.permalink.variables', {}, 'Available variables:')} <code>{'{cid}'}</code> {ctx.i18n.t('admin.permalink.articleId', {}, 'post ID')}, <code>{'{slug}'}</code> {ctx.i18n.t('admin.field.slug', {}, 'slug')},
+            <code>{'{category}'}</code> {ctx.i18n.t('admin.permalink.category', {}, 'category')}, <code>{'{year}'}</code> {ctx.i18n.t('admin.permalink.year', {}, 'year')},
+            <code>{'{month}'}</code> {ctx.i18n.t('admin.permalink.month', {}, 'month')}, <code>{'{day}'}</code> {ctx.i18n.t('admin.permalink.day', {}, 'day')}
           </p>
         </li>
       </ul>
 
       <ul class="typecho-option">
         <li>
-          <label class="typecho-label" for="pagePattern">独立页面路径</label>
+          <label class="typecho-label" for="pagePattern">{ctx.i18n.t('admin.field.pagePath', {}, 'Page path')}</label>
           <input type="text" name="pagePattern" id="pagePattern" class="text mono"
             value={currentPagePattern} style="width: 300px;" />
           <p class="description">
-            可用变量: <code>{'{slug}'}</code> 缩略名, <code>{'{cid}'}</code> 页面 ID
+            {ctx.i18n.t('admin.permalink.variables', {}, 'Available variables:')} <code>{'{slug}'}</code> {ctx.i18n.t('admin.field.slug', {}, 'slug')}, <code>{'{cid}'}</code> {ctx.i18n.t('admin.permalink.pageId', {}, 'page ID')}
           </p>
         </li>
       </ul>
 
       <ul class="typecho-option">
         <li>
-          <label class="typecho-label" for="categoryPattern">分类路径</label>
+          <label class="typecho-label" for="categoryPattern">{ctx.i18n.t('admin.field.categoryPath', {}, 'Category path')}</label>
           <input type="text" name="categoryPattern" id="categoryPattern" class="text mono"
             value={currentCategoryPattern} style="width: 300px;" />
           <p class="description">
-            可用变量: <code>{'{slug}'}</code> 分类缩略名, <code>{'{mid}'}</code> 分类 ID
+            {ctx.i18n.t('admin.permalink.variables', {}, 'Available variables:')} <code>{'{slug}'}</code> {ctx.i18n.t('admin.field.slug', {}, 'slug')}, <code>{'{mid}'}</code> {ctx.i18n.t('admin.permalink.categoryId', {}, 'category ID')}
           </p>
         </li>
       </ul>
 
       <ul class="typecho-option typecho-option-submit">
         <li>
-          <button type="submit" class="btn primary">保存设置</button>
+          <button type="submit" class="btn primary">{ctx.i18n.t('admin.action.save', {}, 'Save settings')}</button>
         </li>
       </ul>
     </form>

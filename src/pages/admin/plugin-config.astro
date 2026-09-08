@@ -22,7 +22,7 @@ const authCheck = requireAuth(ctx);
 if (authCheck) return authCheck;
 
 if (!hasPermission(ctx.user!.group || 'visitor', 'administrator')) {
-  return new Response('Forbidden', { status: 403 });
+  return new Response(ctx.i18n.t('core.error.forbidden', {}, 'Forbidden'), { status: 403 });
 }
 
 const { options, urls, user, csrfToken } = ctx;
@@ -44,9 +44,12 @@ const manifest = plugin.manifest;
 const configuration = getPluginConfigurationView(options, pluginId);
 const configDef = configuration.fields;
 const configValues = configuration.values;
-const message = Astro.url.searchParams.get('saved') === '1' ? '插件设置已经保存' : '';
+const pluginDisplayName = ctx.i18n.t(`plugin.${plugin.id}.name`, {}, manifest.name || pluginId);
+const message = Astro.url.searchParams.get('saved') === '1'
+  ? ctx.i18n.t('admin.config.pluginSaved', {}, 'Plugin settings saved')
+  : '';
 
-const pageTitle = `设置插件 ${manifest.name || pluginId}`;
+const pageTitle = ctx.i18n.t('admin.config.pluginTitle', { name: pluginDisplayName }, `Plugin settings: ${pluginDisplayName}`);
 ---
 <Admin title={pageTitle} options={options} urls={urls} user={user} activeMenu="plugins" pluginCtx={ctx}>
   <ConfigForm
@@ -58,6 +61,7 @@ const pageTitle = `设置插件 ${manifest.name || pluginId}`;
     configValues={configValues}
     message={message}
     backHref="/admin/plugins"
-    backLabel="返回插件列表"
+    backLabel={ctx.i18n.t('admin.config.backPlugins', {}, 'Back to plugins')}
+    i18n={ctx.i18n}
   />
 </Admin>

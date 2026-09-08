@@ -28,7 +28,7 @@ describe('Paperline search control', () => {
     for (const component of headerComponents) {
       const template = readFileSync(join(themeRoot, 'components', component), 'utf8');
 
-      expect(template).toContain('aria-label="搜索"');
+      expect(template).toContain("theme.search.submit");
       expect(template).toContain('<svg class="search-icon"');
     }
   });

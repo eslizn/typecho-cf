@@ -6,6 +6,7 @@ import { hasPermission } from '@/lib/auth';
 import { applyFilterSafely, doHook, type HookContext } from '@/lib/plugin';
 import { clearAdminFlash, readAdminFlash } from '@/lib/admin-flash';
 import type { I18n } from '@/lib/i18n';
+import { safeJsonForScript } from '@/lib/escape';
 
 interface Props {
   title: string;
@@ -22,6 +23,8 @@ const { title, options, urls, user, activeMenu, bodyClass, pluginCtx, i18n } = A
 const _pluginCtx: HookContext = pluginCtx ?? { activatedPlugins: new Set<string>() };
 const pageI18n = i18n ?? pluginCtx?.i18n;
 const documentLocale = pageI18n?.locale || (options.lang === 'zh_CN' ? 'zh-CN' : 'en');
+const t = (key: string, variables: Record<string, string | number> = {}, fallback = key): string =>
+  pageI18n?.t(key, variables, fallback) ?? fallback;
 
 const userGroup = user?.group || 'visitor';
 const isAdmin = hasPermission(userGroup, 'administrator');
@@ -44,44 +47,44 @@ interface AdminMenuGroup {
 // Typecho 原版菜单结构：嵌套的 ul.root > li.parent + ul.child
 const menuGroups: AdminMenuGroup[] = [
   {
-    label: '控制台',
+    label: t('admin.menu.dashboard', {}, 'Dashboard'),
     show: isContributor,
     children: [
-      { label: '概览', href: '/admin/', active: activeMenu === 'dashboard', show: isContributor },
-      { label: '个人设置', href: '/admin/profile', active: activeMenu === 'profile', show: true },
-      { label: '插件', href: '/admin/plugins', active: activeMenu === 'plugins', show: isAdmin },
-      { label: '外观', href: '/admin/themes', active: activeMenu === 'themes', show: isAdmin },
+      { label: t('admin.menu.overview', {}, 'Overview'), href: '/admin/', active: activeMenu === 'dashboard', show: isContributor },
+      { label: t('admin.menu.profile', {}, 'Profile'), href: '/admin/profile', active: activeMenu === 'profile', show: true },
+      { label: t('admin.menu.plugins', {}, 'Plugins'), href: '/admin/plugins', active: activeMenu === 'plugins', show: isAdmin },
+      { label: t('admin.menu.themes', {}, 'Appearance'), href: '/admin/themes', active: activeMenu === 'themes', show: isAdmin },
     ],
   },
   {
-    label: '撰写',
+    label: t('admin.menu.write', {}, 'Write'),
     show: isContributor,
     children: [
-      { label: '撰写文章', href: '/admin/write-post', active: activeMenu === 'write-post', show: isContributor },
-      { label: '创建页面', href: '/admin/write-page', active: activeMenu === 'write-page', show: isEditor },
+      { label: t('admin.menu.writePost', {}, 'Write post'), href: '/admin/write-post', active: activeMenu === 'write-post', show: isContributor },
+      { label: t('admin.menu.writePage', {}, 'Create page'), href: '/admin/write-page', active: activeMenu === 'write-page', show: isEditor },
     ],
   },
   {
-    label: '管理',
+    label: t('admin.menu.manage', {}, 'Manage'),
     show: isContributor,
     children: [
-      { label: '文章', href: '/admin/manage-posts', active: activeMenu === 'manage-posts', show: isContributor },
-      { label: '独立页面', href: '/admin/manage-pages', active: activeMenu === 'manage-pages', show: isEditor },
-      { label: '评论', href: '/admin/manage-comments', active: activeMenu === 'manage-comments', show: isContributor },
-      { label: '分类', href: '/admin/manage-categories', active: activeMenu === 'manage-categories', show: isEditor },
-      { label: '标签', href: '/admin/manage-tags', active: activeMenu === 'manage-tags', show: isEditor },
-      { label: '文件', href: '/admin/manage-medias', active: activeMenu === 'manage-medias', show: isEditor },
-      { label: '用户', href: '/admin/manage-users', active: activeMenu === 'manage-users', show: isAdmin },
+      { label: t('admin.menu.posts', {}, 'Posts'), href: '/admin/manage-posts', active: activeMenu === 'manage-posts', show: isContributor },
+      { label: t('admin.menu.pages', {}, 'Pages'), href: '/admin/manage-pages', active: activeMenu === 'manage-pages', show: isEditor },
+      { label: t('admin.menu.comments', {}, 'Comments'), href: '/admin/manage-comments', active: activeMenu === 'manage-comments', show: isContributor },
+      { label: t('admin.menu.categories', {}, 'Categories'), href: '/admin/manage-categories', active: activeMenu === 'manage-categories', show: isEditor },
+      { label: t('admin.menu.tags', {}, 'Tags'), href: '/admin/manage-tags', active: activeMenu === 'manage-tags', show: isEditor },
+      { label: t('admin.menu.medias', {}, 'Media'), href: '/admin/manage-medias', active: activeMenu === 'manage-medias', show: isEditor },
+      { label: t('admin.menu.users', {}, 'Users'), href: '/admin/manage-users', active: activeMenu === 'manage-users', show: isAdmin },
     ],
   },
   {
-    label: '设置',
+    label: t('admin.menu.settings', {}, 'Settings'),
     show: isAdmin,
     children: [
-      { label: '基本', href: '/admin/options-general', active: activeMenu === 'options', show: isAdmin },
-      { label: '评论', href: '/admin/options-discussion', active: activeMenu === 'options-discussion', show: isAdmin },
-      { label: '阅读', href: '/admin/options-reading', active: activeMenu === 'options-reading', show: isAdmin },
-      { label: '永久链接', href: '/admin/options-permalink', active: activeMenu === 'options-permalink', show: isAdmin },
+      { label: t('admin.menu.general', {}, 'General'), href: '/admin/options-general', active: activeMenu === 'options', show: isAdmin },
+      { label: t('admin.menu.discussion', {}, 'Discussion'), href: '/admin/options-discussion', active: activeMenu === 'options-discussion', show: isAdmin },
+      { label: t('admin.menu.reading', {}, 'Reading'), href: '/admin/options-reading', active: activeMenu === 'options-reading', show: isAdmin },
+      { label: t('admin.menu.permalink', {}, 'Permalinks'), href: '/admin/options-permalink', active: activeMenu === 'options-permalink', show: isAdmin },
     ],
   },
 ];
@@ -157,6 +160,11 @@ const adminFooterHtml = await applyFilterSafely(_pluginCtx, 'admin:footer', '', 
 const flashError = user ? await readAdminFlash(Astro.request, options, user.uid, pageI18n) : null;
 if (flashError) Astro.response.headers.append('Set-Cookie', clearAdminFlash(Astro.request));
 await doHook(_pluginCtx, 'admin:end', { ...adminHookContext, menuGroups: safeMenuGroups });
+const adminClientMessageJson = safeJsonForScript({
+  selectFirst: t('admin.action.selectFirst', {}, 'Select an item first'),
+  confirmAction: t('admin.action.confirm', {}, 'Confirm this action?'),
+  return: t('admin.action.return', {}, 'Return'),
+});
 ---
 <!DOCTYPE html>
 <html lang={documentLocale}>
@@ -164,7 +172,7 @@ await doHook(_pluginCtx, 'admin:end', { ...adminHookContext, menuGroups: safeMen
   <meta charset={options.charset || 'UTF-8'} />
   <meta name="renderer" content="webkit" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>{`${title} - ${options.title} - Powered by Typecho CF`}</title>
+    <title>{`${title} - ${options.title} - ${t('admin.footer.poweredBy', {}, 'Powered by Typecho CF')}`}</title>
   <meta name="robots" content="noindex, nofollow" />
   <link rel="stylesheet" href="/css/normalize.css" />
   <link rel="stylesheet" href="/css/grid.css" />
@@ -174,7 +182,7 @@ await doHook(_pluginCtx, 'admin:end', { ...adminHookContext, menuGroups: safeMen
 </head>
 <body>
   <div class="typecho-head-nav clearfix" role="navigation">
-    <button class="menu-bar" type="button" aria-controls="typecho-nav-list" aria-expanded="false">菜单</button>
+    <button class="menu-bar" type="button" aria-controls="typecho-nav-list" aria-expanded="false">{t('admin.action.menu', {}, 'Menu')}</button>
     <nav id="typecho-nav-list">
       {visibleGroups.map((group, idx) => {
         const isFocus = idx === focusGroupIdx;
@@ -198,9 +206,9 @@ await doHook(_pluginCtx, 'admin:end', { ...adminHookContext, menuGroups: safeMen
     <div class="operate">
       <a href={`/admin/profile`} class="author">{user?.screenName || user?.name}</a>
       <form method="post" action={urls.logoutUrl} class="logout-form">
-        <button type="submit" class="exit">登出</button>
+        <button type="submit" class="exit">{t('admin.action.logout', {}, 'Log out')}</button>
       </form>
-      <a href={urls.siteUrl + '/'}>网站</a>
+      <a href={urls.siteUrl + '/'}>{t('admin.action.site', {}, 'Site')}</a>
     </div>
   </div>
 
@@ -213,7 +221,7 @@ await doHook(_pluginCtx, 'admin:end', { ...adminHookContext, menuGroups: safeMen
         <div class="typecho-option-tabs notice notice-error typecho-dismissible" role="alert"
           style="padding: 10px 15px; margin-bottom: 20px; border-radius: 3px; background: #ffeaea; color: #c33;">
           <p>{flashError}</p>
-          <button type="button" class="typecho-notice-close" aria-label="关闭提示">&times;</button>
+          <button type="button" class="typecho-notice-close" aria-label={t('admin.action.closeNotice', {}, 'Close notice')}>&times;</button>
         </div>
       )}
       <div class:list={['row', 'typecho-page-main', bodyClass]} role="main">
@@ -225,7 +233,7 @@ await doHook(_pluginCtx, 'admin:end', { ...adminHookContext, menuGroups: safeMen
   <div class="typecho-foot" role="contentinfo">
     <div class="copyright">
       <p>&copy; {new Date().getFullYear()} <a href={urls.siteUrl}>{options.title}</a>.
-      Powered by <a href="https://github.com/eslizn/typecho-cf">Typecho CF</a>.</p>
+      {t('admin.footer.poweredBy', {}, 'Powered by Typecho CF')}.</p>
     </div>
   </div>
 
@@ -233,6 +241,7 @@ await doHook(_pluginCtx, 'admin:end', { ...adminHookContext, menuGroups: safeMen
   <script is:inline src="/vendor/jquery-ui.js"></script>
   <script is:inline src="/vendor/typecho.js"></script>
   <script is:inline>
+    const adminClientMessages = {adminClientMessageJson};
     (function () {
       $(document).ready(function() {
         // 导航菜单
@@ -286,7 +295,7 @@ await doHook(_pluginCtx, 'admin:end', { ...adminHookContext, menuGroups: safeMen
               return false;
             }
           }).find('.child')
-          .append($('<li class="return"><a>返回</a></li>').click(function () {
+          .append($('<li class="return"><a>' + adminClientMessages.return + '</a></li>').click(function () {
             nav.removeClass('expanded').addClass('noexpanded');
             return false;
           }));
@@ -380,13 +389,13 @@ await doHook(_pluginCtx, 'admin:end', { ...adminHookContext, menuGroups: safeMen
 
           var checked = form.find('input[type=checkbox]:checked').not('.typecho-table-select-all');
           if (checked.length === 0) {
-            alert('请先选择要操作的项目');
+            alert(adminClientMessages.selectFirst);
             return;
           }
 
           // Confirm delete actions
           if (href.indexOf('delete') >= 0) {
-            if (!confirm('确认要执行此操作吗?')) return;
+            if (!confirm(adminClientMessages.confirmAction)) return;
           }
 
           form.attr('action', href);

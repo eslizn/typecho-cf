@@ -3,12 +3,14 @@ import { getDb, schema } from '@/db';
 import { loadOptions } from '@/lib/options';
 import { hashPassword, generateRandomString } from '@/lib/auth';
 import { PASSWORD_MIN_LENGTH, REQUEST_BODY_LIMITS } from '@/lib/constants';
-import { InputError, readBoundedFormData } from '@/lib/input';
+import { InputError, inputErrorMessage, readBoundedFormData } from '@/lib/input';
 import { REGISTER_NOTICE_FLASH_COOKIE, createFlashRedirectHeaders } from '@/lib/flash';
 import { eq } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
-import { getRequestCoreContextFromLocals } from '@/lib/context';
+import { getRequestCoreContextFromLocals, getRequestI18n } from '@/lib/context';
 import { applyFilter, doHook, parseActivatedPlugins, setActivatedPlugins, type HookContext } from '@/lib/plugin';
+import { i18nMessage } from '@/lib/i18n';
+import { textError } from '@/lib/http';
 
 /**
  * Reject cross-origin POSTs. Tightening this beyond the global CSRF
@@ -37,22 +39,29 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const core = getRequestCoreContextFromLocals(locals);
   const db = core?.db ?? getDb(env.DB);
   const options = core?.options ?? await loadOptions(db);
+  let i18n = core?.i18n ?? getRequestI18n(request, options);
   const pluginCtx: HookContext = core?.pluginCtx ?? { activatedPlugins: new Set<string>() };
-  if (!core) await setActivatedPlugins(pluginCtx, parseActivatedPlugins(options.activatedPlugins as string | undefined));
+  if (!core) {
+    await setActivatedPlugins(pluginCtx, parseActivatedPlugins(options.activatedPlugins as string | undefined));
+    i18n = getRequestI18n(request, options, pluginCtx.activatedPlugins);
+  }
+  pluginCtx.i18n = i18n;
+  const error = (status: number, key: string, variables: Record<string, string | number> = {}, fallback = key) =>
+    textError(status, i18nMessage(key, fallback, variables), undefined, i18n);
 
   if (!options.allowRegister) {
-    return new Response('注册已关闭', { status: 403 });
+    return error(403, 'auth.registrationClosed', {}, 'Registration is closed.');
   }
 
   if (!isSameOriginRequest(request, options.siteUrl)) {
-    return new Response('Forbidden', { status: 403 });
+    return error(403, 'core.error.forbidden', {}, 'Forbidden');
   }
 
   let formData: FormData;
   try {
     formData = await readBoundedFormData(request, REQUEST_BODY_LIMITS.publicForm);
   } catch (error) {
-    if (error instanceof InputError) return new Response(error.message, { status: error.status });
+    if (error instanceof InputError) return textError(error.status, inputErrorMessage(error), undefined, i18n);
     throw error;
   }
   const name = formData.get('name')?.toString()?.trim() || '';
@@ -60,19 +69,19 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const password = formData.get('password')?.toString() || '';
 
   if (!name || !mail || !password) {
-    return new Response('请填写完整信息', { status: 400 });
+    return error(400, 'auth.registrationIncomplete', {}, 'Please complete all required fields.');
   }
 
   if (name.length < 2 || name.length > 32) {
-    return new Response('用户名长度需在2-32个字符之间', { status: 400 });
+    return error(400, 'auth.usernameLength', {}, 'Username must be between 2 and 32 characters.');
   }
 
   if (password.length < PASSWORD_MIN_LENGTH) {
-    return new Response(`密码长度至少${PASSWORD_MIN_LENGTH}个字符`, { status: 400 });
+    return error(400, 'auth.passwordTooShort', { count: PASSWORD_MIN_LENGTH }, 'The password must be at least {count} characters.');
   }
 
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)) {
-    return new Response('邮箱格式不正确', { status: 400 });
+    return error(400, 'auth.emailInvalid', {}, 'The email address is invalid.');
   }
 
   let registrationData: { name: string; mail: string; screenName: string } = {
@@ -91,29 +100,29 @@ export const POST: APIRoute = async ({ request, locals }) => {
       return new Response(String(filtered._rejected), { status: 403 });
     }
     if (!filtered || typeof filtered !== 'object') {
-      return new Response('注册信息无效', { status: 400 });
+      return error(400, 'auth.registrationInvalid', {}, 'The registration details are invalid.');
     }
     registrationData = {
       name: typeof filtered.name === 'string' ? filtered.name.trim() : '',
       mail: typeof filtered.mail === 'string' ? filtered.mail.trim() : '',
       screenName: typeof filtered.screenName === 'string' ? filtered.screenName.trim() : '',
     };
-  } catch (error) {
+  } catch (caught) {
     console.error({
       event: 'register_filter_failed',
-      errorType: error instanceof Error ? error.name : 'UnknownError',
+      errorType: caught instanceof Error ? caught.name : 'UnknownError',
     });
-    return new Response('插件处理注册信息时出错，请稍后重试', { status: 503 });
+    return error(503, 'auth.pluginRegistrationFailed', {}, 'A plugin failed while processing the registration. Please try again later.');
   }
 
   if (registrationData.name.length < 2 || registrationData.name.length > 32) {
-    return new Response('用户名长度需在2-32个字符之间', { status: 400 });
+    return error(400, 'auth.usernameLength', {}, 'Username must be between 2 and 32 characters.');
   }
   if (!registrationData.mail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(registrationData.mail)) {
-    return new Response('邮箱格式不正确', { status: 400 });
+    return error(400, 'auth.emailInvalid', {}, 'The email address is invalid.');
   }
   if (registrationData.screenName.length > 150) {
-    return new Response('昵称过长', { status: 400 });
+    return error(400, 'auth.nicknameTooLong', {}, 'The nickname is too long.');
   }
 
   const [[existingName], [existingMail]] = await db.batch([
@@ -123,10 +132,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
       .where(eq(schema.users.mail, registrationData.mail)).limit(1),
   ]);
   if (existingName) {
-    return new Response('用户名已被使用', { status: 409 });
+    return error(409, 'auth.usernameTaken', {}, 'That username is already in use.');
   }
   if (existingMail) {
-    return new Response('邮箱已被使用', { status: 409 });
+    return error(409, 'auth.emailTaken', {}, 'That email address is already in use.');
   }
 
   const hashedPassword = await hashPassword(password);
@@ -146,7 +155,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
   }).returning({ uid: schema.users.uid });
 
   if (!result[0]?.uid) {
-    return new Response('注册失败', { status: 500 });
+    return error(500, 'auth.registrationFailed', {}, 'Registration failed.');
   }
 
   await doHook(pluginCtx, 'user:register:after', {
@@ -168,6 +177,6 @@ export const POST: APIRoute = async ({ request, locals }) => {
   // browser without their awareness.
   return new Response(null, {
     status: 302,
-    headers: createFlashRedirectHeaders('/admin/login', REGISTER_NOTICE_FLASH_COOKIE, '注册成功，请使用新账号登录', '/admin/login', request),
+    headers: createFlashRedirectHeaders('/admin/login', REGISTER_NOTICE_FLASH_COOKIE, i18nMessage('auth.registrationSuccess', 'Registration successful. Sign in with your new account.'), '/admin/login', request),
   });
 };

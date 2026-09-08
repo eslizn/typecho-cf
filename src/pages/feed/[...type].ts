@@ -99,7 +99,7 @@ export const GET: APIRoute = async ({ request, locals, params }) => {
     const rendered = renderContent(post.text || '');
     const cats = postCats.get(post.cid) || [];
     let item: FeedItem = {
-      title: post.title || '无标题',
+      title: post.title || i18n.t('feed.untitled', {}, 'Untitled'),
       link: buildPermalink(
         { cid: post.cid, slug: post.slug, type: post.type, created: post.created },
         urls.siteUrl,
@@ -112,7 +112,7 @@ export const GET: APIRoute = async ({ request, locals, params }) => {
       categories: cats,
     };
     // Apply feed:item filter — plugins can modify each feed item
-    item = await applyFilterSafely(pluginCtx, 'feed:item', item);
+    item = await applyFilterSafely(pluginCtx, 'feed:item', item, { i18n });
     items.push(item);
   }
 
@@ -185,9 +185,9 @@ async function generateCommentsFeed(
     )}#comment-${comment.coid}`,
     content: renderContent(comment.text || '').html,
     date: new Date((comment.created || 0) * 1000),
-    author: comment.author || '匿名',
+    author: comment.author || i18n.t('feed.anonymous', {}, 'Anonymous'),
     };
-    item = await applyFilterSafely(pluginCtx, 'feed:item', item);
+    item = await applyFilterSafely(pluginCtx, 'feed:item', item, { i18n });
     items.push(item);
   }
 

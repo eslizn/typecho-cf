@@ -1,13 +1,51 @@
 import { MAX_PAGE_NUMBER, REQUEST_BODY_LIMITS } from '@/lib/constants';
+import {
+  i18nMessage,
+  resolveI18nMessage,
+  type I18n,
+  type I18nMessage,
+} from '@/lib/i18n';
 
 export class InputError extends Error {
   constructor(
     public readonly status: 400 | 413,
     message: string,
+    public readonly messageDescriptor?: I18nMessage,
   ) {
     super(message);
     this.name = 'InputError';
   }
+}
+
+/** Convert a bounded-input failure into a stable, locale-neutral descriptor. */
+export function inputErrorMessage(error: InputError): I18nMessage {
+  if (error.messageDescriptor) return error.messageDescriptor;
+  return i18nMessage(
+    error.status === 413 ? 'core.error.requestBodyTooLarge' : 'core.error.badRequest',
+    error.message || (error.status === 413 ? 'Request body too large' : 'Bad Request'),
+  );
+}
+
+/** Render an input failure while preserving its descriptor for redirects/API clients. */
+export function inputErrorResponse(error: InputError, i18n?: I18n): Response {
+  const message = inputErrorMessage(error);
+  const headers = new Headers();
+  headers.set('X-Typecho-I18n-Code', message.key);
+  if (message.variables && Object.keys(message.variables).length > 0) {
+    headers.set('X-Typecho-I18n-Params', JSON.stringify(message.variables));
+  }
+  return new Response(resolveI18nMessage(message, i18n), {
+    status: error.status,
+    headers,
+  });
+}
+
+function createInputError(
+  status: 400 | 413,
+  key: string,
+  fallback: string,
+): InputError {
+  return new InputError(status, fallback, i18nMessage(key, fallback));
 }
 
 /**
@@ -17,12 +55,13 @@ export class InputError extends Error {
 export async function readAdminFormOrError(
   request: Request,
   maxBytes: number = REQUEST_BODY_LIMITS.adminForm,
+  i18n?: I18n,
 ): Promise<FormData | Response> {
   try {
     return await readBoundedFormData(request, maxBytes);
   } catch (error) {
     if (error instanceof InputError) {
-      return new Response(error.message, { status: error.status });
+      return inputErrorResponse(error, i18n);
     }
     throw error;
   }
@@ -41,14 +80,14 @@ export function assertBoundedContentLength(request: Request, maxBytes: number): 
   const contentLength = request.headers.get('content-length');
   if (contentLength !== null) {
     if (!/^\d+$/.test(contentLength.trim())) {
-      throw new InputError(400, 'Invalid Content-Length');
+      throw createInputError(400, 'core.error.invalidContentLength', 'Invalid Content-Length');
     }
     const declaredBytes = Number(contentLength);
     if (!Number.isSafeInteger(declaredBytes)) {
-      throw new InputError(400, 'Invalid Content-Length');
+      throw createInputError(400, 'core.error.invalidContentLength', 'Invalid Content-Length');
     }
     if (declaredBytes > maxBytes) {
-      throw new InputError(413, 'Request body too large');
+      throw createInputError(413, 'core.error.requestBodyTooLarge', 'Request body too large');
     }
   }
 }
@@ -68,7 +107,7 @@ export async function readBoundedFormData(request: Request, maxBytes: number): P
     }).formData();
   } catch (error) {
     if (error instanceof InputError) throw error;
-    throw new InputError(400, 'Malformed form data');
+    throw createInputError(400, 'core.error.malformedFormData', 'Malformed form data');
   }
 }
 
@@ -86,13 +125,13 @@ export async function readBoundedBody(request: Request, maxBytes: number): Promi
       totalBytes += value.byteLength;
       if (totalBytes > maxBytes) {
         try { await reader.cancel(); } catch { /* preserve the 413 response */ }
-        throw new InputError(413, 'Request body too large');
+        throw createInputError(413, 'core.error.requestBodyTooLarge', 'Request body too large');
       }
       chunks.push(value);
     }
   } catch (error) {
     if (error instanceof InputError) throw error;
-    throw new InputError(400, 'Malformed request body');
+    throw createInputError(400, 'core.error.malformedRequestBody', 'Malformed request body');
   } finally {
     reader.releaseLock();
   }
@@ -114,7 +153,7 @@ export async function readBoundedJson(request: Request, maxBytes: number): Promi
   try {
     return JSON.parse(text);
   } catch {
-    throw new InputError(400, 'Malformed JSON');
+    throw createInputError(400, 'core.error.malformedJson', 'Malformed JSON');
   }
 }
 

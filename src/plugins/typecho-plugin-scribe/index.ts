@@ -1,8 +1,10 @@
-import { fetchWithTimeout, parseAttachmentMeta, parsePluginOption, stripTypechoMarkers } from 'typecho/plugin-sdk';
-import type { AttachmentMeta, PluginInitContext } from 'typecho/plugin-sdk';
+import { fetchWithTimeout, parseAttachmentMeta, parsePluginOption, safeJsonForScript, stripTypechoMarkers } from 'typecho/plugin-sdk';
+import type { AttachmentMeta, I18n, PluginInitContext } from 'typecho/plugin-sdk';
 import type { Database } from 'typecho/db';
 import { schema } from 'typecho/db';
 import { and, desc, eq, inArray, or } from 'drizzle-orm';
+import en from './locales/en.json';
+import zhCN from './locales/zh-CN.json';
 
 type WriterMode = 'generate' | 'polish' | 'correct';
 type ContentType = 'post' | 'page';
@@ -121,6 +123,10 @@ const DEFAULTS: ScribeConfig = {
 
 const VALIDATION_TIMEOUT_MS = 3500;
 const LLM_REQUEST_TIMEOUT_MS = 60_000;
+
+function translate(i18n: I18n | undefined, key: string, fallback: string, variables?: Record<string, string | number>): string {
+  return i18n?.t(key, variables, fallback) ?? fallback;
+}
 const SYSTEM_PROMPT = [
   '你是 Typecho-CF 的资深内容编辑助手。',
   '你的目标是帮助作者生成、润色或纠错可直接保存的正文，而不是回答关于写作过程的问题。',
@@ -152,8 +158,10 @@ function normalizeEnum<T extends string>(value: unknown, validValues: readonly T
   return validValues.includes(value as T) ? (value as T) : fallback;
 }
 
-function assertValid<T extends string>(value: string, validValues: readonly T[], label: string): void {
-  if (!(validValues as readonly string[]).includes(value)) throw new Error(`${label}配置不正确`);
+function assertValid<T extends string>(value: string, validValues: readonly T[], label: string, i18n?: I18n, key?: string): void {
+  if (!(validValues as readonly string[]).includes(value)) {
+    throw new Error(translate(i18n, key || 'plugin.typecho-plugin-scribe.message.configValidationError', `${label}配置不正确`));
+  }
 }
 
 function normalizeLengthPreset(value: unknown): LengthPreset {
@@ -357,87 +365,87 @@ function validationHeaders(config: ScribeConfig): HeadersInit {
   };
 }
 
-async function assertModelsResponse(response: Response, config: ScribeConfig): Promise<void> {
+async function assertModelsResponse(response: Response, config: ScribeConfig, i18n?: I18n): Promise<void> {
   if (!response.ok) {
     const suffix = await readErrorSnippet(response);
     if (response.status === 401 || response.status === 403) {
-      throw new Error(`API Key 无效或无权限${suffix}`);
+      throw new Error(translate(i18n, 'plugin.typecho-plugin-scribe.message.apiKeyInvalid', `API Key 无效或无权限${suffix}`, { suffix }));
     }
     if (response.status === 404) {
-      throw new Error(`模型不存在或接口地址不正确${suffix}`);
+      throw new Error(translate(i18n, 'plugin.typecho-plugin-scribe.message.modelInvalid', `模型不存在或接口地址不正确${suffix}`, { suffix }));
     }
-    throw new Error(`LLM 配置校验失败 (${response.status})${suffix}`);
+    throw new Error(translate(i18n, 'plugin.typecho-plugin-scribe.message.configValidationFailed', `LLM 配置校验失败 (${response.status})${suffix}`, { status: response.status, suffix }));
   }
 
   const data = await response.json().catch(() => null) as ModelsResponse | ModelInfo | null;
   if (Array.isArray((data as ModelsResponse | null)?.data)) {
     const exists = (data as ModelsResponse).data?.some(item => item.id === config.model);
     if (!exists) {
-      throw new Error(`模型不存在：${config.model}`);
+      throw new Error(translate(i18n, 'plugin.typecho-plugin-scribe.message.modelMissing', `模型不存在：${config.model}`, { model: config.model }));
     }
   }
 }
 
-async function validateModelAccess(config: ScribeConfig): Promise<void> {
+async function validateModelAccess(config: ScribeConfig, i18n?: I18n): Promise<void> {
   const modelResponse = await fetchWithTimeout(buildModelUrl(config.endpoint, config.model), {
     method: 'GET',
     headers: validationHeaders(config),
-  });
+  }, VALIDATION_TIMEOUT_MS, translate(i18n, 'plugin.typecho-plugin-scribe.message.requestTimeout', 'LLM 请求超时，请稍后重试'));
 
   if (modelResponse.ok) {
     return;
   }
 
   if (![404, 405].includes(modelResponse.status)) {
-    await assertModelsResponse(modelResponse, config);
+    await assertModelsResponse(modelResponse, config, i18n);
     return;
   }
 
   const listResponse = await fetchWithTimeout(buildModelsUrl(config.endpoint), {
     method: 'GET',
     headers: validationHeaders(config),
-  });
-  await assertModelsResponse(listResponse, config);
+  }, VALIDATION_TIMEOUT_MS, translate(i18n, 'plugin.typecho-plugin-scribe.message.requestTimeout', 'LLM 请求超时，请稍后重试'));
+  await assertModelsResponse(listResponse, config, i18n);
 }
 
-async function validateConfig(settings?: Record<string, unknown>): Promise<ScribeConfig> {
+async function validateConfig(settings?: Record<string, unknown>, i18n?: I18n): Promise<ScribeConfig> {
   const config = normalizeConfig(settings);
   if (!config.endpoint || !config.apiKey || !config.model) {
-    throw new Error('请填写接口地址、API Key 和模型名称');
+    throw new Error(translate(i18n, 'plugin.typecho-plugin-scribe.message.configRequired', '请填写接口地址、API Key 和模型名称'));
   }
 
   let url: URL;
   try {
     url = new URL(config.endpoint);
   } catch {
-    throw new Error('接口地址格式不正确');
+    throw new Error(translate(i18n, 'plugin.typecho-plugin-scribe.message.endpointInvalid', '接口地址格式不正确'));
   }
   if (!['https:', 'http:'].includes(url.protocol)) {
-    throw new Error('接口地址必须使用 http 或 https');
+    throw new Error(translate(i18n, 'plugin.typecho-plugin-scribe.message.endpointProtocol', '接口地址必须使用 http 或 https'));
   }
 
   const temperature = Number(config.temperature);
   if (!Number.isFinite(temperature) || temperature < 0 || temperature > 2) {
-    throw new Error('temperature 必须是 0 到 2 之间的数字');
+    throw new Error(translate(i18n, 'plugin.typecho-plugin-scribe.message.temperatureInvalid', 'temperature 必须是 0 到 2 之间的数字'));
   }
 
   const maxTokens = Number(config.maxTokens);
   if (!Number.isInteger(maxTokens) || maxTokens < 128 || maxTokens > 32000) {
-    throw new Error('max tokens 必须是 128 到 32000 之间的整数');
+    throw new Error(translate(i18n, 'plugin.typecho-plugin-scribe.message.maxTokensInvalid', 'max tokens 必须是 128 到 32000 之间的整数'));
   }
 
   const stylePostCount = Number(config.stylePostCount);
   if (!Number.isInteger(stylePostCount) || stylePostCount < 0 || stylePostCount > 20) {
-    throw new Error('风格参考文章数必须是 0 到 20 之间的整数');
+    throw new Error(translate(i18n, 'plugin.typecho-plugin-scribe.message.styleCountInvalid', '风格参考文章数必须是 0 到 20 之间的整数'));
   }
   if (!['0', '1'].includes(config.includeBodyAssets)) {
-    throw new Error('发送正文图片和附件配置不正确');
+    throw new Error(translate(i18n, 'plugin.typecho-plugin-scribe.message.assetConfigInvalid', '发送正文图片和附件配置不正确'));
   }
-  assertValid(config.outputLanguage, OUTPUT_LANGUAGES, '输出语言');
-  assertValid(config.lengthPreset, LENGTH_PRESETS, '篇幅策略');
-  assertValid(config.factPolicy, FACT_POLICIES, '事实策略');
+  assertValid(config.outputLanguage, OUTPUT_LANGUAGES, '输出语言', i18n, 'plugin.typecho-plugin-scribe.message.outputLanguageInvalid');
+  assertValid(config.lengthPreset, LENGTH_PRESETS, '篇幅策略', i18n, 'plugin.typecho-plugin-scribe.message.lengthPresetInvalid');
+  assertValid(config.factPolicy, FACT_POLICIES, '事实策略', i18n, 'plugin.typecho-plugin-scribe.message.factPolicyInvalid');
 
-  await validateModelAccess(config);
+  await validateModelAccess(config, i18n);
 
   return config;
 }
@@ -644,9 +652,10 @@ async function callLLM(
   styleSamples: StyleSample[],
   assets: ContentAsset[],
   siteUrl?: string,
+  i18n?: I18n,
 ): Promise<string> {
   if (!config.endpoint || !config.apiKey || !config.model) {
-    throw new Error('请先完整配置接口地址、API Key 和模型名称');
+    throw new Error(translate(i18n, 'plugin.typecho-plugin-scribe.message.configRequired', '请先完整配置接口地址、API Key 和模型名称'));
   }
 
   const response = await fetchWithTimeout(
@@ -660,30 +669,30 @@ async function callLLM(
       body: JSON.stringify(buildChatCompletionPayload(config, mode, payload, styleSamples, assets, siteUrl)),
     },
     LLM_REQUEST_TIMEOUT_MS,
-    'LLM 请求超时，请稍后重试',
+    translate(i18n, 'plugin.typecho-plugin-scribe.message.requestTimeout', 'LLM 请求超时，请稍后重试'),
   );
 
   if (!response.ok) {
     const suffix = await readErrorSnippet(response);
-    throw new Error(`LLM 请求失败 (${response.status})${suffix}`);
+    throw new Error(translate(i18n, 'plugin.typecho-plugin-scribe.message.requestFailed', `LLM 请求失败 (${response.status})${suffix}`, { status: response.status, suffix }));
   }
 
   const data = await response.json() as ChatCompletionResponse;
   const content = data.choices?.[0]?.message?.content;
   if (!content) {
-    throw new Error('LLM 返回格式不正确');
+    throw new Error(translate(i18n, 'plugin.typecho-plugin-scribe.message.responseInvalid', 'LLM 返回格式不正确'));
   }
 
   return content.trim().replace(/^```(?:markdown|md)?\s*/i, '').replace(/\s*```$/i, '').trim();
 }
 
-function createTextStreamFromLLM(response: Response): ReadableStream<Uint8Array> {
+function createTextStreamFromLLM(response: Response, i18n?: I18n): ReadableStream<Uint8Array> {
   const decoder = new TextDecoder();
   const encoder = new TextEncoder();
   const reader = response.body?.getReader();
 
   if (!reader) {
-    throw new Error('LLM 未返回可读取的流');
+    throw new Error(translate(i18n, 'plugin.typecho-plugin-scribe.message.streamMissing', 'LLM 未返回可读取的流'));
   }
 
   let buffer = '';
@@ -747,9 +756,10 @@ async function callLLMStream(
   styleSamples: StyleSample[],
   assets: ContentAsset[],
   siteUrl?: string,
+  i18n?: I18n,
 ): Promise<Response> {
   if (!config.endpoint || !config.apiKey || !config.model) {
-    throw new Error('请先完整配置接口地址、API Key 和模型名称');
+    throw new Error(translate(i18n, 'plugin.typecho-plugin-scribe.message.configRequired', '请先完整配置接口地址、API Key 和模型名称'));
   }
 
   const response = await fetchWithTimeout(
@@ -763,15 +773,15 @@ async function callLLMStream(
       body: JSON.stringify(buildChatCompletionPayload(config, mode, payload, styleSamples, assets, siteUrl, true)),
     },
     LLM_REQUEST_TIMEOUT_MS,
-    'LLM 请求超时，请稍后重试',
+    translate(i18n, 'plugin.typecho-plugin-scribe.message.requestTimeout', 'LLM 请求超时，请稍后重试'),
   );
 
   if (!response.ok) {
     const suffix = await readErrorSnippet(response);
-    throw new Error(`LLM 请求失败 (${response.status})${suffix}`);
+    throw new Error(translate(i18n, 'plugin.typecho-plugin-scribe.message.requestFailed', `LLM 请求失败 (${response.status})${suffix}`, { status: response.status, suffix }));
   }
 
-  return new Response(createTextStreamFromLLM(response), {
+  return new Response(createTextStreamFromLLM(response, i18n), {
     status: 200,
     headers: {
       'Content-Type': 'text/plain; charset=utf-8',
@@ -781,10 +791,30 @@ async function callLLMStream(
   });
 }
 
-const POST_EDITOR_HTML = editorHtml('post');
-const PAGE_EDITOR_HTML = editorHtml('page');
-
-function editorHtml(contentType: ContentType): string {
+function editorHtml(contentType: ContentType, i18n?: I18n): string {
+  const t = (key: string, fallback: string, variables?: Record<string, string | number>) =>
+    translate(i18n, key, fallback, variables);
+  const messages = safeJsonForScript({
+    aiGenerating: t('plugin.typecho-plugin-scribe.message.aiGenerating', 'AI 正在生成…'),
+    aiFailed: t('plugin.typecho-plugin-scribe.message.aiFailed', 'AI 写作失败。'),
+    aiLabel: t('plugin.typecho-plugin-scribe.message.aiLabel', 'AI 写作'),
+    close: translate(i18n, 'admin.action.closeNotice', 'Close notice'),
+    labels: {
+      generate: t('plugin.typecho-plugin-scribe.message.generate', '生成'),
+      polish: t('plugin.typecho-plugin-scribe.message.polish', '润色'),
+      correct: t('plugin.typecho-plugin-scribe.message.correct', '纠错'),
+    },
+    titles: {
+      generate: t('plugin.typecho-plugin-scribe.message.generateTitle', 'AI 生成'),
+      polish: t('plugin.typecho-plugin-scribe.message.polishTitle', 'AI 润色'),
+      correct: t('plugin.typecho-plugin-scribe.message.correctTitle', 'AI 纠错'),
+    },
+    busy: t('plugin.typecho-plugin-scribe.message.busy', 'AI {label} in progress…', { label: '{label}' }),
+    complete: t('plugin.typecho-plugin-scribe.message.complete', 'AI {label}完成', { label: '{label}' }),
+    bodyRequired: t('plugin.typecho-plugin-scribe.message.bodyRequired', '请先输入正文，再使用 AI {label}', { label: '{label}' }),
+    noContent: t('plugin.typecho-plugin-scribe.message.noContent', 'AI 未返回内容。'),
+    csrfMissing: t('plugin.typecho-plugin-scribe.message.csrfMissing', '缺少 CSRF token，无法继续。'),
+  });
   return `
 <style>
 #wmd-scribe-button span {
@@ -909,11 +939,12 @@ function editorHtml(contentType: ContentType): string {
 <div class="typecho-scribe-overlay" role="status" aria-live="polite" aria-hidden="true">
   <div class="typecho-scribe-loader">
     <span class="typecho-scribe-loader-spinner" aria-hidden="true"></span>
-    <span class="typecho-scribe-loader-text">AI 正在生成...</span>
+    <span class="typecho-scribe-loader-text">${t('plugin.typecho-plugin-scribe.message.aiGenerating', 'AI 正在生成…')}</span>
   </div>
 </div>
 <script is:inline>
 (function() {
+  var messages = ${messages};
   if (window.__typechoScribeReady) return;
   window.__typechoScribeReady = true;
 
@@ -922,6 +953,19 @@ function editorHtml(contentType: ContentType): string {
     if (notice && notice.parentNode) {
       notice.parentNode.removeChild(notice);
     }
+  }
+
+  function localizedMessage(message) {
+    var value = String(message || '');
+    if (!value) return messages.aiFailed;
+    if (value === 'AI 写作失败') return messages.aiFailed;
+    if (value === 'AI 未返回内容') return messages.noContent;
+    var bodyPrefix = '请先输入正文，再使用 AI ';
+    if (value.indexOf(bodyPrefix) === 0) {
+      return messages.bodyRequired.replace('{label}', value.slice(bodyPrefix.length));
+    }
+    if (value === '缺少 CSRF token，无法继续') return messages.csrfMissing;
+    return value;
   }
 
   function showAdminNotice(message, type) {
@@ -938,14 +982,14 @@ function editorHtml(contentType: ContentType): string {
     notice.setAttribute('role', isError ? 'alert' : 'status');
 
     var paragraph = document.createElement('p');
-    paragraph.textContent = message || 'AI 写作失败';
+    paragraph.textContent = localizedMessage(message);
     paragraph.style.margin = '0';
     notice.appendChild(paragraph);
 
     var closeButton = document.createElement('button');
     closeButton.type = 'button';
     closeButton.className = 'typecho-notice-close';
-    closeButton.setAttribute('aria-label', '关闭提示');
+    closeButton.setAttribute('aria-label', messages.close || '关闭提示');
     closeButton.innerHTML = '&times;';
     notice.appendChild(closeButton);
 
@@ -969,8 +1013,8 @@ function editorHtml(contentType: ContentType): string {
     correct: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 10 2 2 4-4"/><rect width="20" height="20" x="2" y="2" rx="4" opacity=".25"/><path d="M20.5 2.5 15 20 9 17l-5.5 3L6 14Z"/></svg>'
   };
   var scribeButtons = [];
-  var MODE_LABELS = { generate: '生成', polish: '润色', correct: '纠错' };
-  var MODE_TITLES = { generate: 'AI 生成', polish: 'AI 润色', correct: 'AI 纠错' };
+  var MODE_LABELS = messages.labels;
+  var MODE_TITLES = messages.titles;
 
   function modeLabel(mode) {
     return MODE_LABELS[mode] || MODE_LABELS.generate;
@@ -991,7 +1035,7 @@ function editorHtml(contentType: ContentType): string {
       overlay.setAttribute('aria-hidden', busy ? 'false' : 'true');
     }
     if (overlayText && label) {
-      overlayText.textContent = busy ? 'AI 正在' + label + '...' : 'AI 正在生成...';
+      overlayText.textContent = busy ? messages.busy.replace('{label}', label) : messages.aiGenerating;
     }
     if (busy) closeScribeMenus();
     scribeButtons.forEach(function(control) {
@@ -1178,13 +1222,13 @@ function editorHtml(contentType: ContentType): string {
 
   async function readActionError(response) {
     var text = await response.text().catch(function() { return ''; });
-    return extractActionErrorFromText(text) || response.statusText || 'AI 写作失败';
+    return extractActionErrorFromText(text) || response.statusText || messages.aiFailed;
   }
 
   async function readStreamIntoEditor(response, text, oldText, mode) {
     if (!response.body || !window.TextDecoder) {
       var data = await response.json().catch(function() { return {}; });
-      if (!response.ok || !data.success) throw new Error(extractActionError(data) || 'AI 写作失败');
+      if (!response.ok || !data.success) throw new Error(extractActionError(data) || messages.aiFailed);
       text.value = mergeAiCompletion(oldText, data.content || '', mode);
       return;
     }
@@ -1213,7 +1257,7 @@ function editorHtml(contentType: ContentType): string {
 
     if (!text.value && oldText) {
       text.value = oldText;
-      throw new Error('AI 未返回内容');
+      throw new Error(messages.noContent);
     }
   }
 
@@ -1231,7 +1275,7 @@ function editorHtml(contentType: ContentType): string {
     var mode;
     if (requestedMode) {
       if ((requestedMode === 'polish' || requestedMode === 'correct') && !hasText) {
-        showAdminNotice('请先输入正文，再使用 AI ' + modeLabel(requestedMode), 'error');
+        showAdminNotice(messages.bodyRequired.replace('{label}', modeLabel(requestedMode)), 'error');
         return;
       }
       mode = requestedMode;
@@ -1265,7 +1309,7 @@ function editorHtml(contentType: ContentType): string {
       await readStreamIntoEditor(response, text, oldText, mode);
       text.dispatchEvent(new Event('input', { bubbles: true }));
       if (window.jQuery) window.jQuery(text).trigger('input');
-      showAdminNotice('AI ' + label + '完成', 'success');
+      showAdminNotice(messages.complete.replace('{label}', label), 'success');
     } catch (error) {
       text.value = oldText;
       showAdminNotice(error && error.message ? error.message : 'AI 写作失败', 'error');
@@ -1331,10 +1375,10 @@ function editorHtml(contentType: ContentType): string {
     var item = document.createElement('li');
     item.id = 'wmd-scribe-button';
     item.className = 'wmd-button typecho-scribe-toolbar-button typecho-scribe-menu-trigger';
-    item.title = 'AI 写作';
+    item.title = messages.aiLabel;
     item.tabIndex = 0;
     item.setAttribute('role', 'button');
-    item.setAttribute('aria-label', 'AI 写作');
+    item.setAttribute('aria-label', messages.aiLabel);
     item.setAttribute('aria-haspopup', 'menu');
     item.setAttribute('aria-expanded', 'false');
     item.innerHTML = SCRIBE_ICON;
@@ -1366,8 +1410,8 @@ function editorHtml(contentType: ContentType): string {
     button.type = 'button';
     button.className = 'btn btn-xs typecho-scribe-fallback-btn';
     button.innerHTML = SCRIBE_ICON;
-    button.title = 'AI 写作';
-    button.setAttribute('aria-label', 'AI 写作');
+    button.title = messages.aiLabel;
+    button.setAttribute('aria-label', messages.aiLabel);
     button.setAttribute('aria-haspopup', 'menu');
     button.setAttribute('aria-expanded', 'false');
     wrapper.appendChild(button);
@@ -1421,23 +1465,28 @@ function editorHtml(contentType: ContentType): string {
 </script>`;
 }
 
-export default function init({ addHook, pluginId }: PluginInitContext): void {
-  addHook('admin:writePost:bottom', pluginId, (html: string) => html + POST_EDITOR_HTML);
-  addHook('admin:writePage:bottom', pluginId, (html: string) => html + PAGE_EDITOR_HTML);
+export default function init({ addHook, pluginId, registerTranslations }: PluginInitContext): void {
+  registerTranslations?.('en', en);
+  registerTranslations?.('zh-CN', zhCN);
+
+  addHook('admin:writePost:bottom', pluginId, (html: string, extra?: { i18n?: I18n }) => html + editorHtml('post', extra?.i18n));
+  addHook('admin:writePage:bottom', pluginId, (html: string, extra?: { i18n?: I18n }) => html + editorHtml('page', extra?.i18n));
 
   addHook(
     'plugin:config:beforeSave',
     pluginId,
-    async (result: ConfigValidationResult, extra?: { pluginId?: string; settings?: Record<string, unknown> }) => {
+    async (result: ConfigValidationResult, extra?: { pluginId?: string; settings?: Record<string, unknown>; i18n?: I18n }) => {
       if (extra?.pluginId !== pluginId) return result;
 
       try {
-        const settings = await validateConfig(extra.settings || {});
+        const settings = await validateConfig(extra.settings || {}, extra.i18n);
         return { success: true, settings };
       } catch (error) {
         return {
           success: false,
-          error: error instanceof Error ? error.message : 'LLM 配置校验失败',
+          error: error instanceof Error
+            ? error.message
+            : translate(extra?.i18n, 'plugin.typecho-plugin-scribe.message.configValidationError', 'LLM 配置校验失败'),
         };
       }
     },
@@ -1460,7 +1509,7 @@ export default function init({ addHook, pluginId }: PluginInitContext): void {
     pluginId,
     async (
       result: PluginActionResult,
-      extra?: { action?: string; payload?: WriterPayload; options?: Record<string, unknown>; db?: Database },
+      extra?: { action?: string; payload?: WriterPayload; options?: Record<string, unknown>; db?: Database; i18n?: I18n },
     ) => {
       const action = extra?.action || '';
       if (!['generate', 'polish', 'correct'].includes(action)) return result;
@@ -1473,7 +1522,7 @@ export default function init({ addHook, pluginId }: PluginInitContext): void {
           loadStyleSamples(extra?.db, Number.isFinite(Number(config.stylePostCount)) ? Number(config.stylePostCount) : 0),
           loadContentAssets(extra?.db, config, payload),
         ]);
-        const response = await callLLMStream(config, action as WriterMode, payload, styleSamples, assets, siteUrl);
+        const response = await callLLMStream(config, action as WriterMode, payload, styleSamples, assets, siteUrl, extra?.i18n);
         return {
           handled: true,
           success: true,
@@ -1483,7 +1532,9 @@ export default function init({ addHook, pluginId }: PluginInitContext): void {
         return {
           handled: true,
           success: false,
-          error: error instanceof Error ? error.message : 'AI 写作失败',
+          error: error instanceof Error
+            ? error.message
+            : translate(extra?.i18n, 'plugin.typecho-plugin-scribe.message.aiFailed', 'AI 写作失败'),
         };
       }
     },

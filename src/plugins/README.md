@@ -133,6 +133,34 @@ export default function init({ addHook, pluginId }: PluginInitContext): void {
 
 ---
 
+## 多语言翻译
+
+插件可以在 `init()` 中注册静态翻译件。翻译件应放在插件包自己的 `locales/` 目录，并在初始化时同步注册：
+
+```ts
+import type { PluginInitContext } from 'typecho/plugin-sdk';
+import en from './locales/en.json';
+import zhCN from './locales/zh-CN.json';
+
+export default function init({ addHook, pluginId, registerTranslations }: PluginInitContext): void {
+  registerTranslations('en', en, 'English');
+  registerTranslations('zh-CN', zhCN, '中文（简体）');
+
+  addHook('frontend:footer', pluginId, (html, extra) => {
+    const label = extra?.i18n?.t('plugin.typecho-plugin-example.label', {}, 'Example');
+    return html + `<span>${label}</span>`; // 拼接 HTML 前请自行转义
+  });
+}
+```
+
+`registerTranslations(locale, messages, displayName?)` 支持新增语言、补充已有语言、完整覆盖或部分覆盖核心/其他插件的 key。合并顺序是核心目录 → `options.activatedPlugins` 中的插件顺序 → 当前插件内的注册调用顺序；后注册的同名 key 覆盖先注册的值，不使用额外的 `priority`。只有激活插件的翻译件参与全局查找，插件未提供的 key 会继续按当前语言、语言族和 `en` 回退。推荐使用 `plugin.<pluginId>.*` 命名空间；如果有意覆盖系统 key，应在文档中说明。
+
+Hook 的 `extra.i18n` 是当前请求的 request-local 翻译器，使用 `i18n.t(key, variables, fallbackText)` 或 `i18n.tPlural(...)`。翻译值是纯文本，只支持简单的 `{name}` / `{count}` 插值，不解析 ICU，不允许翻译件直接携带 HTML。
+
+插件生成由浏览器后续执行的内联脚本时，不要读取 `navigator.language` 或扫描 DOM。请只注入当前请求已经解析好的有限消息包，并使用 SDK 的 `safeJsonForScript()` 安全序列化；脚本直接使用这些消息生成提示。
+
+---
+
 ## 读取插件配置
 
 在 filter/call 处理函数中，从传入的 `extra.options` 读取配置：

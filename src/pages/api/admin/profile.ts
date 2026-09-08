@@ -11,13 +11,17 @@ import { isAdminActionResponse, requireAdminAction } from '@/lib/admin-auth';
 import { readAdminFormOrError } from '@/lib/input';
 import { normalizeHttpUrl } from '@/lib/url';
 import { eq, and, ne } from 'drizzle-orm';
+import { i18nMessage } from '@/lib/i18n';
+import { textError } from '@/lib/http';
 
 export const POST: APIRoute = async ({ request, locals }) => {
   const auth = await requireAdminAction(request, 'visitor');
   if (isAdminActionResponse(auth)) return auth;
 
-  const formData = await readAdminFormOrError(request);
+  const formData = await readAdminFormOrError(request, undefined, auth.i18n);
   if (formData instanceof Response) return formData;
+  const error = (status: number, key: string, variables: Record<string, string | number> = {}, fallback = key) =>
+    textError(status, i18nMessage(key, fallback, variables), undefined, auth.i18n);
   const screenName = formData.get('screenName')?.toString()?.trim() || auth.user.name;
   const mail = formData.get('mail')?.toString()?.trim() || '';
   const url = formData.get('url')?.toString()?.trim() || '';
@@ -25,11 +29,11 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const passwordConfirm = formData.get('passwordConfirm')?.toString() || '';
   const currentPassword = formData.get('currentPassword')?.toString() || '';
 
-  if (!mail) return new Response('邮箱不能为空', { status: 400 });
+  if (!mail) return error(400, 'admin.profile.emailRequired', {}, 'Email is required.');
 
   // Basic email format validation
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)) {
-    return new Response('邮箱格式不正确', { status: 400 });
+    return error(400, 'admin.profile.emailInvalid', {}, 'The email address is invalid.');
   }
 
   // Check email uniqueness (exclude current user)
@@ -37,7 +41,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     where: and(eq(schema.users.mail, mail), ne(schema.users.uid, auth.uid)),
   });
   if (existingMail) {
-    return new Response('邮箱已被其他用户使用', { status: 409 });
+    return error(409, 'admin.profile.emailTaken', {}, 'This email address is already used by another user.');
   }
 
   const updateData: Record<string, unknown> = {
@@ -49,23 +53,23 @@ export const POST: APIRoute = async ({ request, locals }) => {
   if (url) {
     const normalizedUrl = normalizeHttpUrl(url);
     if (normalizedUrl === null) {
-      return new Response('个人主页地址格式不正确', { status: 400 });
+      return error(400, 'admin.profile.urlInvalid', {}, 'The profile URL is invalid.');
     }
     updateData.url = normalizedUrl;
   }
 
   if (password) {
     if (!currentPassword) {
-      return new Response('请输入当前密码', { status: 400 });
+      return error(400, 'admin.profile.currentPasswordRequired', {}, 'Enter your current password.');
     }
     if (!auth.user.password || await verifyPassword(currentPassword, auth.user.password) !== true) {
-      return new Response('当前密码不正确', { status: 403 });
+      return error(403, 'admin.profile.currentPasswordInvalid', {}, 'The current password is incorrect.');
     }
     if (password !== passwordConfirm) {
-      return new Response('两次输入的密码不一致', { status: 400 });
+      return error(400, 'admin.profile.passwordMismatch', {}, 'The two passwords do not match.');
     }
     if (password.length < PASSWORD_MIN_LENGTH) {
-      return new Response(`密码长度至少${PASSWORD_MIN_LENGTH}位`, { status: 400 });
+      return error(400, 'admin.profile.passwordTooShort', { count: PASSWORD_MIN_LENGTH }, 'The password must be at least {count} characters.');
     }
     updateData.password = await hashPassword(password);
     updateData.authCode = generateRandomString(32);

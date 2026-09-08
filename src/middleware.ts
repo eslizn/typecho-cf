@@ -14,7 +14,8 @@ import { env } from 'cloudflare:workers';
 import { isCacheablePublicPath } from '@/lib/cache';
 import { CONTENT_ROUTE_PATHS, isContentPathAllowed } from '@/lib/content-path';
 import type { I18nMessage } from '@/lib/i18n';
-import { normalizeI18nMessage } from '@/lib/i18n';
+import { i18nMessage, normalizeI18nMessage } from '@/lib/i18n';
+import { getThemeTranslationCatalogVersion } from '@/lib/theme';
 
 // Plugin loader registration (generated at build time by plugin-loader.ts).
 // Statically imported so the lazy plugin loader table exists before the first
@@ -93,10 +94,11 @@ export const onRequest = defineMiddleware(async (context, next) => {
   // Plugin activation has already completed in bootstrap. The locale and
   // catalog bundle must be known before the first cache lookup so plugin
   // overrides cannot be bypassed by a core-only cache hit.
+  const cacheBundleName = `${resolvedLocale.bundleName}+${getThemeTranslationCatalogVersion(options.theme || 'typecho-theme-minimal')}`;
   const cacheKey = isCacheable
-    ? new Request(withCacheVersion(context.request.url, options.cacheVersion, resolvedLocale.bundleName), {
+    ? new Request(withCacheVersion(context.request.url, options.cacheVersion, cacheBundleName), {
       method: 'GET',
-      headers: { 'Accept-Language': resolvedLocale.bundleName },
+      headers: { 'Accept-Language': cacheBundleName },
     })
     : null;
 
@@ -278,7 +280,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
     !isPluginRoute(path) &&
     !isContentPathAllowed(path, { permalinkPattern: postPattern, pagePattern, categoryPattern })
   ) {
-    return finalizeRequestResponse(new Response('Not Found', { status: 404 }), {
+    return finalizeRequestResponse(new Response(i18n.t('core.error.notFound', {}, 'Not Found'), { status: 404 }), {
       request: context.request,
       pluginCtx,
       i18n,
@@ -328,7 +330,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
     response = internalTarget ? await next(internalTarget) : await next();
   } catch (err) {
     console.error({ event: 'route_handler_failed', path, error: err instanceof Error ? err.message : String(err) });
-    response = new Response('Server error', { status: 500 });
+    response = new Response(i18n.t('core.error.server', {}, 'Server error'), { status: 500 });
   }
   if (response.status === 404) {
     // Only warn for admin paths (should never 404); info for everything else
@@ -345,9 +347,27 @@ export const onRequest = defineMiddleware(async (context, next) => {
   if (isAdminHtmlFormRequest(context.request) && path.startsWith('/api/admin/') && response.status >= 400) {
     const uid = await getAdminUserForFlash(context.request, db, options);
     if (uid) {
-      let message: string | I18nMessage = response.status >= 500 ? '操作失败，请稍后重试' : '操作失败';
+      let message: string | I18nMessage = response.status >= 500
+        ? i18nMessage('admin.error.operationFailed', 'Operation failed')
+        : i18nMessage('admin.error.invalidRequest', 'Invalid request');
       try {
         const body = await response.clone().text();
+        let hasHeaderDescriptor = false;
+        const responseCode = response.headers.get('X-Typecho-I18n-Code');
+        const responseParams = response.headers.get('X-Typecho-I18n-Params');
+        if (responseCode) {
+          let variables: unknown;
+          try { variables = responseParams ? JSON.parse(responseParams) : undefined; } catch { variables = undefined; }
+          const descriptor = normalizeI18nMessage({
+            key: responseCode,
+            variables,
+            fallbackText: body.trim() || undefined,
+          });
+          if (descriptor) {
+            message = descriptor;
+            hasHeaderDescriptor = true;
+          }
+        }
         if (body.trim()) {
           try {
             const parsed = JSON.parse(body) as { error?: unknown; code?: unknown; params?: unknown };
@@ -362,7 +382,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
               message = parsed.error;
             }
           } catch {
-            message = body.trim();
+            if (!hasHeaderDescriptor) message = body.trim();
           }
         }
       } catch { /* preserve generic message */ }

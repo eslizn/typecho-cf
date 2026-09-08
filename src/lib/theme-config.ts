@@ -103,7 +103,7 @@ export async function saveThemeConfiguration(
 
   return {
     success: true,
-    message: '主题设置已经保存',
+    message: auth.i18n.t('admin.config.themeSaved', {}, 'Theme settings saved'),
     theme: themeId,
     settings: maskConfigValues(fields, finalSettings),
   };

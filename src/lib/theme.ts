@@ -210,6 +210,20 @@ export function createThemeI18n(
   });
 }
 
+/** Stable fingerprint for theme-local catalogs used by public cache keys. */
+export function getThemeTranslationCatalogVersion(themeId: string): string {
+  const theme = getActiveTheme(themeId);
+  const parts: string[] = [theme.id];
+  for (const locale of Object.keys(theme.locales).sort()) {
+    const messages = theme.locales[locale] || {};
+    parts.push(locale);
+    for (const key of Object.keys(messages).sort()) {
+      parts.push(key, messages[key]);
+    }
+  }
+  return `theme-${fnv1a(parts.join('\0'))}`;
+}
+
 /**
  * Get the CSS path(s) for a theme
  * Order: stylesheets (base CSS like normalize/grid) → main stylesheet
@@ -282,4 +296,13 @@ export function getThemeCount(): number {
 // directly; no page-level registration script is required.
 for (const entry of themeRegistryEntries) {
   registerTheme(entry.packageName, entry.manifest, entry.cssPath, entry.locales || {});
+}
+
+function fnv1a(value: string): string {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
 }

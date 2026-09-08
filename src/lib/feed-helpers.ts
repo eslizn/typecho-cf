@@ -71,7 +71,7 @@ export async function buildFeedItem(
     date: new Date((post.created || 0) * 1000),
   };
 
-  item = await applyFilterSafely(pluginCtx, 'feed:item', item);
+  item = await applyFilterSafely(pluginCtx, 'feed:item', item, { i18n });
   return item;
 }
 

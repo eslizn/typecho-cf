@@ -1,5 +1,7 @@
 import { escapeAttr, parsePluginOption } from 'typecho/plugin-sdk';
-import type { PluginInitContext } from 'typecho/plugin-sdk';
+import type { I18n, PluginInitContext } from 'typecho/plugin-sdk';
+import en from './locales/en.json';
+import zhCN from './locales/zh-CN.json';
 
 type SpamMode = 'spam' | 'waiting' | 'discard';
 
@@ -23,6 +25,7 @@ interface HookExtra {
   request?: Request;
   formData?: FormData;
   isLoggedIn?: boolean;
+  i18n?: I18n;
 }
 
 const DEFAULTS: AntiSpamConfig = {
@@ -121,24 +124,32 @@ async function validateToken(
   secret: string,
   minTime: number,
   maxTime: number,
+  i18n?: I18n,
 ): Promise<string | null> {
-  if (!secret) return '站点安全密钥未配置';
-  if (!token) return '安全令牌缺失';
+  const t = (key: string, fallback: string, variables?: Record<string, string | number>) =>
+    i18n?.t(key, variables, fallback) ?? fallback;
+
+  if (!secret) return t('plugin.typecho-plugin-antispam.reason.siteSecretMissing', '站点安全密钥未配置');
+  if (!token) return t('plugin.typecho-plugin-antispam.reason.tokenMissing', '安全令牌缺失');
 
   const decoded = decodeToken(token);
-  if (!decoded) return '安全令牌无效';
+  if (!decoded) return t('plugin.typecho-plugin-antispam.reason.tokenInvalid', '安全令牌无效');
 
   const expectedSig = await hmacSha256(String(decoded.timestamp), secret);
-  if (decoded.signature !== expectedSig) return '安全令牌验证失败';
+  if (decoded.signature !== expectedSig) return t('plugin.typecho-plugin-antispam.reason.tokenVerificationFailed', '安全令牌验证失败');
 
   const now = Math.floor(Date.now() / 1000);
   const age = now - decoded.timestamp;
 
   if (age < minTime) {
-    return `提交过快，请${minTime - age}秒后再试`;
+    return t(
+      'plugin.typecho-plugin-antispam.reason.tooFast',
+      `提交过快，请${minTime - age}秒后再试`,
+      { seconds: minTime - age },
+    );
   }
   if (age > maxTime) {
-    return '页面已过期，请刷新后重新提交';
+    return t('plugin.typecho-plugin-antispam.reason.expired', '页面已过期，请刷新后重新提交');
   }
 
   return null;
@@ -150,9 +161,10 @@ function countLinks(text: string): number {
   return matches ? matches.length : 0;
 }
 
-function buildHoneypotHtml(): string {
+function buildHoneypotHtml(i18n?: I18n): string {
+  const label = i18n?.t('plugin.typecho-plugin-antispam.ui.address', undefined, 'Address') ?? 'Address';
   return `<div style="position:absolute;left:-9999px;top:auto;width:1px;height:1px;overflow:hidden;" aria-hidden="true" tabindex="-1">
-<label for="comment-${HONEYPOT_FIELD}">Address</label>
+<label for="comment-${HONEYPOT_FIELD}">${escapeAttr(label)}</label>
 <input type="text" name="${escapeAttr(HONEYPOT_FIELD)}" id="comment-${escapeAttr(HONEYPOT_FIELD)}" tabindex="-1" autocomplete="off">
 </div>`;
 }
@@ -161,13 +173,13 @@ function buildTokenHtml(token: string): string {
   return `<input type="hidden" name="${escapeAttr(TOKEN_FIELD)}" value="${escapeAttr(token)}">`;
 }
 
-async function buildSnippet(options?: Record<string, unknown>): Promise<{ headHtml: string; bodyHtml: string }> {
+async function buildSnippet(options?: Record<string, unknown>, i18n?: I18n): Promise<{ headHtml: string; bodyHtml: string }> {
   const config = getConfig(options);
 
   let bodyHtml = '';
 
   if (config.honeypot) {
-    bodyHtml += buildHoneypotHtml();
+    bodyHtml += buildHoneypotHtml(i18n);
   }
 
   if (config.timeCheck) {
@@ -193,7 +205,10 @@ function rejectComment(commentData: MutableCommentData, mode: SpamMode, reason: 
   return commentData;
 }
 
-export default function init({ addHook, pluginId }: PluginInitContext): void {
+export default function init({ addHook, pluginId, registerTranslations }: PluginInitContext): void {
+  registerTranslations?.('en', en);
+  registerTranslations?.('zh-CN', zhCN);
+
   addHook('comment:beforeSave', pluginId, async (
     commentData: MutableCommentData,
     extra?: HookExtra,
@@ -209,7 +224,15 @@ export default function init({ addHook, pluginId }: PluginInitContext): void {
     if (config.honeypot) {
       const honeypotValue = extra.formData?.get(HONEYPOT_FIELD)?.toString() || '';
       if (honeypotValue) {
-        return rejectComment(commentData, config.mode, '检测到垃圾评论特征');
+        return rejectComment(
+          commentData,
+          config.mode,
+          extra.i18n?.t(
+            'plugin.typecho-plugin-antispam.reason.honeypot',
+            undefined,
+            '检测到垃圾评论特征',
+          ) ?? '检测到垃圾评论特征',
+        );
       }
     }
 
@@ -218,7 +241,7 @@ export default function init({ addHook, pluginId }: PluginInitContext): void {
       const secret = getSecret(extra.options);
       if (secret) {
         const token = extra.formData?.get(TOKEN_FIELD)?.toString() || '';
-        const error = await validateToken(token, secret, config.minTime, config.maxTime);
+        const error = await validateToken(token, secret, config.minTime, config.maxTime, extra.i18n);
         if (error) {
           return rejectComment(commentData, config.mode, error);
         }
@@ -231,8 +254,16 @@ export default function init({ addHook, pluginId }: PluginInitContext): void {
       const links = countLinks(text);
       if (links > config.maxLinks) {
         const msg = config.maxLinks === 0
-          ? '评论中不允许包含链接'
-          : `评论中链接数量超过限制（最多${config.maxLinks}个）`;
+          ? extra.i18n?.t(
+            'plugin.typecho-plugin-antispam.reason.linksNotAllowed',
+            undefined,
+            '评论中不允许包含链接',
+          ) ?? '评论中不允许包含链接'
+          : extra.i18n?.t(
+            'plugin.typecho-plugin-antispam.reason.tooManyLinks',
+            { count: config.maxLinks },
+            `评论中链接数量超过限制（最多${config.maxLinks}个）`,
+          ) ?? `评论中链接数量超过限制（最多${config.maxLinks}个）`;
         return rejectComment(commentData, config.mode, msg);
       }
     }
@@ -242,10 +273,10 @@ export default function init({ addHook, pluginId }: PluginInitContext): void {
 
   addHook('frontend:footer', pluginId, async (
     bodyHtml: string,
-    extra?: { options?: Record<string, unknown>; pageContext?: { hasComments?: boolean } },
+    extra?: { options?: Record<string, unknown>; pageContext?: { hasComments?: boolean }; i18n?: I18n },
   ) => {
     if (!extra?.pageContext?.hasComments) return bodyHtml;
-    const snippet = await buildSnippet(extra?.options);
+    const snippet = await buildSnippet(extra?.options, extra.i18n);
     return bodyHtml + snippet.bodyHtml;
   });
 }

@@ -4,7 +4,7 @@ import { loadOptions } from '@/lib/options';
 import { getAuthCookies, validateAuthToken, validateCommentToken, timeSafeEqual } from '@/lib/auth';
 import { setActivatedPlugins, parseActivatedPlugins, applyFilter, doHook, type HookContext } from '@/lib/plugin';
 import { bumpCacheVersion, purgeContentCache } from '@/lib/cache';
-import { getClientIp, getRequestCoreContextFromLocals } from '@/lib/context';
+import { getClientIp, getRequestCoreContextFromLocals, getRequestI18n } from '@/lib/context';
 import { notifyOnComment } from '@/lib/comment-email';
 import { buildPermalink } from '@/lib/content';
 import { normalizeHttpUrl } from '@/lib/url';
@@ -12,20 +12,25 @@ import { isSameOriginRequest } from '@/lib/admin-auth';
 import { eq, and, sql } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 import { REQUEST_BODY_LIMITS } from '@/lib/constants';
-import { InputError, readBoundedFormData } from '@/lib/input';
+import { InputError, inputErrorMessage, readBoundedFormData } from '@/lib/input';
 import { validateFilteredComment, WriteFilterError } from '@/lib/write-filter';
+import { textError } from '@/lib/http';
+import { i18nMessage } from '@/lib/i18n';
 
 export const POST: APIRoute = async ({ request, locals }) => {
   const core = getRequestCoreContextFromLocals(locals);
   const db = core?.db ?? getDb(env.DB);
   const options = core?.options ?? await loadOptions(db);
+  let i18n = core?.i18n ?? getRequestI18n(request, options);
+  const error = (status: number, key: string, variables: Record<string, string | number> = {}, fallback = key) =>
+    textError(status, i18nMessage(key, fallback, variables), undefined, i18n);
 
   if (!isSameOriginRequest(request, options.siteUrl || '')) {
-    return new Response('Forbidden', { status: 403 });
+    return error(403, 'core.error.forbidden', {}, 'Forbidden');
   }
   const requestReferer = request.headers.get('referer');
   if (requestReferer && !isTrustedCommentReferer(requestReferer, options.siteUrl || '')) {
-    return new Response('评论来源页 URL 不合法', { status: 403 });
+    return error(403, 'comment.refererInvalid', {}, 'The comment source URL is invalid.');
   }
 
   // Load activated plugins
@@ -34,12 +39,14 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const activatedIds = parseActivatedPlugins(options.activatedPlugins as string | undefined);
     await setActivatedPlugins(pluginCtx, activatedIds);
   }
+  i18n = core?.i18n ?? getRequestI18n(request, options, pluginCtx.activatedPlugins);
+  pluginCtx.i18n = i18n;
 
   let formData: FormData;
   try {
     formData = await readBoundedFormData(request, REQUEST_BODY_LIMITS.publicForm);
   } catch (error) {
-    if (error instanceof InputError) return new Response(error.message, { status: error.status });
+    if (error instanceof InputError) return textError(error.status, inputErrorMessage(error), undefined, i18n);
     throw error;
   }
   const cid = parseInt(formData.get('cid')?.toString() || '0', 10);
@@ -50,12 +57,12 @@ export const POST: APIRoute = async ({ request, locals }) => {
   let url = formData.get('url')?.toString()?.trim() || '';
 
   if (!cid || !text) {
-    return new Response('评论内容不能为空', { status: 400 });
+    return error(400, 'comment.textRequired', {}, 'Comment text is required.');
   }
 
   // Limit comment text length
   if (text.length > 10000) {
-    return new Response('评论内容过长', { status: 400 });
+    return error(400, 'comment.textTooLong', {}, 'Comment text is too long.');
   }
 
   // Content lookup and optional session validation are independent.
@@ -69,18 +76,18 @@ export const POST: APIRoute = async ({ request, locals }) => {
   ]);
 
   if (!content) {
-    return new Response('文章不存在', { status: 404 });
+    return error(404, 'comment.contentNotFound', {}, 'The post does not exist.');
   }
 
   const isPublicContent =
     (content.type === 'post' || content.type === 'page') &&
     (content.status === 'publish' || content.status === 'hidden');
   if (!isPublicContent) {
-    return new Response('评论目标不可用', { status: 403 });
+    return error(403, 'comment.targetUnavailable', {}, 'Comments are not available for this content.');
   }
 
   if (content.allowComment !== '1') {
-    return new Response('评论已关闭', { status: 403 });
+    return error(403, 'comment.closed', {}, 'Comments are closed.');
   }
 
   // Encrypted-post gate: allow commenting only when the submitter has
@@ -91,7 +98,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
   if (content.password) {
     const suppliedPassword = formData.get('password')?.toString() || '';
     if (!timeSafeEqual(suppliedPassword, content.password)) {
-      return new Response('评论加密文章需要正确密码', { status: 403 });
+      return error(403, 'comment.passwordRequired', {}, 'The correct post password is required to comment.');
     }
   }
 
@@ -99,7 +106,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
   if (options.commentsAutoClose && options.commentsPostTimeout && content.created) {
     const ageSeconds = Math.floor(Date.now() / 1000) - content.created;
     if (ageSeconds > options.commentsPostTimeout) {
-      return new Response('评论已关闭（文章发布时间过长）', { status: 403 });
+      return error(403, 'comment.autoClosed', {}, 'Comments are closed because this post is too old.');
     }
   }
 
@@ -116,24 +123,24 @@ export const POST: APIRoute = async ({ request, locals }) => {
   // Validate for anonymous users
   if (!userId) {
     if (!author) {
-      return new Response('请填写称呼', { status: 400 });
+      return error(400, 'comment.authorRequired', {}, 'Please enter your name.');
     }
     if (options.commentsRequireMail && !mail) {
-      return new Response('请填写邮箱', { status: 400 });
+      return error(400, 'comment.emailRequired', {}, 'Please enter your email address.');
     }
     if (options.commentsRequireURL && !url) {
-      return new Response('请填写网站地址', { status: 400 });
+      return error(400, 'comment.websiteRequired', {}, 'Please enter your website URL.');
     }
     // Basic email format validation
     if (mail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)) {
-      return new Response('邮箱格式不正确', { status: 400 });
+      return error(400, 'comment.emailInvalid', {}, 'The email address is invalid.');
     }
   }
 
   if (url) {
     const normalizedUrl = normalizeHttpUrl(url);
     if (normalizedUrl === null) {
-      return new Response('网站地址格式不正确', { status: 400 });
+      return error(400, 'comment.websiteInvalid', {}, 'The website URL is invalid.');
     }
     url = normalizedUrl;
   }
@@ -141,7 +148,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
   // Check referer URL matches the content's URL (anti-spam: ensure comment came from a real page view)
   if (options.commentsCheckReferer) {
     if (!isTrustedCommentReferer(request.headers.get('referer'), options.siteUrl || '')) {
-      return new Response('评论来源页 URL 不合法', { status: 403 });
+      return error(403, 'comment.refererInvalid', {}, 'The comment source URL is invalid.');
     }
   }
 
@@ -183,7 +190,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
   if (options.commentsPostIntervalEnable && !userId && recentComment[0]) {
       const elapsed = Math.floor(Date.now() / 1000) - (recentComment[0].created || 0);
       if (elapsed < (options.commentsPostInterval || 60)) {
-        return new Response(`评论过于频繁，请等待 ${options.commentsPostInterval - elapsed} 秒后再试`, { status: 429 });
+        return error(429, 'comment.rateLimited', { seconds: options.commentsPostInterval - elapsed }, 'Comments are being posted too quickly. Try again in {seconds} seconds.');
       }
   }
 
@@ -199,7 +206,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
   }
 
   if (parent > 0 && !parentComment) {
-    return new Response('父评论不存在', { status: 400 });
+    return error(400, 'comment.parentNotFound', {}, 'The parent comment does not exist.');
   }
 
   const now = Math.floor(Date.now() / 1000);
@@ -233,7 +240,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       ? await validateCommentToken(submittedToken, options.secret as string, cid)
       : false;
     if (!valid) {
-      return new Response('评论来源验证失败', { status: 403 });
+      return error(403, 'comment.csrfFailed', {}, 'Comment verification failed.');
     }
   }
 
@@ -242,7 +249,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
   // rather than letting them surface as a 500 to the commenter.
   try {
     const filtered = await applyFilter(pluginCtx, 'comment:beforeSave', commentData, {
-      request, formData, db, options, isLoggedIn: !!userId,
+      request, formData, db, options, isLoggedIn: !!userId, i18n,
     });
     commentData = validateFilteredComment(protectedCommentData, filtered);
   } catch (err) {
@@ -253,7 +260,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       event: 'comment_filter_failed',
       errorType: err instanceof Error ? err.name : 'UnknownError',
     });
-    return new Response('插件处理评论时出错，请稍后重试', { status: 503 });
+    return error(503, 'comment.pluginFailed', {}, 'A plugin failed while processing the comment. Please try again later.');
   }
 
   // Check if any plugin rejected the comment (e.g. captcha verification failed)
@@ -276,7 +283,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     );
   }
   const [inserted] = await db.batch(writeStatements as [any, ...any[]]);
-  if (!inserted.length) return new Response('评论保存失败', { status: 500 });
+  if (!inserted.length) return error(500, 'comment.saveFailed', {}, 'The comment could not be saved.');
   const newCoid = inserted[0].coid;
   commentData.coid = newCoid;
 

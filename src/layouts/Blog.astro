@@ -41,6 +41,8 @@ const {
 
 const currentPath = new URL(Astro.request.url).pathname;
 const isIndex = currentPath === '/';
+const t = (key: string, variables: Record<string, string | number> = {}, fallback = key): string =>
+  i18n?.t(key, variables, fallback) ?? fallback;
 ---
 <Base
   title={title}
@@ -61,14 +63,14 @@ const isIndex = currentPath === '/';
         </div>
         <div class="site-search col-3 kit-hidden-tb">
           <form id="search" method="post" action={urls.siteUrl + '/'} role="search">
-            <label for="s" class="sr-only">搜索关键字</label>
-            <input type="text" id="s" name="s" class="text" placeholder="输入关键字搜索" />
-            <button type="submit" class="submit">搜索</button>
+            <label for="s" class="sr-only">{t('core.frontend.searchLabel', {}, 'Search keywords')}</label>
+            <input type="text" id="s" name="s" class="text" placeholder={t('core.frontend.searchPlaceholder', {}, 'Search')} />
+            <button type="submit" class="submit">{t('core.frontend.searchSubmit', {}, 'Search')}</button>
           </form>
         </div>
         <div class="col-mb-12">
           <nav id="nav-menu" class="clearfix" role="navigation">
-            <a class:list={[{ current: isIndex }]} href={urls.siteUrl + '/'}>首页</a>
+            <a class:list={[{ current: isIndex }]} href={urls.siteUrl + '/'}>{t('core.frontend.home', {}, 'Home')}</a>
             {pages.map((page) => (
               <a
                 class:list={[{ current: currentSlug === page.slug }]}
@@ -93,7 +95,7 @@ const isIndex = currentPath === '/';
           <div class="col-mb-12 col-offset-1 col-3 kit-hidden-tb" id="secondary" role="complementary">
             {sidebarData.recentPosts && sidebarData.recentPosts.length > 0 && (
               <section class="widget">
-                <h3 class="widget-title">最新文章</h3>
+                <h3 class="widget-title">{t('core.frontend.recentPosts', {}, 'Recent posts')}</h3>
                 <ul class="widget-list">
                   {sidebarData.recentPosts.map((post) => (
                     <li><a href={post.permalink}>{post.title}</a></li>
@@ -104,7 +106,7 @@ const isIndex = currentPath === '/';
 
             {sidebarData.recentComments && sidebarData.recentComments.length > 0 && (
               <section class="widget">
-                <h3 class="widget-title">最近回复</h3>
+                <h3 class="widget-title">{t('core.frontend.recentComments', {}, 'Recent comments')}</h3>
                 <ul class="widget-list">
                   {sidebarData.recentComments.map((comment) => (
                     <li>
@@ -117,7 +119,7 @@ const isIndex = currentPath === '/';
 
             {sidebarData.categories && sidebarData.categories.length > 0 && (
               <section class="widget">
-                <h3 class="widget-title">分类</h3>
+                <h3 class="widget-title">{t('core.frontend.categories', {}, 'Categories')}</h3>
                 <ul class="widget-list">
                   {sidebarData.categories.map((cat) => (
                     <li><a href={cat.permalink}>{cat.name} ({cat.count})</a></li>
@@ -128,7 +130,7 @@ const isIndex = currentPath === '/';
 
             {sidebarData.archives && sidebarData.archives.length > 0 && (
               <section class="widget">
-                <h3 class="widget-title">归档</h3>
+                <h3 class="widget-title">{t('core.frontend.archives', {}, 'Archives')}</h3>
                 <ul class="widget-list">
                   {sidebarData.archives.map((archive) => (
                     <li><a href={archive.permalink}>{archive.date}</a></li>
@@ -138,20 +140,20 @@ const isIndex = currentPath === '/';
             )}
 
             <section class="widget">
-              <h3 class="widget-title">其它</h3>
+              <h3 class="widget-title">{t('core.frontend.other', {}, 'Other')}</h3>
               <ul class="widget-list">
                 {isLoggedIn ? (
                   <>
                     <li class="last">
-                      <a href={urls.adminUrl}>进入后台 ({user?.screenName || user?.name})</a>
+                      <a href={urls.adminUrl}>{t('core.frontend.admin', { name: user?.screenName || user?.name || '' }, 'Admin ({name})')}</a>
                     </li>
-                    <li><form method="post" action={urls.logoutUrl} class="logout-form"><button type="submit">退出</button></form></li>
+                    <li><form method="post" action={urls.logoutUrl} class="logout-form"><button type="submit">{t('core.frontend.logout', {}, 'Log out')}</button></form></li>
                   </>
                 ) : (
-                  <li class="last"><a href={urls.loginUrl}>登录</a></li>
+                  <li class="last"><a href={urls.loginUrl}>{t('core.frontend.login', {}, 'Log in')}</a></li>
                 )}
-                <li><a href={urls.feedUrl}>文章 RSS</a></li>
-                <li><a href={urls.commentsFeedUrl}>评论 RSS</a></li>
+                <li><a href={urls.feedUrl}>{t('core.frontend.postsRss', {}, 'Posts RSS')}</a></li>
+                <li><a href={urls.commentsFeedUrl}>{t('core.frontend.commentsRss', {}, 'Comments RSS')}</a></li>
               </ul>
             </section>
           </div>
@@ -162,6 +164,6 @@ const isIndex = currentPath === '/';
 
   <footer id="footer" role="contentinfo">
     &copy; {new Date().getFullYear()} <a href={urls.siteUrl}>{options.title}</a>.
-    由 <a href="https://github.com/eslizn/typecho-cf">Typecho</a> 强力驱动.
+    {t('core.frontend.poweredBy', {}, 'Powered by Typecho CF')}.
   </footer>
 </Base>

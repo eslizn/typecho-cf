@@ -12,7 +12,7 @@ const authCheck = requireAuth(ctx);
 if (authCheck) return authCheck;
 
 if (!hasPermission(ctx.user!.group || 'visitor', 'editor')) {
-  return new Response('Forbidden', { status: 403 });
+  return new Response(ctx.i18n.t('core.error.forbidden', {}, 'Forbidden'), { status: 403 });
 }
 
 const { db, options, urls, user, csrfToken } = ctx;
@@ -89,23 +89,23 @@ function formatBytes(bytes: number): string {
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 }
 ---
-<Admin title="管理文件" options={options} urls={urls} user={user} activeMenu="manage-medias" pluginCtx={ctx}>
+<Admin title={ctx.i18n.t('admin.page.manageMedias', {}, 'Manage media')} options={options} urls={urls} user={user} activeMenu="manage-medias" pluginCtx={ctx}>
   <div class="col-mb-12 typecho-list">
     <div class="typecho-list-operate clearfix">
       <form method="get">
         <div class="operate">
-          <label><i class="sr-only">全选</i><input type="checkbox" class="typecho-table-select-all" /></label>
+          <label><i class="sr-only">{ctx.i18n.t('admin.action.selectAll', {}, 'Select all')}</i><input type="checkbox" class="typecho-table-select-all" /></label>
           <div class="btn-group btn-drop">
-            <button class="btn dropdown-toggle btn-s" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="media-actions-top"><i class="sr-only">操作</i>选中项 <i class="i-caret-down"></i></button>
+            <button class="btn dropdown-toggle btn-s" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="media-actions-top"><i class="sr-only">{ctx.i18n.t('admin.action.actions', {}, 'Actions')}</i>{ctx.i18n.t('admin.notice.selectAction', {}, 'Select an action')} <i class="i-caret-down"></i></button>
             <ul class="dropdown-menu" id="media-actions-top" role="menu">
-              <li><a href="/api/admin/media-batch?do=delete">删除</a></li>
+              <li><a href="/api/admin/media-batch?do=delete">{ctx.i18n.t('admin.action.delete', {}, 'Delete')}</a></li>
             </ul>
           </div>
         </div>
         <div class="search" role="search">
-          {keywords && <a href="/admin/manage-medias">&laquo; 取消筛选</a>}
-          <input type="text" class="text-s" placeholder="请输入关键字" value={keywords} name="keywords" />
-          <button type="submit" class="btn btn-s">筛选</button>
+          {keywords && <a href="/admin/manage-medias">&laquo; {ctx.i18n.t('admin.action.clearFilter', {}, 'Clear filter')}</a>}
+          <input type="text" class="text-s" placeholder={ctx.i18n.t('admin.search.placeholder', {}, 'Enter keywords')} value={keywords} name="keywords" />
+          <button type="submit" class="btn btn-s">{ctx.i18n.t('admin.action.filter', {}, 'Filter')}</button>
         </div>
       </form>
     </div>
@@ -124,16 +124,16 @@ function formatBytes(bytes: number): string {
           <thead>
             <tr>
               <th class="kit-hidden-mb"></th>
-              <th>文件名</th>
-              <th class="kit-hidden-mb">上传者</th>
-              <th class="kit-hidden-mb">所属</th>
-              <th>日期</th>
+              <th>{ctx.i18n.t('admin.field.fileName', {}, 'File name')}</th>
+              <th class="kit-hidden-mb">{ctx.i18n.t('admin.field.owner', {}, 'Owner')}</th>
+              <th class="kit-hidden-mb">{ctx.i18n.t('admin.field.contentOwner', {}, 'Attached to')}</th>
+              <th>{ctx.i18n.t('admin.field.date', {}, 'Date')}</th>
             </tr>
           </thead>
           <tbody>
             {attachments.length === 0 ? (
               <tr>
-                <td colspan="5"><h6 class="typecho-list-table-title">没有任何文件</h6></td>
+                <td colspan="5"><h6 class="typecho-list-table-title">{ctx.i18n.t('admin.notice.noMedia', {}, 'No media')}</h6></td>
               </tr>
             ) : (
               attachments.map((att) => {
@@ -147,23 +147,23 @@ function formatBytes(bytes: number): string {
                   <tr>
                     <td class="kit-hidden-mb"><input type="checkbox" value={String(att.cid)} name="cid[]" /></td>
                     <td>
-                      <a href={`/admin/media?cid=${att.cid}`}>{att.title || '未命名文件'}</a>
-                      <a href={`/admin/media?cid=${att.cid}`} title={`编辑 ${att.title}`}><i class="i-edit"></i></a>
+                      <a href={`/admin/media?cid=${att.cid}`}>{att.title || ctx.i18n.t('admin.form.noName', {}, 'Unnamed')}</a>
+                      <a href={`/admin/media?cid=${att.cid}`} title={`${ctx.i18n.t('admin.action.edit', {}, 'Edit')} ${att.title || ctx.i18n.t('admin.form.noName', {}, 'Unnamed')}`}><i class="i-edit"></i></a>
                       {fileUrl && (
-                        <a href={fileUrl} title="浏览文件" target="_blank" rel="noopener noreferrer"><i class="i-exlink"></i></a>
+                        <a href={fileUrl} title={ctx.i18n.t('admin.action.browse', {}, 'Browse')} target="_blank" rel="noopener noreferrer"><i class="i-exlink"></i></a>
                       )}
                       <br />
-                      <span class="description">{isImage ? '图片' : '文件'} - {formatBytes(parseInt(String(meta.size || '0'), 10) || 0)}</span>
+                      <span class="description">{isImage ? ctx.i18n.t('admin.status.image', {}, 'Image') : ctx.i18n.t('admin.status.file', {}, 'File')} - {formatBytes(parseInt(String(meta.size || '0'), 10) || 0)}</span>
                     </td>
-                    <td class="kit-hidden-mb">{authorName || '未知'}</td>
+                    <td class="kit-hidden-mb">{authorName || ctx.i18n.t('admin.status.unknown', {}, 'Unknown')}</td>
                     <td class="kit-hidden-mb">
                       {att.parent && parentTitle ? (
                         <a href={`/admin/write-post?cid=${att.parent}`}>{parentTitle}</a>
                       ) : (
-                        <span class="description">未归档</span>
+                        <span class="description">{ctx.i18n.t('admin.status.unarchived', {}, 'Unarchived')}</span>
                       )}
                     </td>
-                    <td>{formatDate(att.created || 0, 'Y-m-d', options.timezone)}</td>
+                    <td>{formatDate(att.created || 0, 'Y-m-d', options.timezone, ctx.i18n.locale)}</td>
                   </tr>
                 );
               })
@@ -176,11 +176,11 @@ function formatBytes(bytes: number): string {
     <div class="typecho-list-operate clearfix">
       <div class="operate-toolbar">
         <div class="operate">
-          <label><i class="sr-only">全选</i><input type="checkbox" class="typecho-table-select-all" /></label>
+          <label><i class="sr-only">{ctx.i18n.t('admin.action.selectAll', {}, 'Select all')}</i><input type="checkbox" class="typecho-table-select-all" /></label>
           <div class="btn-group btn-drop">
-            <button class="btn dropdown-toggle btn-s" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="media-actions-bottom"><i class="sr-only">操作</i>选中项 <i class="i-caret-down"></i></button>
+            <button class="btn dropdown-toggle btn-s" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="media-actions-bottom"><i class="sr-only">{ctx.i18n.t('admin.action.actions', {}, 'Actions')}</i>{ctx.i18n.t('admin.notice.selectAction', {}, 'Select an action')} <i class="i-caret-down"></i></button>
             <ul class="dropdown-menu" id="media-actions-bottom" role="menu">
-              <li><a href="/api/admin/media-batch?do=delete">删除</a></li>
+              <li><a href="/api/admin/media-batch?do=delete">{ctx.i18n.t('admin.action.delete', {}, 'Delete')}</a></li>
             </ul>
           </div>
         </div>

@@ -10,7 +10,7 @@ const ctx = await createContext(Astro.locals, Astro.request);
 const authCheck = requireAuth(ctx);
 if (authCheck) return authCheck;
 if (!hasPermission(ctx.user!.group || 'visitor', 'editor')) {
-  return new Response('Forbidden', { status: 403 });
+  return new Response(ctx.i18n.t('core.error.forbidden', {}, 'Forbidden'), { status: 403 });
 }
 
 const { db, options, urls, user, csrfToken } = ctx;
@@ -40,26 +40,28 @@ const authorMap = new Map(pageRows
     name: row.authorName,
     screenName: row.authorScreenName,
   }]));
+const t = ctx.i18n.t.bind(ctx.i18n);
+const tPlural = ctx.i18n.tPlural.bind(ctx.i18n);
 ---
-<Admin title="管理页面" options={options} urls={urls} user={user} activeMenu="manage-pages" pluginCtx={ctx}>
+<Admin title={t('admin.page.managePages', {}, 'Manage pages')} options={options} urls={urls} user={user} activeMenu="manage-pages" pluginCtx={ctx}>
   <div class="col-mb-12 typecho-list">
     <div class="typecho-list-operate clearfix">
       <form method="get">
         <div class="operate">
-          <label><i class="sr-only">全选</i><input type="checkbox" class="typecho-table-select-all" /></label>
+           <label><i class="sr-only">{t('admin.action.selectAll', {}, 'Select all')}</i><input type="checkbox" class="typecho-table-select-all" /></label>
           <div class="btn-group btn-drop">
-            <button class="btn dropdown-toggle btn-s" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="page-actions"><i class="sr-only">操作</i>选中项 <i class="i-caret-down"></i></button>
+             <button class="btn dropdown-toggle btn-s" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="page-actions"><i class="sr-only">{t('admin.action.actions', {}, 'Actions')}</i>{t('admin.notice.selectAction', {}, 'Select an action')} <i class="i-caret-down"></i></button>
             <ul class="dropdown-menu" id="page-actions" role="menu">
-              <li><a href="/api/admin/content-batch?do=delete&type=page">删除</a></li>
-              <li><a href="/api/admin/content-batch?do=mark&status=publish&type=page">标记为<strong>公开</strong></a></li>
-              <li><a href="/api/admin/content-batch?do=mark&status=hidden&type=page">标记为<strong>隐藏</strong></a></li>
+               <li><a href="/api/admin/content-batch?do=delete&type=page">{t('admin.action.delete', {}, 'Delete')}</a></li>
+               <li><a href="/api/admin/content-batch?do=mark&status=publish&type=page">{t('admin.action.markAs', {}, 'Mark as ')}<strong>{t('admin.option.publish', {}, 'Published')}</strong></a></li>
+               <li><a href="/api/admin/content-batch?do=mark&status=hidden&type=page">{t('admin.action.markAs', {}, 'Mark as ')}<strong>{t('admin.option.hidden', {}, 'Hidden')}</strong></a></li>
             </ul>
           </div>
         </div>
         <div class="search" role="search">
-          {keywords && <a href="/admin/manage-pages">&laquo; 取消筛选</a>}
-          <input type="text" class="text-s" placeholder="请输入关键字" value={keywords} name="keywords" />
-          <button type="submit" class="btn btn-s">筛选</button>
+           {keywords && <a href="/admin/manage-pages">&laquo; {t('admin.action.clearFilter', {}, 'Clear filter')}</a>}
+           <input type="text" class="text-s" placeholder={t('admin.search.placeholder', {}, 'Enter keywords')} value={keywords} name="keywords" />
+           <button type="submit" class="btn btn-s">{t('admin.action.filter', {}, 'Filter')}</button>
         </div>
       </form>
     </div>
@@ -80,16 +82,16 @@ const authorMap = new Map(pageRows
             <tr class="nodrag">
               <th class="kit-hidden-mb"></th>
               <th class="kit-hidden-mb"></th>
-              <th>标题</th>
-              <th>缩略名</th>
-              <th class="kit-hidden-mb">作者</th>
-              <th>日期</th>
+               <th>{t('admin.field.title', {}, 'Title')}</th>
+               <th>{t('admin.field.slug', {}, 'Slug')}</th>
+               <th class="kit-hidden-mb">{t('admin.field.author', {}, 'Author')}</th>
+               <th>{t('admin.field.date', {}, 'Date')}</th>
             </tr>
           </thead>
           <tbody>
             {pages.length === 0 ? (
               <tr>
-                <td colspan="6"><h6 class="typecho-list-table-title">没有任何页面</h6></td>
+                 <td colspan="6"><h6 class="typecho-list-table-title">{t('admin.notice.noPages', {}, 'No pages')}</h6></td>
               </tr>
             ) : (
               pages.map((pg) => {
@@ -101,21 +103,21 @@ const authorMap = new Map(pageRows
                     <td class="kit-hidden-mb">
                       <a href={`/admin/manage-comments?cid=${pg.cid}`}
                         class="balloon-button size-small"
-                        title={`${pg.commentsNum || 0} 评论`}>{pg.commentsNum || 0}</a>
+                         title={tPlural('admin.content.commentsCount', pg.commentsNum || 0, {}, '{count} comments')}>{pg.commentsNum || 0}</a>
                     </td>
                     <td>
-                      <a href={`/admin/write-page?cid=${pg.cid}`}>{pg.title || '无标题'}</a>
-                      {isDraft && <em class="status">草稿</em>}
-                      {pg.status === 'hidden' && <em class="status">隐藏</em>}
-                      <a href={`/admin/write-page?cid=${pg.cid}`} title={`编辑 ${pg.title}`}><i class="i-edit"></i></a>
+                       <a href={`/admin/write-page?cid=${pg.cid}`}>{pg.title || t('core.content.untitled', {}, 'Untitled')}</a>
+                       {isDraft && <em class="status">{t('admin.option.draft', {}, 'Draft')}</em>}
+                       {pg.status === 'hidden' && <em class="status">{t('admin.option.hidden', {}, 'Hidden')}</em>}
+                       <a href={`/admin/write-page?cid=${pg.cid}`} title={`${t('admin.action.edit', {}, 'Edit')} ${pg.title || t('core.content.untitled', {}, 'Untitled')}`}><i class="i-edit"></i></a>
                       {!isDraft && (
                         <a href={buildPermalink({ cid: pg.cid, slug: pg.slug, type: pg.type, created: pg.created }, urls.siteUrl, undefined, options.pagePattern as string | undefined)}
-                          title={`浏览 ${pg.title}`}><i class="i-exlink"></i></a>
+                           title={`${t('admin.action.browse', {}, 'Browse')} ${pg.title || t('core.content.untitled', {}, 'Untitled')}`}><i class="i-exlink"></i></a>
                       )}
                     </td>
                     <td>{pg.slug}</td>
-                    <td class="kit-hidden-mb">{author?.screenName || author?.name || '未知'}</td>
-                    <td>{formatDate(pg.created || 0, 'Y-m-d', options.timezone)}</td>
+                     <td class="kit-hidden-mb">{author?.screenName || author?.name || t('admin.status.unknown', {}, 'Unknown')}</td>
+                    <td>{formatDate(pg.created || 0, 'Y-m-d', options.timezone, ctx.i18n.locale)}</td>
                   </tr>
                 );
               })

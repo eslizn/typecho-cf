@@ -212,7 +212,7 @@ export async function renderMarkdownFiltered(ctx: HookContext, text: string): Pr
  */
 export function renderContentExcerpt(
   text: string,
-  moreText = '- 阅读剩余部分 -',
+  moreText = '- Read more -',
   permalink = '#'
 ): string {
   if (!text) return '';

@@ -9,26 +9,26 @@ import { buildPermalink } from '@/lib/content';
 const ctx = await createContext(Astro.locals, Astro.request);
 const authCheck = requireAuth(ctx);
 if (authCheck) return authCheck;
-if (!hasPermission(ctx.user!.group || 'visitor', 'contributor')) return new Response('Forbidden', { status: 403 });
+if (!hasPermission(ctx.user!.group || 'visitor', 'contributor')) return new Response(ctx.i18n.t('core.error.forbidden', {}, 'Forbidden'), { status: 403 });
 const coid = Number.parseInt(Astro.url.searchParams.get('coid') || '0', 10);
 const comment = await ctx.db.query.comments.findFirst({ where: eq(schema.comments.coid, coid) });
-if (!comment) return new Response('Not Found', { status: 404 });
+if (!comment) return new Response(ctx.i18n.t('core.error.notFound', {}, 'Not Found'), { status: 404 });
 const content = await ctx.db.query.contents.findFirst({ where: eq(schema.contents.cid, comment.cid || 0) });
-if (!content || (ctx.user!.group !== 'administrator' && content.authorId !== ctx.user!.uid)) return new Response('Forbidden', { status: 403 });
+if (!content || (ctx.user!.group !== 'administrator' && content.authorId !== ctx.user!.uid)) return new Response(ctx.i18n.t('core.error.forbidden', {}, 'Forbidden'), { status: 403 });
 const contentUrl = buildPermalink(content, ctx.urls.siteUrl, ctx.options.permalinkPattern, ctx.options.pagePattern);
 ---
-<Admin title="编辑评论" options={ctx.options} urls={ctx.urls} user={ctx.user} activeMenu="manage-comments" pluginCtx={ctx}>
+<Admin title={ctx.i18n.t('admin.page.editComment', {}, 'Edit comment')} options={ctx.options} urls={ctx.urls} user={ctx.user} activeMenu="manage-comments" pluginCtx={ctx}>
   <div class="col-mb-12 col-tb-8 col-tb-offset-2" role="form">
     <form method="post" action="/api/admin/comment">
       <input type="hidden" name="_" value={ctx.csrfToken} />
       <input type="hidden" name="coid" value={String(comment.coid)} />
       <ul class="typecho-option">
-        <li><label for="author" class="typecho-label">作者</label><input id="author" name="author" class="text w-100" value={comment.author || ''} required /></li>
-        <li><label for="mail" class="typecho-label">邮箱</label><input id="mail" name="mail" type="email" class="text w-100" value={comment.mail || ''} /></li>
-        <li><label for="url" class="typecho-label">网址</label><input id="url" name="url" type="url" class="text w-100" value={comment.url || ''} /></li>
-        <li><label for="text" class="typecho-label">内容</label><textarea id="text" name="text" class="w-100 mono" rows="10" required>{comment.text || ''}</textarea></li>
+        <li><label for="author" class="typecho-label">{ctx.i18n.t('admin.field.author', {}, 'Author')}</label><input id="author" name="author" class="text w-100" value={comment.author || ''} required /></li>
+        <li><label for="mail" class="typecho-label">{ctx.i18n.t('admin.field.email', {}, 'Email')}</label><input id="mail" name="mail" type="email" class="text w-100" value={comment.mail || ''} /></li>
+        <li><label for="url" class="typecho-label">{ctx.i18n.t('admin.field.url', {}, 'URL')}</label><input id="url" name="url" type="url" class="text w-100" value={comment.url || ''} /></li>
+        <li><label for="text" class="typecho-label">{ctx.i18n.t('admin.field.content', {}, 'Content')}</label><textarea id="text" name="text" class="w-100 mono" rows="10" required>{comment.text || ''}</textarea></li>
       </ul>
-      <p><button type="submit" class="btn primary">保存评论</button> <a class="btn" href={contentUrl}>返回文章</a></p>
+      <p><button type="submit" class="btn primary">{ctx.i18n.t('admin.action.saveComment', {}, 'Save comment')}</button> <a class="btn" href={contentUrl}>{ctx.i18n.t('admin.action.backToPost', {}, 'Back to post')}</a></p>
     </form>
   </div>
 </Admin>

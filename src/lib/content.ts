@@ -166,7 +166,7 @@ export function buildSearchLink(keywords: string, siteUrl: string): string {
  * Format a Unix timestamp using PHP-style date formatting
  * Supports common PHP date format characters
  */
-export function formatDate(timestamp: number, format: string, timezoneOffset = 28800): string {
+export function formatDate(timestamp: number, format: string, timezoneOffset = 28800, locale = 'en'): string {
   const date = new Date((timestamp + timezoneOffset) * 1000);
   const utcDate = new Date(date.getTime() + date.getTimezoneOffset() * 60000);
 
@@ -180,13 +180,16 @@ export function formatDate(timestamp: number, format: string, timezoneOffset = 2
   const j = String(utcDate.getDate());
   const c = new Date(timestamp * 1000).toISOString();
 
-  const monthNames = [
-    'January', 'February', 'March', 'April', 'May', 'June',
-    'July', 'August', 'September', 'October', 'November', 'December',
-  ];
-  const shortMonthNames = monthNames.map((name) => name.substring(0, 3));
-  const F = monthNames[utcDate.getMonth()];
-  const M = shortMonthNames[utcDate.getMonth()];
+  const monthDate = new Date(Date.UTC(utcDate.getFullYear(), utcDate.getMonth(), 1));
+  let F: string;
+  let M: string;
+  try {
+    F = new Intl.DateTimeFormat(locale, { month: 'long', timeZone: 'UTC' }).format(monthDate);
+    M = new Intl.DateTimeFormat(locale, { month: 'short', timeZone: 'UTC' }).format(monthDate);
+  } catch {
+    F = new Intl.DateTimeFormat('en', { month: 'long', timeZone: 'UTC' }).format(monthDate);
+    M = new Intl.DateTimeFormat('en', { month: 'short', timeZone: 'UTC' }).format(monthDate);
+  }
 
   const replacements: Record<string, string> = { Y, m, d, H, i, s, n, j, F, M, c };
 

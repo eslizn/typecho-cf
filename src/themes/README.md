@@ -13,6 +13,7 @@ typecho-theme-example/
 ├── package.json        # npm 包声明（keywords 必须包含 typecho + theme）
 ├── theme.json          # 可选：主题元数据（也可用 package.json 的 typecho.theme）
 ├── style.css           # 主样式表
+├── locales/             # 可选：主题内部翻译件（如 en.json、zh-CN.json）
 └── components/         # 可选：自定义模板组件
     ├── Index.astro     # 首页（文章列表）
     ├── Post.astro      # 文章详情
@@ -22,6 +23,30 @@ typecho-theme-example/
 ```
 
 无 `components/` 目录时为纯 CSS 主题，系统自动回退到默认主题的模板组件。
+
+---
+
+## 主题内部多语言
+
+主题可以在 `locales/<locale>.json` 中提供自己的翻译件，例如 `locales/en.json` 和 `locales/zh-CN.json`。主题组件从公共 Props 取得同形态的 `i18n`：
+
+```astro
+---
+import Base from '@/layouts/Base.astro';
+import type { ThemeIndexProps } from '@/lib/theme-props';
+
+const { options, urls, user, isLoggedIn, pluginCtx, i18n } = Astro.props as ThemeIndexProps;
+---
+<Base options={options} urls={urls} user={user} isLoggedIn={isLoggedIn} pluginCtx={pluginCtx} i18n={i18n}>
+  <button aria-label={i18n.t('theme.search.submit', {}, 'Search')}>
+    {i18n.t('theme.search.submit', {}, 'Search')}
+  </button>
+</Base>
+```
+
+查找顺序是当前主题翻译件 → 全局（核心和激活插件）翻译件 → 默认文本。主题翻译件只对当前主题内部生效，不会增加全局语言选项，也不会覆盖管理端、其他主题或插件中的同名 key；主题预览使用被预览主题的作用域。文章、页面、分类、标签、用户名等用户内容不会被自动翻译。
+
+主题翻译值是纯文本，只支持简单的 `{name}` / `{count}` 插值，不解析 ICU。主题自行输出完整 HTML 时仍需自行处理 `<html lang>`、安全转义及插件注入；使用系统 `Base.astro` 时，传入的 `i18n` 会同时用于文档语言和主题布局。
 
 ---
 
@@ -38,6 +63,7 @@ typecho-theme-example/
   "files": [
     "theme.json",
     "style.css",
+    "locales/",
     "components/"
   ]
 }
@@ -174,6 +200,7 @@ interface ThemeBaseProps {
   currentPath: string;           // 当前请求路径
   pluginCtx: HookContext;        // 当前请求已激活插件集合，传给 Base 布局执行展示 Hook
   themeConfig: Record<string, unknown>;  // 当前激活主题的自定义配置（manifest.config 声明字段，已合并默认值）
+  i18n: I18n;                    // 主题作用域翻译器：主题翻译件优先，全局翻译件回退
 }
 ```
 
@@ -305,9 +332,9 @@ import type { ThemeIndexProps } from '@/lib/theme-props';
 
 type Props = ThemeIndexProps;
 
-const { options, posts, pagination, urls, isLoggedIn, user, pluginCtx } = Astro.props;
+const { options, posts, pagination, urls, isLoggedIn, user, pluginCtx, i18n } = Astro.props;
 ---
-<Base options={options} urls={urls} user={user} isLoggedIn={isLoggedIn} pluginCtx={pluginCtx}>
+<Base options={options} urls={urls} user={user} isLoggedIn={isLoggedIn} pluginCtx={pluginCtx} i18n={i18n}>
   <header>
     <a href={urls.siteUrl}>{options.title}</a>
   </header>

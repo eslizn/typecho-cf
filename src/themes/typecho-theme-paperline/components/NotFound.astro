@@ -23,6 +23,7 @@ const {
   errorTitle,
 } = Astro.props;
 
+const t = i18n.t.bind(i18n);
 const isIndex = currentPath === '/';
 ---
 <Base
@@ -43,10 +44,10 @@ const isIndex = currentPath === '/';
         </div>
         <div class="site-search col-3 kit-hidden-tb">
           <form id="search" method="post" action={urls.siteUrl + '/'} role="search">
-            <label for="s" class="sr-only">搜索关键字</label>
-            <input type="text" id="s" name="s" class="text" placeholder="输入关键字搜索" />
-            <button type="submit" class="submit" aria-label="搜索">
-              搜索
+            <label for="s" class="sr-only">{t('theme.search.label', {}, 'Search keywords')}</label>
+            <input type="text" id="s" name="s" class="text" placeholder={t('theme.search.placeholder', {}, 'Search keywords')} />
+            <button type="submit" class="submit" aria-label={t('theme.search.submit', {}, 'Search')}>
+              {t('theme.search.submit', {}, 'Search')}
               <svg class="search-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
                 <circle cx="7" cy="7" r="4.5" />
                 <path d="m10.5 10.5 4 4" />
@@ -56,7 +57,7 @@ const isIndex = currentPath === '/';
         </div>
         <div class="col-mb-12">
           <nav id="nav-menu" class="clearfix" role="navigation">
-            <a class:list={[{ current: isIndex }]} href={urls.siteUrl + '/'}>首页</a>
+            <a class:list={[{ current: isIndex }]} href={urls.siteUrl + '/'}>{t('theme.nav.home', {}, 'Home')}</a>
             {pages.map((page) => (
               <a href={page.permalink} title={page.title}>{page.title}</a>
             ))}
@@ -72,10 +73,10 @@ const isIndex = currentPath === '/';
         <div class="col-mb-12 col-tb-8 col-tb-offset-2">
           <div class="error-page">
             <h2 class="post-title">{errorTitle}</h2>
-            <p>你想查看的页面已被转移或删除了, 要不要搜索看看:</p>
+            <p>{t('theme.notFound.description', {}, 'The page you are looking for has been moved or deleted. Would you like to search?')}</p>
             <form method="post" action={urls.siteUrl + '/'}>
               <p><input type="text" name="s" class="text" autofocus /></p>
-              <p><button type="submit" class="submit">搜索</button></p>
+              <p><button type="submit" class="submit">{t('theme.search.submit', {}, 'Search')}</button></p>
             </form>
           </div>
         </div>
@@ -85,7 +86,7 @@ const isIndex = currentPath === '/';
 
   <footer id="footer" role="contentinfo">
     &copy; {new Date().getFullYear()} <a href={urls.siteUrl}>{options.title}</a>.
-    由 <a href="https://github.com/eslizn/typecho-cf">Typecho CF</a> 强力驱动.
+    {t('theme.footer.poweredBy', {}, 'Powered by')} <a href="https://github.com/eslizn/typecho-cf">Typecho CF</a>.
   </footer>
   <CodeHighlight />
 </Base>

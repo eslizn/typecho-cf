@@ -65,30 +65,33 @@ const [
 
 const isContributor = hasPermission(user!.group || 'visitor', 'contributor');
 ---
-<Admin title="控制台" options={options} urls={urls} user={user} activeMenu="dashboard" bodyClass="typecho-dashboard" pluginCtx={ctx}>
+<Admin title={ctx.i18n.t('admin.page.dashboard', {}, 'Dashboard')} options={options} urls={urls} user={user} activeMenu="dashboard" bodyClass="typecho-dashboard" pluginCtx={ctx}>
   <div class="col-mb-12 welcome-board" role="main">
     <p>
-      目前有 <em>{postCount[0]?.count || 0}</em> 篇文章, 并有 <em>{commentCount[0]?.count || 0}</em>
-      条关于你的评论在 <em>{catCount[0]?.count || 0}</em> 个分类中.
-      <br />点击下面的链接快速开始:
+      {ctx.i18n.t('admin.dashboard.welcome', {
+        posts: postCount[0]?.count || 0,
+        comments: commentCount[0]?.count || 0,
+        categories: catCount[0]?.count || 0,
+      }, 'You have {posts} posts and {comments} comments in {categories} categories.')}
+      <br />{ctx.i18n.t('admin.dashboard.quickStart', {}, 'Get started with one of these links:')}
     </p>
     <ul id="start-link" class="clearfix">
-      {isContributor && <li><a href="/admin/write-post">撰写新文章</a></li>}
+      {isContributor && <li><a href="/admin/write-post">{ctx.i18n.t('admin.dashboard.writePost', {}, 'Write a new post')}</a></li>}
       {(waitingComments[0]?.count || 0) > 0 && (
         <li>
-          <a href="/admin/manage-comments?status=waiting">待审核评论</a>
+          <a href="/admin/manage-comments?status=waiting">{ctx.i18n.t('admin.dashboard.waitingComments', {}, 'Pending comments')}</a>
           <span class="balloon">{waitingComments[0]?.count}</span>
         </li>
       )}
       {(spamComments[0]?.count || 0) > 0 && (
         <li>
-          <a href="/admin/manage-comments?status=spam">垃圾评论</a>
+          <a href="/admin/manage-comments?status=spam">{ctx.i18n.t('admin.dashboard.spamComments', {}, 'Spam comments')}</a>
           <span class="balloon">{spamComments[0]?.count}</span>
         </li>
       )}
       {isAdmin && (
         <>
-          <li><a href="/admin/options-general">系统设置</a></li>
+          <li><a href="/admin/options-general">{ctx.i18n.t('admin.dashboard.systemSettings', {}, 'System settings')}</a></li>
         </>
       )}
     </ul>
@@ -96,16 +99,16 @@ const isContributor = hasPermission(user!.group || 'visitor', 'contributor');
 
   <div class="col-mb-12 col-tb-4" role="complementary">
     <section class="latest-link">
-      <h3>最近发布的文章</h3>
+      <h3>{ctx.i18n.t('admin.dashboard.recentPosts', {}, 'Recently published posts')}</h3>
       <ul>
         {recentPosts.length === 0 ? (
-          <li><em>暂时没有文章</em></li>
+          <li><em>{ctx.i18n.t('admin.dashboard.noPosts', {}, 'No posts yet')}</em></li>
         ) : (
           recentPosts.map((post) => (
             <li>
-              <span>{formatDate(post.created || 0, 'n.j', options.timezone)}</span>
+              <span>{formatDate(post.created || 0, 'n.j', options.timezone, ctx.i18n.locale)}</span>
               <a href={buildPermalink({ cid: post.cid, slug: post.slug, type: post.type, created: post.created }, urls.siteUrl, options.permalinkPattern as string | undefined)} class="title">
-                {post.title || '无标题'}
+                {post.title || ctx.i18n.t('core.content.untitled', {}, 'Untitled')}
               </a>
             </li>
           ))
@@ -116,21 +119,21 @@ const isContributor = hasPermission(user!.group || 'visitor', 'contributor');
 
   <div class="col-mb-12 col-tb-4" role="complementary">
     <section class="latest-link">
-      <h3>最近得到的回复</h3>
+      <h3>{ctx.i18n.t('admin.dashboard.recentComments', {}, 'Recent replies')}</h3>
       <ul>
         {recentComments.length === 0 ? (
-          <li>暂时没有回复</li>
+          <li>{ctx.i18n.t('admin.dashboard.noComments', {}, 'No replies yet')}</li>
         ) : (
           recentComments.map((comment) => (
             <li>
-              <span>{formatDate(comment.created || 0, 'n.j', options.timezone)}</span>
+              <span>{formatDate(comment.created || 0, 'n.j', options.timezone, ctx.i18n.locale)}</span>
               <a href={`${buildPermalink(
                 { cid: comment.cid, slug: comment.contentSlug, type: comment.contentType, created: comment.contentCreated },
                 urls.siteUrl,
                 options.permalinkPattern as string | undefined,
                 options.pagePattern as string | undefined,
               )}#comment-${comment.coid}`} class="title">
-                {comment.author || '匿名'}
+                {comment.author || ctx.i18n.t('core.comment.anonymous', {}, 'Anonymous')}
               </a>:
               {(comment.text || '').replace(/<[^>]+>/g, '').substring(0, 35)}...
             </li>
@@ -142,11 +145,11 @@ const isContributor = hasPermission(user!.group || 'visitor', 'contributor');
 
   <div class="col-mb-12 col-tb-4" role="complementary">
     <section class="latest-link">
-      <h3>关于 Typecho</h3>
+      <h3>{ctx.i18n.t('admin.dashboard.about', {}, 'About Typecho')}</h3>
       <ul>
-        <li><a href="https://github.com/eslizn/typecho-cf" target="_blank">项目主页</a></li>
+        <li><a href="https://github.com/eslizn/typecho-cf" target="_blank">{ctx.i18n.t('admin.dashboard.projectHome', {}, 'Project home')}</a></li>
         <li>Astro + Cloudflare Workers</li>
-        <li>Typecho 数据兼容</li>
+        <li>{ctx.i18n.t('admin.dashboard.compatibility', {}, 'Typecho data compatible')}</li>
       </ul>
     </section>
   </div>

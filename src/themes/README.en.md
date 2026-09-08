@@ -13,6 +13,7 @@ typecho-theme-example/
 ├── package.json        # npm package manifest (keywords must include typecho + theme)
 ├── theme.json          # Optional metadata (or use package.json typecho.theme)
 ├── style.css           # Main stylesheet
+├── locales/             # Optional theme-local catalogs (for example en.json and zh-CN.json)
 └── components/         # Optional: custom template components
     ├── Index.astro     # Home page (post list)
     ├── Post.astro      # Post detail
@@ -22,6 +23,30 @@ typecho-theme-example/
 ```
 
 Themes without a `components/` directory are CSS-only themes — the system automatically falls back to the default theme's template components.
+
+---
+
+## Theme-local translations
+
+Themes can provide catalogs in `locales/<locale>.json`, for example `locales/en.json` and `locales/zh-CN.json`. Template components receive an `i18n` prop with the same interface used by the system and plugins:
+
+```astro
+---
+import Base from '@/layouts/Base.astro';
+import type { ThemeIndexProps } from '@/lib/theme-props';
+
+const { options, urls, user, isLoggedIn, pluginCtx, i18n } = Astro.props as ThemeIndexProps;
+---
+<Base options={options} urls={urls} user={user} isLoggedIn={isLoggedIn} pluginCtx={pluginCtx} i18n={i18n}>
+  <button aria-label={i18n.t('theme.search.submit', {}, 'Search')}>
+    {i18n.t('theme.search.submit', {}, 'Search')}
+  </button>
+</Base>
+```
+
+Lookup order is theme catalog → global (core and active plugin) catalog → fallback text. Theme catalogs are scoped to the current theme: they do not add global locale choices and do not override the same key in admin pages, other themes, or plugins. Theme preview uses the previewed theme's scope. Articles, pages, categories, tags, usernames, and other user content are not translated automatically.
+
+Catalog values are plain text with simple `{name}` / `{count}` interpolation; ICU is not parsed. A theme that renders a complete HTML document remains responsible for `<html lang>`, escaping, and plugin injection. When using the system `Base.astro`, pass the scoped `i18n` prop so it is used by the document and theme layout.
 
 ---
 
@@ -38,6 +63,7 @@ Themes without a `components/` directory are CSS-only themes — the system auto
   "files": [
     "theme.json",
     "style.css",
+    "locales/",
     "components/"
   ]
 }
@@ -174,6 +200,7 @@ interface ThemeBaseProps {
   currentPath: string;           // Current request path
   pluginCtx: HookContext;        // Active plugins for display hooks executed by the Base layout
   themeConfig: Record<string, unknown>;  // Active theme's custom config (manifest.config fields, merged with defaults)
+  i18n: I18n;                    // Theme-scoped translator: theme catalog first, global catalog fallback
 }
 ```
 
@@ -305,9 +332,9 @@ import type { ThemeIndexProps } from '@/lib/theme-props';
 
 type Props = ThemeIndexProps;
 
-const { options, posts, pagination, urls, isLoggedIn, user, pluginCtx } = Astro.props;
+const { options, posts, pagination, urls, isLoggedIn, user, pluginCtx, i18n } = Astro.props;
 ---
-<Base options={options} urls={urls} user={user} isLoggedIn={isLoggedIn} pluginCtx={pluginCtx}>
+<Base options={options} urls={urls} user={user} isLoggedIn={isLoggedIn} pluginCtx={pluginCtx} i18n={i18n}>
   <header>
     <a href={urls.siteUrl}>{options.title}</a>
   </header>

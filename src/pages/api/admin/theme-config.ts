@@ -1,9 +1,10 @@
 import type { APIRoute } from 'astro';
-import { isAdminActionResponse, requireAdminAction } from '@/lib/admin-auth';
+import { isAdminActionResponse, jsonAdminActionError, requireAdminAction } from '@/lib/admin-auth';
 import { REQUEST_BODY_LIMITS } from '@/lib/constants';
-import { InputError, readBoundedFormData, readBoundedJson } from '@/lib/input';
-import { jsonError, jsonOk } from '@/lib/http';
+import { InputError, inputErrorMessage, readBoundedFormData, readBoundedJson } from '@/lib/input';
+import { jsonError, jsonOk, textError } from '@/lib/http';
 import type { I18n } from '@/lib/i18n';
+import { i18nMessage } from '@/lib/i18n';
 import {
   getThemeConfigurationView,
   saveThemeConfiguration,
@@ -12,18 +13,23 @@ import {
 
 function domainError(error: unknown, json: boolean, i18n: I18n): Response {
   if (error instanceof ThemeConfigurationError) {
-    return json ? jsonError(error.status, error.message, undefined, i18n) : new Response(error.message, { status: error.status });
+    const message = error.code === 'not_found'
+      ? i18nMessage('admin.config.themeNotFound', 'The theme does not exist or has no settings.')
+      : i18nMessage('admin.error.invalidRequest', error.message || 'Invalid request.');
+    return json ? jsonError(error.status, message, undefined, i18n) : textError(error.status, message, undefined, i18n);
   }
   if (error instanceof InputError) {
-    return json ? jsonError(error.status, error.message, undefined, i18n) : new Response(error.message, { status: error.status });
+    const message = inputErrorMessage(error);
+    return json ? jsonError(error.status, message, undefined, i18n) : textError(error.status, message, undefined, i18n);
   }
-  return json ? jsonError(400, '主题配置保存失败', undefined, i18n) : new Response('主题配置保存失败', { status: 400 });
+  const message = i18nMessage('admin.config.themeSaveFailed', 'Theme settings could not be saved.');
+  return json ? jsonError(400, message, undefined, i18n) : textError(400, message, undefined, i18n);
 }
 
 export const GET: APIRoute = async ({ request, url }) => {
   const auth = await requireAdminAction(request, 'administrator', { csrf: false });
   if (isAdminActionResponse(auth)) {
-    return jsonError(auth.status === 401 ? 401 : 403, '权限不足');
+    return jsonAdminActionError(request, auth);
   }
   try {
     return jsonOk(getThemeConfigurationView(auth.options, url.searchParams.get('id') || ''));
@@ -35,7 +41,7 @@ export const GET: APIRoute = async ({ request, url }) => {
 export const POST: APIRoute = async ({ request }) => {
   const auth = await requireAdminAction(request, 'administrator');
   if (isAdminActionResponse(auth)) {
-    return jsonError(auth.status === 401 ? 401 : 403, '权限不足');
+    return jsonAdminActionError(request, auth);
   }
 
   const contentType = request.headers.get('content-type')?.toLowerCase() || '';
@@ -51,7 +57,7 @@ export const POST: APIRoute = async ({ request }) => {
       const record = body as Record<string, unknown>;
       themeId = typeof record.theme === 'string' ? record.theme : '';
       if (!record.settings || typeof record.settings !== 'object' || Array.isArray(record.settings)) {
-        throw new ThemeConfigurationError('invalid', '请提供配置数据');
+        throw new ThemeConfigurationError('invalid', 'Configuration data is required.');
       }
       settings = record.settings as Record<string, unknown>;
     } else {

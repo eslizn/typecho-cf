@@ -24,7 +24,7 @@ try {
     currentPath: '/404',
     themeConfig: {},
     statusCode: 404,
-    errorTitle: '404 - 页面没找到',
+    errorTitle: fallbackI18n.t('core.error.notFoundTitle', {}, '404 - Page not found'),
     i18n: fallbackI18n,
   };
 }

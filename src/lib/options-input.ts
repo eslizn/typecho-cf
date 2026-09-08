@@ -1,4 +1,5 @@
 import { compilePermalinkPattern, DEFAULT_PERMALINK_PATTERNS, type PermalinkPatternKind } from '@/lib/permalink-pattern';
+import { normalizeLocale } from '@/lib/i18n';
 
 export class SiteOptionsInputError extends Error {
   constructor(
@@ -160,6 +161,9 @@ export function parseSiteOptionsInput({ formData, sourcePath }: ParseSiteOptions
   }
 
   if (entries.siteUrl !== undefined) entries.siteUrl = normalizeSiteUrl(entries.siteUrl);
+  if (entries.lang !== undefined && normalizeLocale(entries.lang) === null) {
+    invalid('lang', 'expected an empty value or a valid locale tag');
+  }
 
   for (const key of BOOLEAN_KEYS) {
     if (entries[key] !== undefined && entries[key] !== '0' && entries[key] !== '1') {

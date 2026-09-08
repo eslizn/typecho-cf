@@ -23,6 +23,9 @@ import { loadCommentPage } from '@/lib/comment-page';
 import type { RequestContext } from '@/lib/context';
 import { applyFilter, applyFilterSafely, doHook } from '@/lib/plugin';
 import { canViewContent, publishedPostCondition } from '@/lib/content-visibility';
+import { escapeHtml } from '@/lib/escape';
+import { createI18n, type I18n } from '@/lib/i18n';
+import { coreCatalogs } from '@/i18n/catalogs';
 import type {
   ThemeIndexProps, ThemePostProps, ThemePageProps, ThemeArchiveProps, ThemeNotFoundProps,
   PostListItem, CommentNode, CommentOptions,
@@ -46,6 +49,19 @@ const EMPTY_SIDEBAR: SidebarData = {
   archives: [],
 };
 
+// Keep the pure page-data helpers compatible with lightweight test and
+// extension contexts created before request i18n became mandatory.
+const FALLBACK_I18N = createI18n({ locale: 'en', catalogs: coreCatalogs });
+const FALLBACK_BUNDLE_NAME = 'en@catalog-1';
+
+function getRequestI18n(ctx: RequestContext): I18n {
+  return ctx.i18n ?? FALLBACK_I18N;
+}
+
+function getRequestBundleName(ctx: RequestContext): string {
+  return ctx.resolvedLocale?.bundleName ?? FALLBACK_BUNDLE_NAME;
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────
 
 async function loadCommon(ctx: RequestContext, requestUrl: string, withSidebar = true) {
@@ -60,9 +76,10 @@ async function loadCommon(ctx: RequestContext, requestUrl: string, withSidebar =
           options.categoryPattern as string | undefined,
           options.pagePattern as string | undefined,
           options.cacheVersion,
+          getRequestBundleName(ctx),
         )
       : Promise.resolve(EMPTY_SIDEBAR),
-    loadNavPages(db, urls.siteUrl, options.pagePattern as string | undefined, options.cacheVersion),
+    loadNavPages(db, urls.siteUrl, options.pagePattern as string | undefined, options.cacheVersion, getRequestI18n(ctx), getRequestBundleName(ctx)),
   ]);
   const currentPath = new URL(requestUrl).pathname;
   return {
@@ -75,7 +92,7 @@ async function loadCommon(ctx: RequestContext, requestUrl: string, withSidebar =
     currentPath,
     pluginCtx: ctx,
     themeConfig: loadThemeConfig(options, options.theme),
-    i18n: createThemeI18n(options.theme, ctx.i18n, ctx.activatedPlugins),
+    i18n: createThemeI18n(options.theme, getRequestI18n(ctx), ctx.activatedPlugins),
   };
 }
 
@@ -157,7 +174,7 @@ async function buildCommentTree(ctx: RequestContext, allComments: CommentRow[], 
   for (const c of displayComments) {
     map.set(c.coid, {
       coid: c.coid,
-      author: c.author || '匿名',
+      author: c.author || getRequestI18n(ctx).t('core.comment.anonymous', {}, 'Anonymous'),
       mail: c.mail || '',
       url: c.url || '',
       text: await renderCommentTextFiltered(ctx, c.text || '', {
@@ -274,10 +291,18 @@ async function toPostListItem(
     siteUrl,
     permalinkPattern,
   );
-  const title = await filterContentTitle(ctx, displayPost.title || '无标题', displayPost);
+  const title = await filterContentTitle(
+    ctx,
+    displayPost.title || getRequestI18n(ctx).t('core.content.untitled', {}, 'Untitled'),
+    displayPost,
+  );
   const excerpt = await filterContentExcerpt(
     ctx,
-    renderContentExcerpt(displayPost.text || '', '- 阅读剩余部分 -', permalink),
+    renderContentExcerpt(
+      displayPost.text || '',
+      getRequestI18n(ctx).t('core.content.readMore', {}, '- Read more -'),
+      permalink,
+    ),
     displayPost,
   );
   return {
@@ -645,10 +670,10 @@ export async function preparePostData(
         where: eq(schema.contents.cid, cidNum),
       });
 
-  if (!contentRow) return new Response('Not Found', { status: 404 });
+  if (!contentRow) return new Response(getRequestI18n(ctx).t('core.error.notFound', {}, 'Not Found'), { status: 404 });
 
   if (!canViewContent(contentRow, { isLoggedIn, uid: user?.uid })) {
-    return new Response('Not Found', { status: 404 });
+    return new Response(getRequestI18n(ctx).t('core.error.notFound', {}, 'Not Found'), { status: 404 });
   }
 
   const singleLifecycle: ArchiveLifecycleContext = {
@@ -664,7 +689,11 @@ export async function preparePostData(
   await doHook(ctx, 'archive:single', singleLifecycle);
 
   const displayContentRow = await filterContentRow(ctx, contentRow, 'single');
-  const displayTitle = await filterContentTitle(ctx, displayContentRow.title || '无标题', displayContentRow);
+  const displayTitle = await filterContentTitle(
+    ctx,
+    displayContentRow.title || getRequestI18n(ctx).t('core.content.untitled', {}, 'Untitled'),
+    displayContentRow,
+  );
 
   // Password
   const hasPassword = !!contentRow.password;
@@ -741,7 +770,7 @@ export async function preparePostData(
 
   const allowComment = contentRow.allowComment === '1';
   const renderedContent = hasPassword && !passwordVerified
-    ? '<p>此内容已加密，请输入密码访问。</p>'
+    ? `<p>${escapeHtml(getRequestI18n(ctx).t('core.content.passwordProtected', {}, 'This content is password protected. Enter the password to view it.'))}</p>`
     : await renderMarkdownFiltered(ctx, displayContentRow.text || '');
 
   // Generate CSRF token for comment form, bound to cid so that pages
@@ -771,11 +800,11 @@ export async function preparePostData(
     commentPagination: commentPage.pagination,
     commentOptions: { ...buildCommentOptions(options, securityToken), allowComment },
     prevPost: prevPostRows[0] ? {
-      title: prevPostRows[0].title || '无标题',
+      title: prevPostRows[0].title || getRequestI18n(ctx).t('core.content.untitled', {}, 'Untitled'),
       permalink: buildPermalink(prevPostRows[0], urls.siteUrl, options.permalinkPattern as string | undefined),
     } : null,
     nextPost: nextPostRows[0] ? {
-      title: nextPostRows[0].title || '无标题',
+      title: nextPostRows[0].title || getRequestI18n(ctx).t('core.content.untitled', {}, 'Untitled'),
       permalink: buildPermalink(nextPostRows[0], urls.siteUrl, options.permalinkPattern as string | undefined),
     } : null,
     gravatarMap,
@@ -799,10 +828,10 @@ export async function preparePageData(
         where: and(eq(schema.contents.slug, cleanSlug), eq(schema.contents.type, 'page')),
       });
 
-  if (!pageRow) return new Response('Not Found', { status: 404 });
+  if (!pageRow) return new Response(getRequestI18n(ctx).t('core.error.notFound', {}, 'Not Found'), { status: 404 });
 
   if (!canViewContent(pageRow, { isLoggedIn, uid: user?.uid })) {
-    return new Response('Not Found', { status: 404 });
+    return new Response(getRequestI18n(ctx).t('core.error.notFound', {}, 'Not Found'), { status: 404 });
   }
 
   const singleLifecycle: ArchiveLifecycleContext = {
@@ -818,7 +847,11 @@ export async function preparePageData(
   await doHook(ctx, 'archive:single', singleLifecycle);
 
   const displayPageRow = await filterContentRow(ctx, pageRow, 'single');
-  const displayTitle = await filterContentTitle(ctx, displayPageRow.title || '无标题', displayPageRow);
+  const displayTitle = await filterContentTitle(
+    ctx,
+    displayPageRow.title || getRequestI18n(ctx).t('core.content.untitled', {}, 'Untitled'),
+    displayPageRow,
+  );
 
   const permalink = buildPermalink(
     { cid: pageRow.cid, slug: pageRow.slug, type: pageRow.type, created: pageRow.created },
@@ -843,7 +876,7 @@ export async function preparePageData(
   const allowComment = pageRow.allowComment === '1';
 
   const renderedContent = hasPassword && !passwordVerified
-    ? '<p>此内容已加密，请输入密码访问。</p>'
+    ? `<p>${escapeHtml(getRequestI18n(ctx).t('core.content.passwordProtected', {}, 'This content is password protected. Enter the password to view it.'))}</p>`
     : await renderMarkdownFiltered(ctx, displayPageRow.text || '');
 
   // Generate CSRF token for comment form, bound to cid so that pages
@@ -887,10 +920,14 @@ export async function prepareCategoryData(
         where: and(eq(schema.metas.slug, slug), eq(schema.metas.type, 'category')),
       })
     : preloadedCategory;
-  if (!category) return new Response('Not Found', { status: 404 });
+  if (!category) return new Response(getRequestI18n(ctx).t('core.error.notFound', {}, 'Not Found'), { status: 404 });
 
   return prepareArchiveData(ctx, requestUrl, locals, url, {
-    archiveTitle: `分类 ${category.name} 下的文章`,
+    archiveTitle: getRequestI18n(ctx).t(
+      'core.archive.categoryTitle',
+      { category: category.name || getRequestI18n(ctx).t('core.archive.unknown', {}, 'Unknown') },
+      'Posts in category {category}',
+    ),
     archiveType: 'category',
     baseUrl: buildCategoryLink(slug, ctx.urls.siteUrl, ctx.options.categoryPattern as string | undefined),
     hookPoint: 'archive:category',
@@ -912,10 +949,14 @@ export async function prepareTagData(
         where: and(eq(schema.metas.slug, slug), eq(schema.metas.type, 'tag')),
       })
     : preloadedTag;
-  if (!tag) return new Response('Not Found', { status: 404 });
+  if (!tag) return new Response(getRequestI18n(ctx).t('core.error.notFound', {}, 'Not Found'), { status: 404 });
 
   return prepareArchiveData(ctx, requestUrl, locals, url, {
-    archiveTitle: `标签 ${tag.name} 下的文章`,
+    archiveTitle: getRequestI18n(ctx).t(
+      'core.archive.tagTitle',
+      { tag: tag.name || getRequestI18n(ctx).t('core.archive.unknown', {}, 'Unknown') },
+      'Posts tagged {tag}',
+    ),
     archiveType: 'tag',
     baseUrl: buildTagLink(slug, ctx.urls.siteUrl),
     hookPoint: 'archive:tag',
@@ -935,12 +976,16 @@ export async function prepareAuthorData(
   const author = preloadedAuthor === undefined
     ? await ctx.db.query.users.findFirst({ where: eq(schema.users.uid, uidNum) })
     : preloadedAuthor;
-  if (!author) return new Response('Not Found', { status: 404 });
+  if (!author) return new Response(getRequestI18n(ctx).t('core.error.notFound', {}, 'Not Found'), { status: 404 });
 
   const authorMap: AuthorMap = new Map([[author.uid, author]]);
 
   return prepareArchiveData(ctx, requestUrl, locals, url, {
-    archiveTitle: `${author.screenName || author.name} 发布的文章`,
+    archiveTitle: getRequestI18n(ctx).t(
+      'core.archive.authorTitle',
+      { author: author.screenName || author.name || getRequestI18n(ctx).t('core.archive.unknown', {}, 'Unknown') },
+      'Posts by {author}',
+    ),
     archiveType: 'author',
     baseUrl: buildAuthorLink(uidNum, ctx.urls.siteUrl),
     hookPoint: 'archive:author',
@@ -973,7 +1018,11 @@ export async function prepareSearchData(
     && isFtsAvailable();
 
   return prepareArchiveData(ctx, requestUrl, locals, url, {
-    archiveTitle: `包含关键字 ${trimmed} 的文章`,
+    archiveTitle: getRequestI18n(ctx).t(
+      'core.archive.searchTitle',
+      { keywords: trimmed },
+      'Posts containing {keywords}',
+    ),
     archiveType: 'search',
     baseUrl: buildSearchLink(trimmed, ctx.urls.siteUrl),
     hookPoint: 'archive:search',
@@ -1002,6 +1051,6 @@ export async function prepareNotFoundData(
   return {
     ...common,
     statusCode: 404,
-    errorTitle: '404 - 页面没找到',
+    errorTitle: getRequestI18n(ctx).t('core.error.notFoundTitle', {}, '404 - Page not found'),
   };
 }

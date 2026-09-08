@@ -3,9 +3,10 @@ import { setOptionsBatch } from '@/lib/options';
 import { isAdminActionResponse, requireAdminAction, safeAdminRedirectUrl } from '@/lib/admin-auth';
 import { purgeSiteCache } from '@/lib/cache';
 import { REQUEST_BODY_LIMITS } from '@/lib/constants';
-import { InputError, readBoundedFormData } from '@/lib/input';
+import { InputError, inputErrorMessage, readBoundedFormData } from '@/lib/input';
 import { parseSiteOptionsInput, SiteOptionsInputError } from '@/lib/options-input';
 import { textError } from '@/lib/http';
+import { i18nMessage } from '@/lib/i18n';
 
 export const POST: APIRoute = async ({ request, locals }) => {
   const auth = await requireAdminAction(request, 'administrator');
@@ -23,8 +24,12 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const formData = await readBoundedFormData(request, REQUEST_BODY_LIMITS.adminForm);
     entries = parseSiteOptionsInput({ formData, sourcePath: refererPath });
   } catch (error) {
-    if (error instanceof InputError) return textError(error.status, error.message);
-    if (error instanceof SiteOptionsInputError) return textError(400, error.message);
+    if (error instanceof InputError) {
+      return textError(error.status, inputErrorMessage(error), undefined, auth.i18n);
+    }
+    if (error instanceof SiteOptionsInputError) {
+      return textError(400, i18nMessage('admin.error.invalidRequest', 'Invalid request.'), undefined, auth.i18n);
+    }
     throw error;
   }
 

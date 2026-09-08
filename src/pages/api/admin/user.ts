@@ -6,14 +6,18 @@ import { isAdminActionResponse, requireAdminAction } from '@/lib/admin-auth';
 import { readAdminFormOrError } from '@/lib/input';
 import { normalizeHttpUrl } from '@/lib/url';
 import { and, eq, ne, sql } from 'drizzle-orm';
+import { i18nMessage } from '@/lib/i18n';
+import { textError } from '@/lib/http';
 
 export const POST: APIRoute = async ({ request, locals }) => {
   const auth = await requireAdminAction(request, 'administrator');
   if (isAdminActionResponse(auth)) return auth;
   const db = auth.db;
 
-  const formData = await readAdminFormOrError(request);
+  const formData = await readAdminFormOrError(request, undefined, auth.i18n);
   if (formData instanceof Response) return formData;
+  const error = (status: number, key: string, variables: Record<string, string | number> = {}, fallback = key) =>
+    textError(status, i18nMessage(key, fallback, variables), undefined, auth.i18n);
   const action = formData.get('do')?.toString() || 'create';
   const uid = parseInt(formData.get('uid')?.toString() || '0', 10);
   const name = formData.get('name')?.toString()?.trim() || '';
@@ -28,13 +32,13 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
   if (action === 'create') {
     if (!name || !mail || !password) {
-      return new Response('请填写完整信息', { status: 400 });
+      return error(400, 'admin.user.incomplete', {}, 'Please complete all required fields.');
     }
     if (password.length < PASSWORD_MIN_LENGTH) {
-      return new Response(`密码长度至少${PASSWORD_MIN_LENGTH}位`, { status: 400 });
+      return error(400, 'admin.user.passwordTooShort', { count: PASSWORD_MIN_LENGTH }, 'The password must be at least {count} characters.');
     }
     if (password !== confirm) {
-      return new Response('两次输入的密码不一致', { status: 400 });
+      return error(400, 'admin.user.passwordMismatch', {}, 'The two passwords do not match.');
     }
 
     const [[[existingName], [existingMail]], hashedPassword] = await Promise.all([
@@ -47,20 +51,20 @@ export const POST: APIRoute = async ({ request, locals }) => {
       hashPassword(password),
     ]);
     if (existingName) {
-      return new Response('用户名已被使用', { status: 409 });
+      return error(409, 'admin.user.usernameTaken', {}, 'This username is already in use.');
     }
     if (existingMail) {
-      return new Response('邮箱已被使用', { status: 409 });
+      return error(409, 'admin.user.emailTaken', {}, 'This email address is already in use.');
     }
 
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)) {
-      return new Response('邮箱格式不正确', { status: 400 });
+      return error(400, 'admin.user.emailInvalid', {}, 'The email address is invalid.');
     }
 
     let normalizedUrl: string | null = null;
     if (url) {
       const parsed = normalizeHttpUrl(url);
-      if (parsed === null) return new Response('个人主页地址格式不正确', { status: 400 });
+      if (parsed === null) return error(400, 'admin.user.urlInvalid', {}, 'The profile URL is invalid.');
       normalizedUrl = parsed;
     }
 
@@ -95,28 +99,28 @@ export const POST: APIRoute = async ({ request, locals }) => {
         .where(eq(schema.users.group, 'administrator')),
     ]);
     if (!existing) {
-      return new Response('用户不存在', { status: 404 });
+      return error(404, 'admin.user.notFound', {}, 'The user does not exist.');
     }
 
     if (!mail) {
-      return new Response('邮箱不能为空', { status: 400 });
+      return error(400, 'admin.user.emailRequired', {}, 'Email is required.');
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)) {
-      return new Response('邮箱格式不正确', { status: 400 });
+      return error(400, 'admin.user.emailInvalid', {}, 'The email address is invalid.');
     }
 
     if (existingMail) {
-      return new Response('邮箱已被使用', { status: 409 });
+      return error(409, 'admin.user.emailTaken', {}, 'This email address is already in use.');
     }
 
     if (existing.group === 'administrator' && group !== 'administrator' && (adminCounts[0]?.count || 0) <= 1) {
-      return new Response('不能降级最后一个管理员', { status: 400 });
+      return error(400, 'admin.user.lastAdmin', {}, 'The last administrator cannot be demoted.');
     }
 
     let normalizedUrl: string | null = null;
     if (url) {
       const parsed = normalizeHttpUrl(url);
-      if (parsed === null) return new Response('个人主页地址格式不正确', { status: 400 });
+      if (parsed === null) return error(400, 'admin.user.urlInvalid', {}, 'The profile URL is invalid.');
       normalizedUrl = parsed;
     }
 
@@ -129,10 +133,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     if (password) {
       if (password.length < PASSWORD_MIN_LENGTH) {
-        return new Response(`密码长度至少${PASSWORD_MIN_LENGTH}位`, { status: 400 });
+        return error(400, 'admin.user.passwordTooShort', { count: PASSWORD_MIN_LENGTH }, 'The password must be at least {count} characters.');
       }
       if (password !== confirm) {
-        return new Response('两次输入的密码不一致', { status: 400 });
+        return error(400, 'admin.user.passwordMismatch', {}, 'The two passwords do not match.');
       }
       updateData.password = await hashPassword(password);
       // Password changes revoke every existing session for this user.
@@ -147,5 +151,5 @@ export const POST: APIRoute = async ({ request, locals }) => {
     });
   }
 
-  return new Response('Invalid action', { status: 400 });
+  return error(400, 'admin.user.invalidAction', {}, 'Invalid action.');
 };

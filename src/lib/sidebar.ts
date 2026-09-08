@@ -59,8 +59,9 @@ export async function loadSidebarData(
   categoryPattern?: string | null,
   pagePattern?: string | null,
   cacheVersion: string | number = 0,
+  bundleName = '',
 ): Promise<SidebarData> {
-  const cacheKey = `${cacheVersion}\0${siteUrl}\0${permalinkPattern || ''}\0${categoryPattern || ''}\0${pagePattern || ''}`;
+  const cacheKey = `${cacheVersion}\0${bundleName}\0${siteUrl}\0${permalinkPattern || ''}\0${categoryPattern || ''}\0${pagePattern || ''}`;
   const cached = sidebarSnapshot;
   if (cached && cached.key === cacheKey && cached.expiresAt > Date.now()) {
     return await applyFilterSafely(
@@ -140,7 +141,7 @@ export async function loadSidebarData(
   ] as const);
 
   const recentPosts = recentPostRows.map((p) => ({
-    title: p.title || '无标题',
+    title: p.title || ctx.i18n?.t('core.content.untitled', {}, 'Untitled') || 'Untitled',
     permalink: buildPermalink(
       { cid: p.cid, slug: p.slug, type: p.type, created: p.created },
       siteUrl,
@@ -149,7 +150,7 @@ export async function loadSidebarData(
   }));
 
   const recentComments = recentCommentRows.map((c) => ({
-    author: c.author || '匿名',
+    author: c.author || ctx.i18n?.t('core.comment.anonymous', {}, 'Anonymous') || 'Anonymous',
     excerpt: (c.text || '').replace(/<[^>]+>/g, '').substring(0, 35) + (c.text && c.text.length > 35 ? '...' : ''),
     permalink: `${buildPermalink(
       { cid: c.cid ?? 0, slug: c.contentSlug, type: c.contentType, created: c.contentCreated },
@@ -166,13 +167,8 @@ export async function loadSidebarData(
     permalink: buildCategoryLink(c.slug || '', siteUrl, categoryPattern),
   }));
 
-  const monthNames = [
-    'January', 'February', 'March', 'April', 'May', 'June',
-    'July', 'August', 'September', 'October', 'November', 'December',
-  ];
-
   const archives = archiveRows.map((a) => ({
-    date: `${monthNames[a.month - 1]} ${a.year}`,
+    date: formatArchiveMonth(a.year, a.month, ctx.i18n?.locale || 'en'),
     permalink: buildDateLink(a.year, a.month, undefined, siteUrl),
   }));
 
@@ -195,8 +191,10 @@ export async function loadNavPages(
   siteUrl: string,
   pagePattern?: string | null,
   cacheVersion: string | number = 0,
+  i18n?: HookContext['i18n'],
+  bundleName = '',
 ): Promise<NavPage[]> {
-  const cacheKey = `${cacheVersion}\0${siteUrl}\0${pagePattern || ''}`;
+  const cacheKey = `${cacheVersion}\0${bundleName}\0${siteUrl}\0${pagePattern || ''}`;
   const cached = navSnapshot;
   if (cached && cached.key === cacheKey && cached.expiresAt > Date.now()) {
     return cached.data.map(item => ({ ...item }));
@@ -221,7 +219,7 @@ export async function loadNavPages(
     .orderBy(schema.contents.order);
 
   const pages = rows.map((p) => ({
-    title: p.title || '无标题',
+    title: p.title || i18n?.t('core.content.untitled', {}, 'Untitled') || 'Untitled',
     slug: p.slug || '',
     permalink: buildPermalink(
       { cid: p.cid, slug: p.slug, type: p.type, created: p.created },
@@ -236,4 +234,14 @@ export async function loadNavPages(
     data: pages,
   };
   return pages.map(item => ({ ...item }));
+}
+
+function formatArchiveMonth(year: number, month: number, locale: string): string {
+  try {
+    return new Intl.DateTimeFormat(locale, { year: 'numeric', month: 'long', timeZone: 'UTC' })
+      .format(new Date(Date.UTC(year, month - 1, 1)));
+  } catch {
+    return new Intl.DateTimeFormat('en', { year: 'numeric', month: 'long', timeZone: 'UTC' })
+      .format(new Date(Date.UTC(year, month - 1, 1)));
+  }
 }

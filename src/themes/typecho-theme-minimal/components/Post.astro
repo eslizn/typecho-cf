@@ -19,6 +19,7 @@ const {
   commentPagination, prevPost, nextPost, gravatarMap,
 } = Astro.props;
 
+const t = i18n.t.bind(i18n);
 const isIndex = currentPath === '/';
 
 const totalComments = commentPagination.totalComments;
@@ -42,14 +43,14 @@ const totalComments = commentPagination.totalComments;
         </div>
         <div class="site-search col-3 kit-hidden-tb">
           <form id="search" method="post" action={urls.siteUrl + '/'} role="search">
-            <label for="s" class="sr-only">搜索关键字</label>
-            <input type="text" id="s" name="s" class="text" placeholder="输入关键字搜索" />
-            <button type="submit" class="submit">搜索</button>
+            <label for="s" class="sr-only">{t('theme.search.label', {}, 'Search keywords')}</label>
+            <input type="text" id="s" name="s" class="text" placeholder={t('theme.search.placeholder', {}, 'Search keywords')} />
+            <button type="submit" class="submit">{t('theme.search.submit', {}, 'Search')}</button>
           </form>
         </div>
         <div class="col-mb-12">
           <nav id="nav-menu" class="clearfix" role="navigation">
-            <a class:list={[{ current: isIndex }]} href={urls.siteUrl + '/'}>首页</a>
+            <a class:list={[{ current: isIndex }]} href={urls.siteUrl + '/'}>{t('theme.nav.home', {}, 'Home')}</a>
             {pages.map((p) => (
               <a href={p.permalink} title={p.title}>{p.title}</a>
             ))}
@@ -69,22 +70,22 @@ const totalComments = commentPagination.totalComments;
             </h1>
             <ul class="post-meta">
               <li itemprop="author" itemscope itemtype="http://schema.org/Person">
-                作者: <a
+                {t('theme.meta.author', {}, 'Author:')} <a
                   itemprop="name"
                   href={author ? buildAuthorLink(author.uid, urls.siteUrl) : '#'}
                   rel="author"
                 >
-                  {author?.screenName || author?.name || '未知'}
+                  {author?.screenName || author?.name || t('theme.unknown', {}, 'Unknown')}
                 </a>
               </li>
               <li>
-                时间: <time datetime={new Date(post.created * 1000).toISOString()} itemprop="datePublished">
-                  {formatDate(post.created, 'Y-m-d', options.timezone)}
+                {t('theme.meta.time', {}, 'Date:')} <time datetime={new Date(post.created * 1000).toISOString()} itemprop="datePublished">
+                  {formatDate(post.created, 'Y-m-d', options.timezone, i18n.locale)}
                 </time>
               </li>
               {categories.length > 0 && (
                 <li>
-                  分类: {categories.map((c, i) => (
+                  {t('theme.meta.category', {}, 'Category:')} {categories.map((c, i) => (
                     <>{i > 0 && ', '}<a href={c.permalink}>{c.name}</a></>
                   ))}
                 </li>
@@ -94,9 +95,9 @@ const totalComments = commentPagination.totalComments;
             {post.hasPassword && !post.passwordVerified ? (
               <div class="post-content">
                 <form method="get" action={post.permalink}>
-                  <p>请输入密码访问此内容：</p>
+                  <p>{t('theme.content.password', {}, 'Please enter the password to access this content:')}</p>
                   <p><input type="password" name="password" class="text" /></p>
-                  <p><button type="submit" class="submit">提交</button></p>
+                  <p><button type="submit" class="submit">{t('theme.action.submit', {}, 'Submit')}</button></p>
                 </form>
               </div>
             ) : (
@@ -105,8 +106,8 @@ const totalComments = commentPagination.totalComments;
 
             {tags.length > 0 && (
               <p itemprop="keywords" class="tags">
-                标签: {tags.map((t, i) => (
-                  <>{i > 0 && ', '}<a href={t.permalink}>{t.name}</a></>
+                {t('theme.meta.tags', {}, 'Tags:')} {tags.map((tag, i) => (
+                  <>{i > 0 && ', '}<a href={tag.permalink}>{tag.name}</a></>
                 ))}
               </p>
             )}
@@ -118,7 +119,7 @@ const totalComments = commentPagination.totalComments;
               {totalComments > 0 && (
                 <>
                   <h3>
-                    {totalComments === 1 ? '仅有一条评论' : `已有 ${totalComments} 条评论`}
+                    {i18n.tPlural('theme.comments.count', totalComments, {}, '{count} comments')}
                   </h3>
                   <ol class="comment-list">
                     <CommentList
@@ -126,17 +127,18 @@ const totalComments = commentPagination.totalComments;
                       commentOptions={commentOptions}
                       gravatarMap={gravatarMap}
                       permalink={post.permalink}
+                      i18n={i18n}
                     />
                   </ol>
                   {commentPagination.enabled && commentPagination.totalPages > 1 && (
-                    <nav class="page-navigator comment-page-navigator" aria-label="评论分页">
-                      {commentPagination.prevUrl && <a class="prev" href={commentPagination.prevUrl} rel="prev">上一页</a>}
+                    <nav class="page-navigator comment-page-navigator" aria-label={t('theme.comments.ariaLabel', {}, 'Comment pagination')}>
+                      {commentPagination.prevUrl && <a class="prev" href={commentPagination.prevUrl} rel="prev">{t('theme.comments.previous', {}, 'Previous')}</a>}
                       {commentPagination.pages.map((pageNumber) => (
                         pageNumber === commentPagination.currentPage
                           ? <span class="current" aria-current="page">{pageNumber}</span>
                           : <a href={commentPagination.pageUrls[pageNumber]}>{pageNumber}</a>
                       ))}
-                      {commentPagination.nextUrl && <a class="next" href={commentPagination.nextUrl} rel="next">下一页</a>}
+                      {commentPagination.nextUrl && <a class="next" href={commentPagination.nextUrl} rel="next">{t('theme.comments.next', {}, 'Next')}</a>}
                     </nav>
                   )}
                 </>
@@ -146,9 +148,9 @@ const totalComments = commentPagination.totalComments;
                 <div id="respond" class="respond">
                   <div class="cancel-comment-reply">
                     <a id="cancel-comment-reply-link" href="javascript:void(0)" style="display:none"
-                      onclick="return TypechoComment.cancelReply()">取消回复</a>
+                      onclick="return TypechoComment.cancelReply()">{t('theme.comments.cancelReply', {}, 'Cancel reply')}</a>
                   </div>
-                  <h3 id="response">添加新评论</h3>
+                  <h3 id="response">{t('theme.comments.add', {}, 'Add a new comment')}</h3>
                   <form method="post" action="/api/comment" id="comment-form" role="form">
                     <input type="hidden" name="cid" value={String(post.cid)} />
                     <input type="hidden" name="parent" id="comment-parent" value="0" />
@@ -160,13 +162,13 @@ const totalComments = commentPagination.totalComments;
                     )}
                     {isLoggedIn ? (
                       <>
-                        <p>登录身份: <a href={urls.profileUrl}>{user?.screenName || user?.name}</a>.</p>
-                        <form method="post" action={urls.logoutUrl} class="logout-form"><button type="submit">退出 &raquo;</button></form>
+                        <p>{t('theme.comments.loginAs', {}, 'Logged in as:')} <a href={urls.profileUrl}>{user?.screenName || user?.name}</a>.</p>
+                        <form method="post" action={urls.logoutUrl} class="logout-form"><button type="submit">{t('theme.sidebar.logout', {}, 'Log out')} &raquo;</button></form>
                       </>
                     ) : (
                       <>
                         <p>
-                          <label for="author" class="required">称呼</label>
+                          <label for="author" class="required">{t('theme.comments.author', {}, 'Name')}</label>
                           <input type="text" name="author" id="author" class="text" required />
                         </p>
                         <p>
@@ -174,17 +176,17 @@ const totalComments = commentPagination.totalComments;
                           <input type="email" name="mail" id="mail" class="text" required={commentOptions.requireMail} />
                         </p>
                         <p>
-                          <label for="url">网站</label>
+                          <label for="url">{t('theme.comments.website', {}, 'Website')}</label>
                           <input type="url" name="url" id="url" class="text" placeholder="http://" />
                         </p>
                       </>
                     )}
                     <p>
-                      <label for="textarea" class="required">内容</label>
+                      <label for="textarea" class="required">{t('theme.comments.content', {}, 'Content')}</label>
                       <textarea rows="8" cols="50" name="text" id="textarea" class="textarea" required></textarea>
                     </p>
                     <p>
-                      <button type="submit" class="submit">提交评论</button>
+                      <button type="submit" class="submit">{t('theme.comments.submit', {}, 'Submit comment')}</button>
                     </p>
                   </form>
                 </div>
@@ -217,21 +219,21 @@ const totalComments = commentPagination.totalComments;
                   };
                 </script>
               ) : (
-                <h3>评论已关闭</h3>
+                <h3>{t('theme.comments.closed', {}, 'Comments are closed')}</h3>
               )}
             </div>
           )}
 
           <ul class="post-near">
             <li>
-              上一篇: {prevPost ? (
+              {t('theme.navigation.previous', {}, 'Previous post:')} {prevPost ? (
                 <a href={prevPost.permalink}>{prevPost.title}</a>
-              ) : '没有了'}
+              ) : t('theme.navigation.none', {}, 'None')}
             </li>
             <li>
-              下一篇: {nextPost ? (
+              {t('theme.navigation.next', {}, 'Next post:')} {nextPost ? (
                 <a href={nextPost.permalink}>{nextPost.title}</a>
-              ) : '没有了'}
+              ) : t('theme.navigation.none', {}, 'None')}
             </li>
           </ul>
         </div>
@@ -240,7 +242,7 @@ const totalComments = commentPagination.totalComments;
           <div class="col-mb-12 col-offset-1 col-3 kit-hidden-tb" id="secondary" role="complementary">
             {sidebarData.recentPosts && sidebarData.recentPosts.length > 0 && (
               <section class="widget">
-                <h3 class="widget-title">最新文章</h3>
+                <h3 class="widget-title">{t('theme.sidebar.recentPosts', {}, 'Recent posts')}</h3>
                 <ul class="widget-list">
                   {sidebarData.recentPosts.map((p) => (
                     <li><a href={p.permalink}>{p.title}</a></li>
@@ -250,7 +252,7 @@ const totalComments = commentPagination.totalComments;
             )}
             {sidebarData.recentComments && sidebarData.recentComments.length > 0 && (
               <section class="widget">
-                <h3 class="widget-title">最近回复</h3>
+                <h3 class="widget-title">{t('theme.sidebar.recentComments', {}, 'Recent comments')}</h3>
                 <ul class="widget-list">
                   {sidebarData.recentComments.map((c) => (
                     <li><a href={c.permalink}>{c.author}</a>: {c.excerpt}</li>
@@ -260,7 +262,7 @@ const totalComments = commentPagination.totalComments;
             )}
             {sidebarData.categories && sidebarData.categories.length > 0 && (
               <section class="widget">
-                <h3 class="widget-title">分类</h3>
+                <h3 class="widget-title">{t('theme.sidebar.categories', {}, 'Categories')}</h3>
                 <ul class="widget-list">
                   {sidebarData.categories.map((cat) => (
                     <li><a href={cat.permalink}>{cat.name} ({cat.count})</a></li>
@@ -270,7 +272,7 @@ const totalComments = commentPagination.totalComments;
             )}
             {sidebarData.archives && sidebarData.archives.length > 0 && (
               <section class="widget">
-                <h3 class="widget-title">归档</h3>
+                <h3 class="widget-title">{t('theme.sidebar.archives', {}, 'Archives')}</h3>
                 <ul class="widget-list">
                   {sidebarData.archives.map((archive) => (
                     <li><a href={archive.permalink}>{archive.date}</a></li>
@@ -279,20 +281,20 @@ const totalComments = commentPagination.totalComments;
               </section>
             )}
             <section class="widget">
-              <h3 class="widget-title">其它</h3>
+              <h3 class="widget-title">{t('theme.sidebar.other', {}, 'Other')}</h3>
               <ul class="widget-list">
                 {isLoggedIn ? (
                   <>
                     <li class="last">
-                      <a href={urls.adminUrl}>进入后台 ({user?.screenName || user?.name})</a>
+                      <a href={urls.adminUrl}>{t('theme.sidebar.admin', {}, 'Go to admin')} ({user?.screenName || user?.name})</a>
                     </li>
-                    <li><form method="post" action={urls.logoutUrl} class="logout-form"><button type="submit">退出</button></form></li>
+                    <li><form method="post" action={urls.logoutUrl} class="logout-form"><button type="submit">{t('theme.sidebar.logout', {}, 'Log out')}</button></form></li>
                   </>
                 ) : (
-                  <li class="last"><a href={urls.loginUrl}>登录</a></li>
+                  <li class="last"><a href={urls.loginUrl}>{t('theme.sidebar.login', {}, 'Log in')}</a></li>
                 )}
-                <li><a href={urls.feedUrl}>文章 RSS</a></li>
-                <li><a href={urls.commentsFeedUrl}>评论 RSS</a></li>
+                <li><a href={urls.feedUrl}>{t('theme.sidebar.postsRss', {}, 'Posts RSS')}</a></li>
+                <li><a href={urls.commentsFeedUrl}>{t('theme.sidebar.commentsRss', {}, 'Comments RSS')}</a></li>
               </ul>
             </section>
           </div>
@@ -303,6 +305,6 @@ const totalComments = commentPagination.totalComments;
 
   <footer id="footer" role="contentinfo">
     &copy; {new Date().getFullYear()} <a href={urls.siteUrl}>{options.title}</a>.
-    由 <a href="https://github.com/eslizn/typecho-cf">Typecho CF</a> 强力驱动.
+    {t('theme.footer.poweredBy', {}, 'Powered by')} <a href="https://github.com/eslizn/typecho-cf">Typecho CF</a>.
   </footer>
 </Base>

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   InputError,
+  inputErrorMessage,
+  inputErrorResponse,
   normalizeSlug,
   parsePageNumber,
   parsePositiveInteger,
@@ -8,6 +10,8 @@ import {
   readBoundedJson,
   withQueryParams,
 } from '@/lib/input';
+import { createI18n } from '@/lib/i18n';
+import { coreCatalogs } from '@/i18n/catalogs';
 
 describe('readBoundedFormData()', () => {
   it('parses a body within the declared limit', async () => {
@@ -63,6 +67,27 @@ describe('readBoundedFormData()', () => {
       status: 400,
       message: 'Malformed form data',
     });
+  });
+});
+
+describe('localized input errors', () => {
+  it('keeps a stable descriptor and renders it in the request locale', async () => {
+    const request = new Request('https://example.com/form', {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded', 'content-length': '2048' },
+      body: 'title=Hello',
+    });
+    let error: InputError | undefined;
+    try {
+      await readBoundedFormData(request, 1024);
+    } catch (caught) {
+      error = caught as InputError;
+    }
+    expect(error).toBeInstanceOf(InputError);
+    expect(inputErrorMessage(error!)).toMatchObject({ key: 'core.error.requestBodyTooLarge' });
+    const response = inputErrorResponse(error!, createI18n({ locale: 'zh-CN', catalogs: coreCatalogs }));
+    expect(await response.text()).toBe('请求体过大');
+    expect(response.headers.get('X-Typecho-I18n-Code')).toBe('core.error.requestBodyTooLarge');
   });
 });
 

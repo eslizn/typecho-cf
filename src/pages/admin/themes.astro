@@ -9,7 +9,7 @@ const authCheck = requireAuth(ctx);
 if (authCheck) return authCheck;
 
 if (!hasPermission(ctx.user!.group || 'visitor', 'administrator')) {
-  return new Response('Forbidden', { status: 403 });
+  return new Response(ctx.i18n.t('core.error.forbidden', {}, 'Forbidden'), { status: 403 });
 }
 
 const { options, urls, user, csrfToken } = ctx;
@@ -19,7 +19,7 @@ let message = '';
 let messageType = '';
 
 if (Astro.request.method === 'POST') {
-  const csrfError = await requireAdminCSRF(Astro.request, options.secret as string, user!.authCode!, user!.uid);
+  const csrfError = await requireAdminCSRF(Astro.request, options.secret as string, user!.authCode!, user!.uid, ctx.i18n);
   if (csrfError) return csrfError;
   try {
     const formData = await Astro.request.formData();
@@ -40,41 +40,41 @@ if (Astro.request.method === 'POST') {
         await bumpCacheVersion(ctx.db);
         await purgeSiteCache(options.siteUrl || '');
 
-        message = `主题已切换为 "${themeId}"`;
+        message = ctx.i18n.t('admin.theme.activated', { id: themeId }, `Theme switched to "${themeId}"`);
         messageType = 'success';
       } else {
-        message = `主题 "${themeId}" 不存在`;
+        message = ctx.i18n.t('admin.theme.notFound', { id: themeId }, `Theme "${themeId}" does not exist`);
         messageType = 'error';
       }
     }
   } catch (e) {
-    message = '操作失败';
+    message = ctx.i18n.t('admin.error.operationFailed', {}, 'Operation failed');
     messageType = 'error';
   }
 }
 
 const themes = getAvailableThemes(options.theme || 'typecho-theme-minimal');
 ---
-<Admin title="外观" options={options} urls={urls} user={user} activeMenu="themes" pluginCtx={ctx}>
+<Admin title={ctx.i18n.t('admin.page.themes', {}, 'Appearance')} options={options} urls={urls} user={user} activeMenu="themes" pluginCtx={ctx}>
   <div class="col-mb-12" role="main">
     {message && (
       <div class={`typecho-option-tabs notice typecho-dismissible ${messageType === 'error' ? 'notice-error' : 'notice-success'}`}
         style={`padding: 10px 15px; margin-bottom: 20px; border-radius: 3px; ${messageType === 'error' ? 'background: #ffeaea; color: #c33;' : 'background: #e7f5e7; color: #3a3;'}`}>
         <p>{message}</p>
-        <button type="button" class="typecho-notice-close" aria-label="关闭提示">&times;</button>
+        <button type="button" class="typecho-notice-close" aria-label={ctx.i18n.t('admin.action.closeNotice', {}, 'Close notice')}>&times;</button>
       </div>
     )}
 
     {themes.length === 0 ? (
       <div class="typecho-mini-panel" style="text-align: center; padding: 40px 20px;">
-        <h3>暂无主题</h3>
+        <h3>{ctx.i18n.t('admin.notice.noThemes', {}, 'No themes')}</h3>
       </div>
     ) : (
       <>
 
         <div class="typecho-list-operate clearfix">
           <div class="operate">
-            <span>已发现 {themes.length} 个主题</span>
+            <span>{ctx.i18n.t('admin.status.discovered', { count: themes.length }, '{count} items found')}</span>
           </div>
         </div>
 
@@ -98,7 +98,7 @@ const themes = getAvailableThemes(options.theme || 'typecho-theme-minimal');
 
             {theme.isActive && (
               <div style="position: absolute; top: 10px; right: 10px; background: #467B96; color: white; padding: 2px 10px; border-radius: 3px; font-size: 12px;">
-                当前使用
+                {ctx.i18n.t('admin.theme.current', {}, 'Current')}
               </div>
             )}
 
@@ -117,7 +117,7 @@ const themes = getAvailableThemes(options.theme || 'typecho-theme-minimal');
               <div style="font-size: 12px; color: #999; margin-bottom: 12px;">
                 {theme.manifest.author && (
                   <span>
-                    作者:
+                    {ctx.i18n.t('admin.theme.author', {}, 'Author')}:
                     {theme.manifest.authorUrl ? (
                       <a href={theme.manifest.authorUrl} target="_blank" rel="noopener noreferrer">{theme.manifest.author}</a>
                     ) : (
@@ -125,37 +125,37 @@ const themes = getAvailableThemes(options.theme || 'typecho-theme-minimal');
                     )}
                   </span>
                 )}
-                <span style="margin-left: 8px;">· {theme.isDefault ? '内置' : `npm: ${theme.packageName}`}</span>
+                <span style="margin-left: 8px;">· {theme.isDefault ? ctx.i18n.t('admin.status.builtIn', {}, 'Built-in') : ctx.i18n.t('admin.theme.npm', { packageName: theme.packageName }, `npm: ${theme.packageName}`)}</span>
               </div>
 
               <div style="display: flex; gap: 8px; align-items: center;">
                 {theme.isActive ? (
-                  <span class="btn" style="cursor: default; opacity: 0.6;">已启用</span>
+                  <span class="btn" style="cursor: default; opacity: 0.6;">{ctx.i18n.t('admin.status.enabled', {}, 'Enabled')}</span>
                 ) : (
                   <form method="post" action="/admin/themes" style="display: inline;">
                     <input type="hidden" name="_" value={csrfToken} />
                     <input type="hidden" name="action" value="activate" />
                     <input type="hidden" name="theme" value={theme.id} />
-                    <button type="submit" class="btn primary">启用</button>
+                    <button type="submit" class="btn primary">{ctx.i18n.t('admin.action.enable', {}, 'Enable')}</button>
                   </form>
                 )}
 
                 {themeHasConfig(theme.id) && (
                   <a href={`/admin/theme-config?id=${theme.id}`} class="btn" style="text-decoration: none;">
-                    设置
+                    {ctx.i18n.t('admin.action.settings', {}, 'Settings')}
                   </a>
                 )}
 
                 {theme.manifest.homepage && (
                   <a href={theme.manifest.homepage} target="_blank" rel="noopener noreferrer"
                     class="btn" style="text-decoration: none;">
-                    详情
+                    {ctx.i18n.t('admin.action.details', {}, 'Details')}
                   </a>
                 )}
 
                 <a href={`${urls.adminUrl}theme-preview?theme=${encodeURIComponent(theme.id)}`} target="_blank" rel="noopener noreferrer"
                   class="btn" style="text-decoration: none;">
-                  预览
+                  {ctx.i18n.t('admin.theme.preview', {}, 'Preview')}
                 </a>
               </div>
             </div>

@@ -7,17 +7,21 @@ import { resolveUniqueContentSlug } from '@/lib/slug';
 import { readAdminFormOrError } from '@/lib/input';
 import { eq } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
+import { i18nMessage } from '@/lib/i18n';
+import { textError } from '@/lib/http';
 
 export const POST: APIRoute = async ({ request, locals }) => {
   const auth = await requireAdminAction(request, 'editor');
   if (isAdminActionResponse(auth)) return auth;
 
-  const formData = await readAdminFormOrError(request);
+  const formData = await readAdminFormOrError(request, undefined, auth.i18n);
   if (formData instanceof Response) return formData;
+  const error = (status: number, key: string, variables: Record<string, string | number> = {}, fallback = key) =>
+    textError(status, i18nMessage(key, fallback, variables), undefined, auth.i18n);
   const action = formData.get('do')?.toString() || 'update';
   const cid = parseInt(formData.get('cid')?.toString() || '0', 10);
 
-  if (!cid) return new Response('Bad Request', { status: 400 });
+  if (!cid) return error(400, 'admin.media.badRequest', {}, 'Bad Request');
 
   if (action === 'delete') {
     const result = await deleteAttachments({
@@ -28,8 +32,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
       request,
       options: auth.options,
     }, [cid]);
-    if (result.missing.includes(cid)) return new Response('Not Found', { status: 404 });
-    if (result.forbidden.includes(cid)) return new Response('Forbidden', { status: 403 });
+    if (result.missing.includes(cid)) return error(404, 'admin.media.notFound', {}, 'Not Found');
+    if (result.forbidden.includes(cid)) return error(403, 'admin.media.forbidden', {}, 'Forbidden');
     return new Response(null, { status: 302, headers: { Location: '/admin/manage-medias' } });
   }
 
@@ -38,12 +42,12 @@ export const POST: APIRoute = async ({ request, locals }) => {
   });
 
   if (!attachment || attachment.type !== 'attachment') {
-    return new Response('Not Found', { status: 404 });
+    return error(404, 'admin.media.notFound', {}, 'Not Found');
   }
 
   const isAdmin = hasPermission(auth.user.group || 'visitor', 'administrator');
   if (!isAdmin && attachment.authorId !== auth.uid) {
-    return new Response('Forbidden', { status: 403 });
+    return error(403, 'admin.media.forbidden', {}, 'Forbidden');
   }
 
   // Update attachment
@@ -55,7 +59,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     attachment.title || String(cid),
   );
 
-  if (action !== 'update') return new Response('Invalid action', { status: 400 });
+  if (action !== 'update') return error(400, 'admin.media.invalidAction', {}, 'Invalid action.');
 
   await auth.db.update(schema.contents).set({
     title: name,

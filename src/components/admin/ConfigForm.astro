@@ -10,6 +10,7 @@
  */
 import { env } from 'cloudflare:workers';
 import { CONFIG_ROW_ID, type ConfigField } from '@/lib/config';
+import type { I18n } from '@/lib/i18n';
 
 interface Props {
   /** Form submit action (e.g. /api/admin/plugin-config) */
@@ -30,6 +31,8 @@ interface Props {
   backHref: string;
   /** Back link label */
   backLabel: string;
+  /** Request-local translator for host controls and optional metadata keys. */
+  i18n?: I18n;
 }
 
 const {
@@ -42,7 +45,36 @@ const {
   message = '',
   backHref,
   backLabel,
+  i18n,
 } = Astro.props;
+
+const t = (key: string, variables: Record<string, string | number> = {}, fallback = key): string =>
+  i18n?.t(key, variables, fallback) ?? fallback;
+
+interface LocalizedText {
+  value: string;
+  translated: boolean;
+}
+
+const configScope = `${entityName}.${entityId}.config`;
+
+function localizeText(key: string, fallback: string): LocalizedText {
+  const value = i18n?.t(key, {}, '') ?? '';
+  return value ? { value, translated: true } : { value: fallback, translated: false };
+}
+
+function localizeField(field: ConfigField, path: string): LocalizedText {
+  return localizeText(field.labelKey || `${configScope}.${path}.label`, field.label);
+}
+
+function localizeDescription(field: ConfigField, path: string): LocalizedText | null {
+  if (!field.description) return null;
+  return localizeText(field.descriptionKey || `${configScope}.${path}.description`, field.description);
+}
+
+function localizeOption(field: ConfigField, path: string, value: string, fallback: string): LocalizedText {
+  return localizeText(field.optionKeys?.[value] || `${configScope}.${path}.option.${value}`, fallback);
+}
 
 function isR2BucketBinding(value: unknown): boolean {
   return !!value
@@ -118,7 +150,7 @@ function selectedAttr(actual: unknown, expected: unknown): true | undefined {
     <div class="typecho-option-tabs notice typecho-dismissible notice-success"
       style="padding: 10px 15px; margin-bottom: 20px; border-radius: 3px; background: #e7f5e7; color: #3a3;">
       <p>{message}</p>
-      <button type="button" class="typecho-notice-close" aria-label="关闭提示">&times;</button>
+      <button type="button" class="typecho-notice-close" aria-label={t('admin.action.closeNotice', {}, 'Close notice')}>&times;</button>
     </div>
   )}
 
@@ -128,6 +160,8 @@ function selectedAttr(actual: unknown, expected: unknown): true | undefined {
     <ul class="typecho-option">
       {Object.entries(configDef).map(([key, field]: [string, ConfigField]) => {
         const value = configValues[key] ?? field.default ?? '';
+        const fieldText = localizeField(field, key);
+        const fieldDescription = localizeDescription(field, key);
 
         if (field.type === 'hidden') {
           return (
@@ -140,7 +174,7 @@ function selectedAttr(actual: unknown, expected: unknown): true | undefined {
         return (
           <li>
             {!isBoolCheckbox && (
-              <label for={`cfg-${key}`} class="typecho-label">{field.label}</label>
+              <label for={`cfg-${key}`} class="typecho-label">{fieldText.value}</label>
             )}
 
             {field.type === 'text' && (
@@ -159,7 +193,7 @@ function selectedAttr(actual: unknown, expected: unknown): true | undefined {
               <p>
                 <select id={`cfg-${key}`} name={key} data-current-value={fieldValueForOption(value)}>
                   {Object.entries(fieldOptions(field)!).map(([optVal, optLabel]) => (
-                    <option value={optVal} selected={selectedAttr(value, optVal)}>{optLabel}</option>
+                    <option value={optVal} selected={selectedAttr(value, optVal)}>{localizeOption(field, key, optVal, optLabel).value}</option>
                   ))}
                 </select>
               </p>
@@ -176,7 +210,7 @@ function selectedAttr(actual: unknown, expected: unknown): true | undefined {
                       value={optVal}
                       checked={String(value) === String(optVal)}
                     />
-                    <label for={`cfg-${key}-${optVal}`}>{optLabel}</label>
+                    <label for={`cfg-${key}-${optVal}`}>{localizeOption(field, key, optVal, optLabel).value}</label>
                   </span>
                 ))}
               </p>
@@ -192,7 +226,7 @@ function selectedAttr(actual: unknown, expected: unknown): true | undefined {
                     value="1"
                     checked={value === '1' || value === true}
                   />
-                  {' '}{field.label}
+                  {' '}{fieldText.value}
                 </label>
               </p>
             )}
@@ -212,7 +246,7 @@ function selectedAttr(actual: unknown, expected: unknown): true | undefined {
                         value={optVal}
                         checked={checked}
                       />
-                      <label for={`cfg-${key}-${optVal}`}>{optLabel}</label>
+                      <label for={`cfg-${key}-${optVal}`}>{localizeOption(field, key, optVal, optLabel).value}</label>
                     </span>
                   );
                 })}
@@ -223,20 +257,24 @@ function selectedAttr(actual: unknown, expected: unknown): true | undefined {
               <div
                 class="typecho-repeatable"
                 data-repeatable={key}
-                data-label={field.label}
+                 data-label={field.label}
+                 data-label-translated={fieldText.value}
                 data-next-index={String(repeatableRows(value, field).length)}
               >
                 <div class="typecho-repeatable-items">
                   {repeatableRows(value, field).map((row, rowIndex) => (
                     <fieldset class="typecho-repeatable-item">
-                      <legend>{field.label} #{rowIndex + 1}</legend>
+                       <legend>{fieldText.value} #{rowIndex + 1}</legend>
                       <input
                         type="hidden"
                         name={`${key}[${rowIndex}][${CONFIG_ROW_ID}]`}
                         value={String(row[CONFIG_ROW_ID] ?? '')}
                       />
                       {Object.entries(field.itemFields || {}).map(([itemKey, itemField]: [string, ConfigField]) => {
-                        const itemValue = displayRepeatableValue(row[itemKey] ?? itemField.default ?? '', itemField);
+                         const itemValue = displayRepeatableValue(row[itemKey] ?? itemField.default ?? '', itemField);
+                         const itemPath = `${key}.${itemKey}`;
+                         const itemText = localizeField(itemField, itemPath);
+                         const itemDescription = localizeDescription(itemField, itemPath);
                         const inputName = `${key}[${rowIndex}][${itemKey}]`;
                         const inputId = `cfg-${key}-${rowIndex}-${itemKey}`;
                         const visible = isFieldVisible(itemField, row);
@@ -249,7 +287,7 @@ function selectedAttr(actual: unknown, expected: unknown): true | undefined {
                             data-show-when-field={itemField.showWhen?.field}
                             data-show-when-value={showWhenValue}
                           >
-                            <label for={inputId} class="typecho-label">{itemField.label}</label>
+                            <label for={inputId} class="typecho-label">{itemText.value}</label>
 
                             {itemField.type === 'text' && (
                               <p><input type="text" id={inputId} name={inputName} class="text w-100" value={String(itemValue)} disabled={!visible} /></p>
@@ -266,29 +304,31 @@ function selectedAttr(actual: unknown, expected: unknown): true | undefined {
                             {itemField.type === 'select' && fieldOptions(itemField) && (
                               <p>
                                 <select id={inputId} name={inputName} disabled={!visible} data-current-value={fieldValueForOption(itemValue)}>
-                                  {Object.entries(fieldOptions(itemField)!).map(([optVal, optLabel]) => (
-                                    <option value={optVal} selected={selectedAttr(itemValue, optVal)}>{optLabel}</option>
+                                   {Object.entries(fieldOptions(itemField)!).map(([optVal, optLabel]) => (
+                                     <option value={optVal} selected={selectedAttr(itemValue, optVal)}>{localizeOption(itemField, itemPath, optVal, optLabel).value}</option>
                                   ))}
                                 </select>
                               </p>
                             )}
 
-                            {itemField.description && (
-                              <p class="description" set:html={itemField.description}></p>
-                            )}
+                             {itemDescription && (
+                               itemDescription.translated
+                                 ? <p class="description">{itemDescription.value}</p>
+                                 : <p class="description" set:html={itemDescription.value}></p>
+                             )}
                           </div>
                         );
                       })}
                       <p>
-                        <button type="button" class="btn btn-xs typecho-repeatable-remove">删除该项</button>
+                        <button type="button" class="btn btn-xs typecho-repeatable-remove">{t('admin.action.delete', {}, 'Delete')}</button>
                       </p>
                     </fieldset>
                   ))}
                 </div>
-                <button type="button" class="btn typecho-repeatable-add">添加一项</button>
+                <button type="button" class="btn typecho-repeatable-add">{t('admin.action.add', {}, 'Add')}</button>
                 <template class="typecho-repeatable-template">
                   <fieldset class="typecho-repeatable-item">
-                    <legend>{field.label} #__NUMBER__</legend>
+                    <legend>{fieldText.value} #__NUMBER__</legend>
                     {Object.entries(field.itemFields || {}).map(([itemKey, itemField]: [string, ConfigField]) => {
                       const inputName = `${key}[__INDEX__][${itemKey}]`;
                       const inputId = `cfg-${key}-__INDEX__-${itemKey}`;
@@ -305,7 +345,7 @@ function selectedAttr(actual: unknown, expected: unknown): true | undefined {
                           data-show-when-field={itemField.showWhen?.field}
                           data-show-when-value={showWhenValue}
                         >
-                          <label for={inputId} class="typecho-label">{itemField.label}</label>
+                           <label for={inputId} class="typecho-label">{localizeField(itemField, `${key}.${itemKey}`).value}</label>
                           {itemField.type === 'text' && (
                             <p><input type="text" id={inputId} name={inputName} class="text w-100" value={String(itemValue)} disabled={!visible} /></p>
                           )}
@@ -318,28 +358,32 @@ function selectedAttr(actual: unknown, expected: unknown): true | undefined {
                           {itemField.type === 'select' && fieldOptions(itemField) && (
                             <p>
                               <select id={inputId} name={inputName} disabled={!visible} data-current-value={fieldValueForOption(itemValue)}>
-                                {Object.entries(fieldOptions(itemField)!).map(([optVal, optLabel]) => (
-                                  <option value={optVal} selected={selectedAttr(itemValue, optVal)}>{optLabel}</option>
+                                   {Object.entries(fieldOptions(itemField)!).map(([optVal, optLabel]) => (
+                                     <option value={optVal} selected={selectedAttr(itemValue, optVal)}>{localizeOption(itemField, `${key}.${itemKey}`, optVal, optLabel).value}</option>
                                 ))}
                               </select>
                             </p>
                           )}
-                          {itemField.description && (
-                            <p class="description" set:html={itemField.description}></p>
-                          )}
+                           {localizeDescription(itemField, `${key}.${itemKey}`) && (
+                             localizeDescription(itemField, `${key}.${itemKey}`)!.translated
+                               ? <p class="description">{localizeDescription(itemField, `${key}.${itemKey}`)!.value}</p>
+                               : <p class="description" set:html={localizeDescription(itemField, `${key}.${itemKey}`)!.value}></p>
+                           )}
                         </div>
                       );
                     })}
                     <p>
-                      <button type="button" class="btn btn-xs typecho-repeatable-remove">删除该项</button>
+                      <button type="button" class="btn btn-xs typecho-repeatable-remove">{t('admin.action.delete', {}, 'Delete')}</button>
                     </p>
                   </fieldset>
                 </template>
               </div>
             )}
 
-            {field.description && (
-              <p class="description" set:html={field.description}></p>
+            {fieldDescription && (
+              fieldDescription.translated
+                ? <p class="description">{fieldDescription.value}</p>
+                : <p class="description" set:html={fieldDescription.value}></p>
             )}
           </li>
         );
@@ -348,7 +392,7 @@ function selectedAttr(actual: unknown, expected: unknown): true | undefined {
 
     <ul class="typecho-option typecho-option-submit">
       <li>
-        <button type="submit" class="btn primary">保存设置</button>
+        <button type="submit" class="btn primary">{t('admin.action.save', {}, 'Save settings')}</button>
         <a href={backHref} class="btn" style="margin-left: 10px;">{backLabel}</a>
       </li>
     </ul>
@@ -409,7 +453,7 @@ function selectedAttr(actual: unknown, expected: unknown): true | undefined {
   });
 
   function renumberRepeatableItems(root) {
-    var label = root.getAttribute('data-label') || '';
+     var label = root.getAttribute('data-label-translated') || root.getAttribute('data-label') || '';
     root.querySelectorAll('.typecho-repeatable-item').forEach(function(item, index) {
       var legend = item.querySelector('legend');
       if (legend) legend.textContent = label + ' #' + String(index + 1);

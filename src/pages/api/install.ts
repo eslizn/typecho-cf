@@ -5,8 +5,11 @@ import { hashPassword, generateRandomString, timeSafeEqual } from '@/lib/auth';
 import { env } from 'cloudflare:workers';
 import { generateCreateSQL } from '@/lib/schema-sql';
 import { PASSWORD_MIN_LENGTH, REQUEST_BODY_LIMITS } from '@/lib/constants';
-import { InputError, readBoundedFormData } from '@/lib/input';
+import { InputError, inputErrorMessage, readBoundedFormData } from '@/lib/input';
 import { resolveUniqueContentSlug } from '@/lib/slug';
+import { createCoreRequestI18n } from '@/lib/i18n-runtime';
+import { i18nMessage } from '@/lib/i18n';
+import { textError } from '@/lib/http';
 
 /**
  * Create all tables and indexes from Drizzle schema definitions.
@@ -34,6 +37,9 @@ function expectedInstallToken(): string {
 export const POST: APIRoute = async ({ request }) => {
   const d1 = env.DB;
   const db = getDb(d1);
+  const i18n = createCoreRequestI18n(request).i18n;
+  const error = (status: number, key: string, variables: Record<string, string | number> = {}, fallback = key, headers?: HeadersInit) =>
+    textError(status, i18nMessage(key, fallback, variables), headers, i18n);
 
   // Refuse the install endpoint outright once installed=1. The 302 to /admin/
   // that used to sit further down would let an attacker at least confirm the
@@ -44,7 +50,7 @@ export const POST: APIRoute = async ({ request }) => {
   try {
     const installed = await getOption(db, 'installed');
     if (installed === '1') {
-      return new Response('Site already installed', { status: 403 });
+      return error(403, 'install.alreadyInstalled', {}, 'Site is already installed.');
     }
   } catch {
     // Tables not yet created → the install window is still open, fall through.
@@ -54,7 +60,7 @@ export const POST: APIRoute = async ({ request }) => {
   try {
     formData = await readBoundedFormData(request, REQUEST_BODY_LIMITS.publicForm);
   } catch (error) {
-    if (error instanceof InputError) return new Response(error.message, { status: error.status });
+    if (error instanceof InputError) return textError(error.status, inputErrorMessage(error), undefined, i18n);
     throw error;
   }
   const siteTitle = formData.get('siteTitle')?.toString() || 'Hello World';
@@ -68,18 +74,18 @@ export const POST: APIRoute = async ({ request }) => {
   const expected = expectedInstallToken();
   if (expected) {
     if (!timeSafeEqual(installToken, expected)) {
-      return new Response('安装令牌无效', { status: 403 });
+      return error(403, 'install.tokenInvalid', {}, 'The installation token is invalid.');
     }
   } else {
     console.warn({ event: 'install_token_missing', installWindowOpen: true });
   }
 
   if (!userName || !userPassword || !userMail) {
-    return new Response('请填写完整信息', { status: 400 });
+    return error(400, 'install.incomplete', {}, 'Please complete all required fields.');
   }
 
   if (userPassword.length < PASSWORD_MIN_LENGTH) {
-    return new Response(`密码长度至少${PASSWORD_MIN_LENGTH}位`, { status: 400 });
+    return error(400, 'install.passwordTooShort', { count: PASSWORD_MIN_LENGTH }, `The password must be at least ${PASSWORD_MIN_LENGTH} characters.`);
   }
 
   try {
@@ -89,7 +95,7 @@ export const POST: APIRoute = async ({ request }) => {
     // Re-check after table creation in case another concurrent install races us.
     const installed = await getOption(db, 'installed');
     if (installed === '1') {
-      return new Response('Site already installed', { status: 403 });
+      return error(403, 'install.alreadyInstalled', {}, 'Site is already installed.');
     }
 
     // Race-lock: try to claim an exclusive `installing` row backed by the
@@ -101,13 +107,13 @@ export const POST: APIRoute = async ({ request }) => {
       where: (t, { and, eq }) => and(eq(t.name, 'installing'), eq(t.user, 0)),
     });
     if (existingLock) {
-      return new Response('Site install already in progress', { status: 409 });
+      return error(409, 'install.inProgress', {}, 'Site installation is already in progress.');
     }
     try {
       await db.insert(schema.options).values({ name: 'installing', user: 0, value: stampToken });
     } catch {
       // Unique-index collision → another isolate raced us to the insert.
-      return new Response('Site install already in progress', { status: 409 });
+      return error(409, 'install.inProgress', {}, 'Site installation is already in progress.');
     }
 
     // Create admin user
@@ -253,10 +259,10 @@ export const POST: APIRoute = async ({ request }) => {
       status: 302,
       headers: { Location: '/admin/login' },
     });
-  } catch (error) {
+  } catch (caught) {
     console.error({
       event: 'installation_failed',
-      errorType: error instanceof Error ? error.name : 'UnknownError',
+      errorType: caught instanceof Error ? caught.name : 'UnknownError',
     });
     // Best-effort lock release so a transient failure doesn't wedge the
     // install form permanently.
@@ -265,8 +271,6 @@ export const POST: APIRoute = async ({ request }) => {
     } catch {
       // If we can't reach D1 at all, there is nothing more we can do here.
     }
-    return new Response('安装失败，请检查数据库配置', {
-      status: 500,
-    });
+    return error(500, 'install.failed', {}, 'Installation failed. Check the database configuration.');
   }
 };

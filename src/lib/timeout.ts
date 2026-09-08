@@ -8,7 +8,7 @@ export class TimeoutError extends Error {
 export function withTimeout<T>(
   operation: Promise<T>,
   timeoutMs: number,
-  message = '操作超时，请稍后重试',
+  message = 'Operation timed out. Try again later.',
 ): Promise<T> {
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
     return operation;

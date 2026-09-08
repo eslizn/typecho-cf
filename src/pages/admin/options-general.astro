@@ -2,91 +2,123 @@
 import Admin from '@/layouts/Admin.astro';
 import { createContext, requireAuth } from '@/lib/context';
 import { hasPermission } from '@/lib/auth';
+import { getAvailableTranslationLocales } from '@/lib/i18n-registry';
+import { normalizeLocale } from '@/lib/i18n';
 
 const ctx = await createContext(Astro.locals, Astro.request);
 const authCheck = requireAuth(ctx);
 if (authCheck) return authCheck;
 
 if (!hasPermission(ctx.user!.group || 'visitor', 'administrator')) {
-  return new Response('Forbidden', { status: 403 });
+  return new Response(ctx.i18n.t('core.error.forbidden', {}, 'Forbidden'), { status: 403 });
 }
 
 const { options, urls, user, csrfToken } = ctx;
+const configuredLanguage = typeof options.lang === 'string' ? options.lang : 'zh_CN';
+const normalizedConfiguredLanguage = normalizeLocale(configuredLanguage);
+const availableLanguages = getAvailableTranslationLocales(ctx.activatedPlugins);
+const languageIsAvailable = configuredLanguage === '' || availableLanguages.some(({ locale }) => normalizeLocale(locale) === normalizedConfiguredLanguage);
 ---
-<Admin title="基本设置" options={options} urls={urls} user={user} activeMenu="options" pluginCtx={ctx}>
+<Admin title={ctx.i18n.t('admin.page.generalOptions', {}, 'General settings')} options={options} urls={urls} user={user} activeMenu="options" pluginCtx={ctx}>
   <div class="col-mb-12 col-tb-8 col-tb-offset-2" role="form">
     <form method="post" action="/api/admin/options">
       <input type="hidden" name="_" value={csrfToken} />
       <ul class="typecho-option">
         <li>
-          <label for="title" class="typecho-label">站点名称</label>
+          <label for="title" class="typecho-label">{ctx.i18n.t('admin.field.siteTitle', {}, 'Site title')}</label>
           <p><input type="text" id="title" name="title" class="text w-100" value={options.title} /></p>
-          <p class="description">站点的名称将显示在网页的标题处</p>
+          <p class="description">{ctx.i18n.t('admin.description.siteTitle', {}, 'The site name appears in page titles.')}</p>
         </li>
         <li>
-          <label for="description" class="typecho-label">站点描述</label>
+          <label for="description" class="typecho-label">{ctx.i18n.t('admin.field.siteDescription', {}, 'Site description')}</label>
           <p><input type="text" id="description" name="description" class="text w-100" value={options.description} /></p>
-          <p class="description">站点的描述将显示在网页代码的头部</p>
+          <p class="description">{ctx.i18n.t('admin.description.siteDescription', {}, 'The site description appears in the page head.')}</p>
         </li>
         <li>
-          <label for="keywords" class="typecho-label">关键词</label>
-          <p><input type="text" id="keywords" name="keywords" class="text w-100" value={options.keywords} placeholder="多个关键词用逗号分隔" /></p>
-          <p class="description">请以半角逗号 "," 分割多个关键字</p>
+          <label for="keywords" class="typecho-label">{ctx.i18n.t('admin.field.keywords', {}, 'Keywords')}</label>
+          <p><input type="text" id="keywords" name="keywords" class="text w-100" value={options.keywords} placeholder={ctx.i18n.t('admin.description.keywords', {}, 'Separate multiple keywords with commas.')} /></p>
+          <p class="description">{ctx.i18n.t('admin.description.keywords', {}, 'Separate multiple keywords with commas.')}</p>
         </li>
         <li>
-          <label for="siteUrl" class="typecho-label">站点地址</label>
+          <label for="siteUrl" class="typecho-label">{ctx.i18n.t('admin.field.siteAddress', {}, 'Site address')}</label>
           <p><input type="url" id="siteUrl" name="siteUrl" class="text w-100" value={options.siteUrl} /></p>
-          <p class="description">站点地址将作为你的博客的URL标识, 请包含 <code>http://</code> 或 <code>https://</code> 前缀</p>
+          <p class="description">{ctx.i18n.t('admin.description.siteAddress', {}, 'Include the http:// or https:// prefix.')}</p>
         </li>
         <li>
-          <label class="typecho-label">时区</label>
+          <label for="lang" class="typecho-label">{ctx.i18n.t('admin.field.language', {}, 'Language')}</label>
+          <p>
+            <select name="lang" id="lang">
+              <option value="" selected={configuredLanguage === ''}>{ctx.i18n.t('admin.option.auto', {}, 'Auto (browser language)')}</option>
+              {availableLanguages.map(({ locale, displayName }) => (
+                <option
+                  value={normalizeLocale(locale) === normalizedConfiguredLanguage && configuredLanguage !== '' ? configuredLanguage : locale}
+                  selected={normalizeLocale(locale) === normalizedConfiguredLanguage}
+                >
+                  {displayName || (locale === 'zh-CN'
+                    ? ctx.i18n.t('admin.option.zhCN', {}, 'Chinese (Simplified)')
+                    : locale === 'en'
+                      ? ctx.i18n.t('admin.option.en', {}, 'English')
+                      : locale)}
+                </option>
+              ))}
+              {!languageIsAvailable && configuredLanguage !== '' && (
+                <option value={configuredLanguage} selected disabled>
+                  {configuredLanguage} ({ctx.i18n.t('admin.status.unavailable', {}, 'Unavailable')})
+                </option>
+              )}
+            </select>
+          </p>
+          <p class="description">{ctx.i18n.t('admin.description.languageAuto', {}, 'Automatically select a language from the browser request.')}</p>
+        </li>
+        <li>
+          <label class="typecho-label">{ctx.i18n.t('admin.field.timezone', {}, 'Timezone')}</label>
           <p>
             <select name="timezone" id="timezone">
-              <option value="28800" selected={options.timezone === 28800}>UTC+8 (中国标准时间)</option>
+              <option value="28800" selected={options.timezone === 28800}>UTC+8 ({ctx.i18n.t('admin.timezone.china', {}, 'China Standard Time')})</option>
               <option value="0" selected={options.timezone === 0}>UTC</option>
-              <option value="-18000" selected={options.timezone === -18000}>UTC-5 (美国东部)</option>
-              <option value="32400" selected={options.timezone === 32400}>UTC+9 (日本/韩国)</option>
-              <option value="3600" selected={options.timezone === 3600}>UTC+1 (中欧)</option>
+              <option value="-18000" selected={options.timezone === -18000}>UTC-5 ({ctx.i18n.t('admin.timezone.usEastern', {}, 'US Eastern')})</option>
+              <option value="32400" selected={options.timezone === 32400}>UTC+9 ({ctx.i18n.t('admin.timezone.japanKorea', {}, 'Japan/Korea')})</option>
+              <option value="3600" selected={options.timezone === 3600}>UTC+1 ({ctx.i18n.t('admin.timezone.centralEurope', {}, 'Central Europe')})</option>
             </select>
           </p>
         </li>
         <li>
           <label class="typecho-label">
             <input type="checkbox" name="allowRegister" value="1" checked={!!options.allowRegister} />
-            允许注册
+            {ctx.i18n.t('admin.field.allowRegister', {}, 'Allow registration')}
           </label>
-          <p class="description">是否允许访客注册到你的博客</p>
+          <p class="description">{ctx.i18n.t('admin.description.allowRegister', {}, 'Allow visitors to register on your blog.')}</p>
         </li>
         <li>
-          <label for="attachmentTypes" class="typecho-label">允许上传的文件类型</label>
+          <label for="attachmentTypes" class="typecho-label">{ctx.i18n.t('admin.field.uploadTypes', {}, 'Allowed file types')}</label>
           <p><input type="text" id="attachmentTypes" name="attachmentTypes" class="text w-100"
             value={options.attachmentTypes || '@image@'} /></p>
-          <p class="description">使用逗号分隔, 如: <code>@image@</code> 代表所有图片类型, 支持 <code>jpg,png,gif,webp,svg,zip,pdf,mp3,mp4</code> 等扩展名. <code>@image@</code> 等同于 jpg,jpeg,png,gif,webp,bmp,tiff</p>
+          <p class="description">{ctx.i18n.t('admin.description.uploadTypes', {}, 'Separate values with commas. @image@ represents common image types.')}</p>
         </li>
         <li>
           <label class="typecho-label">
             <input type="checkbox" name="cacheEnabled" value="1" checked={options.cacheEnabled !== 0} />
-            启用页面缓存
+            {ctx.i18n.t('admin.field.cache', {}, 'Page cache')}
           </label>
-          <p class="description">启用后，未登录用户访问的页面将在边缘节点缓存 5 分钟，可大幅减少数据库查询。管理员操作（发布、编辑、评论等）会自动清除相关缓存</p>
+          <p class="description">{ctx.i18n.t('admin.description.cache', {}, 'Cache anonymous pages at the edge for five minutes. Content changes clear the cache.')}</p>
         </li>
       </ul>
 
       <ul class="typecho-option">
         <li>
-          <label class="typecho-label">邮件设置</label>
+          <label class="typecho-label">{ctx.i18n.t('admin.field.mailSettings', {}, 'Mail settings')}</label>
           <ul>
             <li>
               <input type="checkbox" id="mailEnabled" name="mailEnabled" value="1" checked={!!options.mailEnabled && options.mailEnabled !== 0} />
-              <label for="mailEnabled">启用邮件发送</label>
-              <p class="description">需要安装邮件适配器插件才能实际发送（密码重置、评论通知依赖此开关）</p>
+              <label for="mailEnabled">{ctx.i18n.t('admin.field.mailEnabled', {}, 'Enable mail')}</label>
+              <p class="description">{ctx.i18n.t('admin.description.mailEnabled', {}, 'A mail adapter plugin is required for password reset and comment notifications.')}</p>
             </li>
             <li>
-              <label for="mailFrom" class="typecho-label">发件邮箱</label>
+              <label for="mailFrom" class="typecho-label">{ctx.i18n.t('admin.field.mailFrom', {}, 'From address')}</label>
               <p><input type="email" id="mailFrom" name="mailFrom" class="text w-100" value={options.mailFrom || ''} /></p>
             </li>
             <li>
-              <label for="mailFromName" class="typecho-label">发件人名称</label>
+              <label for="mailFromName" class="typecho-label">{ctx.i18n.t('admin.field.mailFromName', {}, 'Sender name')}</label>
               <p><input type="text" id="mailFromName" name="mailFromName" class="text w-100" value={options.mailFromName || ''} /></p>
             </li>
           </ul>
@@ -95,15 +127,15 @@ const { options, urls, user, csrfToken } = ctx;
 
       <ul class="typecho-option">
         <li>
-          <label for="robotsTxt" class="typecho-label">robots.txt 内容</label>
+          <label for="robotsTxt" class="typecho-label">{ctx.i18n.t('admin.field.robots', {}, 'robots.txt content')}</label>
           <p><textarea id="robotsTxt" name="robotsTxt" class="w-100" rows="5">{options.robotsTxt || ''}</textarea></p>
-          <p class="description">留空使用默认规则（Allow / Disallow /admin/ /api/ Sitemap）</p>
+          <p class="description">{ctx.i18n.t('admin.description.robots', {}, 'Leave blank to use the default Allow / Disallow /admin/ /api/ Sitemap rules.')}</p>
         </li>
       </ul>
 
       <ul class="typecho-option typecho-option-submit">
         <li>
-          <button type="submit" class="btn primary">保存设置</button>
+          <button type="submit" class="btn primary">{ctx.i18n.t('admin.action.save', {}, 'Save settings')}</button>
         </li>
       </ul>
     </form>

@@ -5,6 +5,7 @@ import { env } from 'cloudflare:workers';
 import { loadOptions } from '@/lib/options';
 import { doHook, parseActivatedPlugins, setActivatedPlugins, type HookContext } from '@/lib/plugin';
 import { getRequestCoreContextFromLocals } from '@/lib/context';
+import { createCoreRequestI18n } from '@/lib/i18n-runtime';
 
 /**
  * Logout — POST only to actually clear cookies. The CSRF risk of clearing
@@ -13,19 +14,20 @@ import { getRequestCoreContextFromLocals } from '@/lib/context';
  * but never modifies session state.
  */
 export const POST: APIRoute = async ({ request, locals }) => {
+  const core = getRequestCoreContextFromLocals(locals);
+  const i18n = core?.i18n ?? createCoreRequestI18n(request).i18n;
   const requestOrigin = new URL(request.url).origin;
   const source = request.headers.get('origin') || request.headers.get('referer');
   if (source) {
     try {
       if (new URL(source).origin !== requestOrigin) {
-        return new Response('Forbidden', { status: 403 });
+        return new Response(i18n.t('core.error.forbidden', {}, 'Forbidden'), { status: 403 });
       }
     } catch {
-      return new Response('Forbidden', { status: 403 });
+      return new Response(i18n.t('core.error.forbidden', {}, 'Forbidden'), { status: 403 });
     }
   }
   const cookieHeaders = clearAuthCookieHeaders(request);
-  const core = getRequestCoreContextFromLocals(locals);
   const pluginCtx: HookContext = core?.pluginCtx ?? { activatedPlugins: new Set<string>() };
   if (!core && env.DB) {
     const db = getDb(env.DB);

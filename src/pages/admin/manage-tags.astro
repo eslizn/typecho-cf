@@ -11,7 +11,7 @@ const authCheck = requireAuth(ctx);
 if (authCheck) return authCheck;
 
 if (!hasPermission(ctx.user!.group || 'visitor', 'editor')) {
-  return new Response('Forbidden', { status: 403 });
+  return new Response(ctx.i18n.t('core.error.forbidden', {}, 'Forbidden'), { status: 403 });
 }
 
 const { db, options, urls, user, csrfToken } = ctx;
@@ -29,18 +29,18 @@ const [tags, editRows] = await db.batch([
 ]);
 const editTag: any = editRows[0] ?? null;
 ---
-<Admin title="管理标签" options={options} urls={urls} user={user} activeMenu="manage-tags" pluginCtx={ctx}>
+<Admin title={ctx.i18n.t('admin.page.manageTags', {}, 'Manage tags')} options={options} urls={urls} user={user} activeMenu="manage-tags" pluginCtx={ctx}>
   <div class="col-mb-12 col-tb-8 typecho-list" role="main">
     <form method="post" name="manage_tags" class="operate-form">
       <input type="hidden" name="_" value={csrfToken} />
       <div class="typecho-list-operate clearfix">
         <div class="operate">
-          <label><i class="sr-only">全选</i><input type="checkbox" class="typecho-table-select-all" /></label>
+          <label><i class="sr-only">{ctx.i18n.t('admin.action.selectAll', {}, 'Select all')}</i><input type="checkbox" class="typecho-table-select-all" /></label>
           <div class="btn-group btn-drop">
-            <button class="btn dropdown-toggle btn-s" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="tag-actions"><i class="sr-only">操作</i>选中项 <i class="i-caret-down"></i></button>
+            <button class="btn dropdown-toggle btn-s" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="tag-actions"><i class="sr-only">{ctx.i18n.t('admin.action.actions', {}, 'Actions')}</i>{ctx.i18n.t('admin.notice.selectAction', {}, 'Select an action')} <i class="i-caret-down"></i></button>
             <ul class="dropdown-menu" id="tag-actions" role="menu">
-              <li><a href="/api/admin/meta?action=delete&type=tag">删除</a></li>
-              <li><a href="/api/admin/meta?action=refresh&type=tag">刷新</a></li>
+              <li><a href="/api/admin/meta?action=delete&type=tag">{ctx.i18n.t('admin.action.delete', {}, 'Delete')}</a></li>
+              <li><a href="/api/admin/meta?action=refresh&type=tag">{ctx.i18n.t('admin.action.refresh', {}, 'Refresh')}</a></li>
             </ul>
           </div>
         </div>
@@ -57,15 +57,15 @@ const editTag: any = editRows[0] ?? null;
           <thead>
             <tr>
               <th class="kit-hidden-mb"></th>
-              <th>名称</th>
-              <th class="kit-hidden-mb">缩略名</th>
-              <th>文章数</th>
+              <th>{ctx.i18n.t('admin.field.name', {}, 'Name')}</th>
+              <th class="kit-hidden-mb">{ctx.i18n.t('admin.field.slug', {}, 'Slug')}</th>
+              <th>{ctx.i18n.t('admin.field.posts', {}, 'Posts')}</th>
             </tr>
           </thead>
           <tbody>
             {tags.length === 0 ? (
               <tr>
-                <td colspan="4"><h6 class="typecho-list-table-title">没有任何标签</h6></td>
+                <td colspan="4"><h6 class="typecho-list-table-title">{ctx.i18n.t('admin.notice.noTags', {}, 'No tags')}</h6></td>
               </tr>
             ) : (
               tags.map((tag) => (
@@ -73,7 +73,7 @@ const editTag: any = editRows[0] ?? null;
                   <td class="kit-hidden-mb"><input type="checkbox" value={String(tag.mid)} name="mid[]" /></td>
                   <td>
                     <a href={`/admin/manage-tags?mid=${tag.mid}`}>{tag.name}</a>
-                    <a href={buildTagLink(tag.slug, urls.siteUrl)} title={`浏览 ${tag.name}`}><i class="i-exlink"></i></a>
+                    <a href={buildTagLink(tag.slug, urls.siteUrl)} title={`${ctx.i18n.t('admin.action.browse', {}, 'Browse')} ${tag.name}`}><i class="i-exlink"></i></a>
                   </td>
                   <td class="kit-hidden-mb">{tag.slug}</td>
                   <td>
@@ -96,24 +96,24 @@ const editTag: any = editRows[0] ?? null;
         <input type="hidden" name="type" value="tag" />
         {editTag && <input type="hidden" name="mid" value={String(editTag.mid)} />}
 
-        <h4>{editTag ? '编辑标签' : '新增标签'}</h4>
+        <h4>{editTag ? ctx.i18n.t('admin.form.editTag', {}, 'Edit tag') : ctx.i18n.t('admin.form.newTag', {}, 'Add tag')}</h4>
 
         <ul class="typecho-option">
           <li>
-            <label for="name" class="typecho-label">标签名称 *</label>
+            <label for="name" class="typecho-label">{ctx.i18n.t('admin.field.tags', {}, 'Tag name')} *</label>
             <input type="text" id="name" name="name" class="text w-100" value={editTag?.name || ''} required />
-            <p class="description">标签名称将在前台显示</p>
+            <p class="description">{ctx.i18n.t('admin.description.tagShown', {}, 'The tag name is shown on the public site.')}</p>
           </li>
           <li>
-            <label for="slug" class="typecho-label">缩略名</label>
-            <input type="text" id="slug" name="slug" class="text w-100" value={editTag?.slug || ''} placeholder="留空自动生成" />
-            <p class="description">标签缩略名用于创建友好的链接形式</p>
+            <label for="slug" class="typecho-label">{ctx.i18n.t('admin.field.slug', {}, 'Slug')}</label>
+            <input type="text" id="slug" name="slug" class="text w-100" value={editTag?.slug || ''} placeholder={ctx.i18n.t('admin.description.autoGenerateSlug', {}, 'Leave blank to generate automatically')} />
+            <p class="description">{ctx.i18n.t('admin.description.tagSlug', {}, 'The tag slug is used for friendly links.')}</p>
           </li>
         </ul>
 
         <p>
-          <button type="submit" class="btn primary">{editTag ? '更新标签' : '增加标签'}</button>
-          {editTag && <a href="/admin/manage-tags" class="btn">取消</a>}
+          <button type="submit" class="btn primary">{editTag ? ctx.i18n.t('admin.action.update', {}, 'Update') : ctx.i18n.t('admin.action.add', {}, 'Add')}</button>
+          {editTag && <a href="/admin/manage-tags" class="btn">{ctx.i18n.t('admin.action.cancel', {}, 'Cancel')}</a>}
         </p>
       </form>
     </div>

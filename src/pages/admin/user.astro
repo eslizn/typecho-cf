@@ -11,10 +11,11 @@ const authCheck = requireAuth(ctx);
 if (authCheck) return authCheck;
 
 if (!hasPermission(ctx.user!.group || 'visitor', 'administrator')) {
-  return new Response('Forbidden', { status: 403 });
+  return new Response(ctx.i18n.t('core.error.forbidden', {}, 'Forbidden'), { status: 403 });
 }
 
 const { db, options, urls, user, csrfToken } = ctx;
+const t = ctx.i18n.t.bind(ctx.i18n);
 const uid = parseInt(Astro.url.searchParams.get('uid') || '0', 10);
 
 let editUser: any = null;
@@ -28,13 +29,13 @@ if (uid) {
 }
 
 const groups = [
-  { value: 'administrator', label: '管理员' },
-  { value: 'editor', label: '编辑' },
-  { value: 'contributor', label: '贡献者' },
-  { value: 'subscriber', label: '关注者' },
+  { value: 'administrator', label: t('admin.option.administrator', {}, 'Administrator') },
+  { value: 'editor', label: t('admin.option.editor', {}, 'Editor') },
+  { value: 'contributor', label: t('admin.option.contributor', {}, 'Contributor') },
+  { value: 'subscriber', label: t('admin.option.subscriber', {}, 'Subscriber') },
 ];
 ---
-<Admin title={isEdit ? '编辑用户' : '增加用户'} options={options} urls={urls} user={user} activeMenu="manage-users" pluginCtx={ctx}>
+<Admin title={isEdit ? t('admin.page.editUser', {}, 'Edit user') : t('admin.page.newUser', {}, 'Add user')} options={options} urls={urls} user={user} activeMenu="manage-users" pluginCtx={ctx}>
   <div class="col-mb-12 col-tb-8 col-tb-offset-2" role="form">
     <form method="post" action="/api/admin/user">
       <input type="hidden" name="_" value={csrfToken} />
@@ -43,28 +44,28 @@ const groups = [
 
       <ul class="typecho-option">
         <li>
-          <label for="name" class="typecho-label">用户名 *</label>
+          <label for="name" class="typecho-label">{t('admin.field.username', {}, 'Username')} *</label>
           <p><input type="text" id="name" name="name" class="text w-100" value={editUser?.name || ''}
             {isEdit ? 'readonly' : ''} required /></p>
-          <p class="description">{isEdit ? '用户名创建后不可修改' : '此用户用于登录的名称'}</p>
+          <p class="description">{isEdit ? t('admin.description.usernameImmutable', {}, 'The username cannot be changed after creation.') : t('admin.description.loginUsername', {}, 'The name used to sign in.')}</p>
         </li>
         <li>
-          <label for="mail" class="typecho-label">邮件地址 *</label>
+          <label for="mail" class="typecho-label">{t('admin.field.email', {}, 'Email')} *</label>
           <p><input type="email" id="mail" name="mail" class="text w-100" value={editUser?.mail || ''} required /></p>
-          <p class="description">此邮件地址将作为该用户的联系方式</p>
+          <p class="description">{t('admin.description.userContact', {}, "This email address is used as the user's contact address.")}</p>
         </li>
         <li>
-          <label for="screenName" class="typecho-label">用户昵称</label>
+          <label for="screenName" class="typecho-label">{t('admin.field.nickname', {}, 'Nickname')}</label>
           <p><input type="text" id="screenName" name="screenName" class="text w-100" value={editUser?.screenName || ''} /></p>
-          <p class="description">用户昵称可以与用户名不同, 用于前台显示. 如果留空, 将使用用户名</p>
+          <p class="description">{t('admin.description.nickname', {}, 'The nickname can differ from the username and is shown publicly. Leave blank to use the username.')}</p>
         </li>
         <li>
-          <label for="url" class="typecho-label">个人主页地址</label>
+          <label for="url" class="typecho-label">{t('admin.field.website', {}, 'Website')}</label>
           <p><input type="url" id="url" name="url" class="text w-100" value={editUser?.url || ''} /></p>
-          <p class="description">此用户的个人主页地址, 请用 <code>http://</code> 或 <code>https://</code> 开头</p>
+          <p class="description">{t('admin.description.website', {}, 'Start with http:// or https://.')}</p>
         </li>
         <li>
-          <label for="group" class="typecho-label">用户组</label>
+          <label for="group" class="typecho-label">{t('admin.field.userGroup', {}, 'User group')}</label>
           <p>
             <select id="group" name="group">
               {groups.map(g => (
@@ -76,26 +77,26 @@ const groups = [
       </ul>
 
       <section>
-        <h3>密码</h3>
+        <h3>{t('admin.field.password', {}, 'Password')}</h3>
         <ul class="typecho-option">
           <li>
-            <label for="password" class="typecho-label">{isEdit ? '新密码' : '用户密码 *'}</label>
+            <label for="password" class="typecho-label">{isEdit ? t('admin.field.newPassword', {}, 'New password') : `${t('admin.field.password', {}, 'Password')} *`}</label>
             <p><input type="password" id="password" name="password" class="text w-100" autocomplete="new-password"
               minlength={PASSWORD_MIN_LENGTH} required={!isEdit} /></p>
-            <p class="description">{isEdit ? '如果不修改密码, 请留空' : `为此用户设置一个至少 ${PASSWORD_MIN_LENGTH} 位的密码`}</p>
+            <p class="description">{isEdit ? t('admin.description.passwordKeep', {}, 'Leave blank to keep the current password.') : t('admin.description.passwordStrength', { count: PASSWORD_MIN_LENGTH }, `Use at least ${PASSWORD_MIN_LENGTH} characters and avoid an easy-to-guess password.`)}</p>
           </li>
           <li>
-            <label for="confirm" class="typecho-label">密码确认</label>
+            <label for="confirm" class="typecho-label">{t('admin.field.confirmPassword', {}, 'Confirm password')}</label>
             <p><input type="password" id="confirm" name="confirm" class="text w-100" autocomplete="new-password" minlength={PASSWORD_MIN_LENGTH} /></p>
-            <p class="description">请再次输入密码进行确认</p>
+            <p class="description">{t('admin.description.passwordConfirm', {}, 'Enter the password again to confirm it.')}</p>
           </li>
         </ul>
       </section>
 
       <ul class="typecho-option typecho-option-submit">
         <li>
-          <button type="submit" class="btn primary">{isEdit ? '更新用户' : '增加用户'}</button>
-          <a href="/admin/manage-users" class="btn">返回</a>
+          <button type="submit" class="btn primary">{isEdit ? t('admin.action.update', {}, 'Update') : t('admin.action.add', {}, 'Add')} {t('admin.field.user', {}, 'user')}</button>
+          <a href="/admin/manage-users" class="btn">{t('admin.action.back', {}, 'Back')}</a>
         </li>
       </ul>
     </form>

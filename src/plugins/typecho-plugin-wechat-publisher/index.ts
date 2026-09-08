@@ -1,13 +1,19 @@
-import { buildPermalink, escapeAttr, escapeHtml, fetchWithTimeout, getOption, hasPermission, normalizeHttpUrl, parseAttachmentMeta, parsePluginOption, renderMarkdown, setOption, stripHtmlTags, stripTypechoMarkers } from 'typecho/plugin-sdk';
-import type { PluginInitContext } from 'typecho/plugin-sdk';
+import { buildPermalink, escapeAttr, escapeHtml, fetchWithTimeout, getOption, hasPermission, normalizeHttpUrl, parseAttachmentMeta, parsePluginOption, renderMarkdown, safeJsonForScript, setOption, stripHtmlTags, stripTypechoMarkers } from 'typecho/plugin-sdk';
+import type { I18n, PluginInitContext } from 'typecho/plugin-sdk';
 import type { Database } from 'typecho/db';
 import { schema } from 'typecho/db';
 import { env } from 'cloudflare:workers';
 import { and, eq } from 'drizzle-orm';
 import sanitizeHtml from 'sanitize-html';
+import en from './locales/en.json';
+import zhCN from './locales/zh-CN.json';
 
 const PLUGIN_ID = 'typecho-plugin-wechat-publisher';
 const WECHAT_API_BASE = 'https://api.weixin.qq.com';
+
+function translate(i18n: I18n | undefined, key: string, fallback: string, variables?: Record<string, string | number>): string {
+  return i18n?.t(key, variables, fallback) ?? fallback;
+}
 
 interface WeChatMpConfig {
   appId: string;
@@ -108,13 +114,13 @@ function getConfig(options?: Record<string, unknown>): WeChatMpConfig {
   };
 }
 
-export function normalizeConfig(settings?: Record<string, unknown>): WeChatMpConfig {
+export function normalizeConfig(settings?: Record<string, unknown>, i18n?: I18n): WeChatMpConfig {
   const config = getConfig({ [`plugin:${PLUGIN_ID}`]: settings || {} });
   if (!config.appId || !config.appSecret) {
-    throw new Error('请填写微信公众号 AppID 和 AppSecret');
+    throw new Error(translate(i18n, 'plugin.typecho-plugin-wechat-publisher.message.configRequired', '请填写微信公众号 AppID 和 AppSecret'));
   }
   if (config.defaultCoverUrl && !normalizeHttpUrl(config.defaultCoverUrl)) {
-    throw new Error('默认封面图片 URL 格式不正确，必须使用 http 或 https');
+    throw new Error(translate(i18n, 'plugin.typecho-plugin-wechat-publisher.message.coverUrlInvalid', '默认封面图片 URL 格式不正确，必须使用 http 或 https'));
   }
   return config;
 }
@@ -204,18 +210,18 @@ function getDefaultUploadBucket(): R2Bucket | null {
   return bucket && typeof bucket.get === 'function' ? bucket : null;
 }
 
-async function fetchLocalUploadBlob(key: string, sourceUrl: string, definitive: boolean): Promise<{ blob: Blob; filename: string } | null> {
+async function fetchLocalUploadBlob(key: string, sourceUrl: string, definitive: boolean, i18n?: I18n): Promise<{ blob: Blob; filename: string } | null> {
   const bucket = getDefaultUploadBucket();
   if (!bucket) return null;
 
   const object = await bucket.get(key);
   if (!object) {
     if (!definitive) return null;
-    throw new Error(`读取站内图片失败：R2 对象不存在：${key}`);
+    throw new Error(translate(i18n, 'plugin.typecho-plugin-wechat-publisher.message.localImageMissing', `读取站内图片失败：R2 对象不存在：${key}`));
   }
 
   const contentType = object.httpMetadata?.contentType || 'image/jpeg';
-  if (!contentType.startsWith('image/')) throw new Error(`不是可上传的图片：${sourceUrl}`);
+  if (!contentType.startsWith('image/')) throw new Error(translate(i18n, 'plugin.typecho-plugin-wechat-publisher.message.notImage', `不是可上传的图片：${sourceUrl}`));
   const blob = await new Response(object.body).blob();
   return {
     blob: blob.type ? blob : new Blob([blob], { type: contentType }),
@@ -223,17 +229,22 @@ async function fetchLocalUploadBlob(key: string, sourceUrl: string, definitive: 
   };
 }
 
-async function requestWeChatJson(url: string, init: RequestInit, label: string): Promise<WeChatJson> {
-  const response = await fetchWithTimeout(url, init, 12_000, '微信公众号接口请求超时');
+async function requestWeChatJson(url: string, init: RequestInit, label: string, i18n?: I18n): Promise<WeChatJson> {
+  const response = await fetchWithTimeout(
+    url,
+    init,
+    12_000,
+    translate(i18n, 'plugin.typecho-plugin-wechat-publisher.message.requestTimeout', '微信公众号接口请求超时'),
+  );
   const data = await response.json().catch(() => null) as WeChatJson | null;
   if (!response.ok || !data || (typeof data.errcode === 'number' && data.errcode !== 0)) {
-    const message = data?.errmsg || response.statusText || '未知错误';
+    const message = data?.errmsg || response.statusText || translate(i18n, 'plugin.typecho-plugin-wechat-publisher.message.unknownError', '未知错误');
     throw new WeChatApiError(label, message, data?.errcode);
   }
   return data;
 }
 
-async function getAccessToken(config: WeChatMpConfig): Promise<string> {
+async function getAccessToken(config: WeChatMpConfig, i18n?: I18n): Promise<string> {
   const params = new URLSearchParams({
     grant_type: 'client_credential',
     appid: config.appId,
@@ -241,33 +252,43 @@ async function getAccessToken(config: WeChatMpConfig): Promise<string> {
   });
   const data = await requestWeChatJson(`${WECHAT_API_BASE}/cgi-bin/token?${params.toString()}`, {
     method: 'GET',
-  }, '获取 access_token');
-  if (!data.access_token) throw new Error('微信公众号未返回 access_token');
+  }, translate(i18n, 'plugin.typecho-plugin-wechat-publisher.message.operation.getAccessToken', '获取 access_token'), i18n);
+  if (!data.access_token) throw new Error(translate(i18n, 'plugin.typecho-plugin-wechat-publisher.message.accessTokenMissing', '微信公众号未返回 access_token'));
   return data.access_token;
 }
 
 const tokenCache = new Map<string, { token: string; expiresAt: number }>();
-async function getAccessTokenCached(config: WeChatMpConfig): Promise<string> {
+async function getAccessTokenCached(config: WeChatMpConfig, i18n?: I18n): Promise<string> {
   const cached = tokenCache.get(config.appId);
   if (cached && cached.expiresAt > Date.now()) return cached.token;
-  const token = await getAccessToken(config);
+  const token = await getAccessToken(config, i18n);
   tokenCache.set(config.appId, { token, expiresAt: Date.now() + 7_000_000 });
   return token;
 }
 
-async function fetchImageBlob(url: string, siteUrl?: string): Promise<{ blob: Blob; filename: string }> {
+async function fetchImageBlob(url: string, siteUrl?: string, i18n?: I18n): Promise<{ blob: Blob; filename: string }> {
   const localUpload = localUploadKeyFromUrl(url, siteUrl);
   if (localUpload) {
-    const localImage = await fetchLocalUploadBlob(localUpload.key, url, localUpload.definitive);
+    const localImage = await fetchLocalUploadBlob(localUpload.key, url, localUpload.definitive, i18n);
     if (localImage) return localImage;
   }
 
   const imageUrl = absoluteUrl(url, siteUrl);
-  const response = await fetchWithTimeout(imageUrl, { method: 'GET' });
-  if (!response.ok) throw new Error(`读取图片失败：${response.status}，URL：${imageUrl}`);
+  const response = await fetchWithTimeout(
+    imageUrl,
+    { method: 'GET' },
+    12_000,
+    translate(i18n, 'plugin.typecho-plugin-wechat-publisher.message.requestTimeout', '微信公众号接口请求超时'),
+  );
+  if (!response.ok) throw new Error(translate(
+    i18n,
+    'plugin.typecho-plugin-wechat-publisher.message.imageReadFailed',
+    `读取图片失败：${response.status}，URL：${imageUrl}`,
+    { status: response.status, url: imageUrl },
+  ));
   const blob = await response.blob();
   const contentType = response.headers.get('Content-Type') || blob.type || 'image/jpeg';
-  if (!contentType.startsWith('image/')) throw new Error(`不是可上传的图片：${imageUrl}`);
+  if (!contentType.startsWith('image/')) throw new Error(translate(i18n, 'plugin.typecho-plugin-wechat-publisher.message.notImage', `不是可上传的图片：${imageUrl}`));
   return {
     blob: blob.type ? blob : new Blob([blob], { type: contentType }),
     filename: filenameFromUrl(imageUrl, contentType),
@@ -281,26 +302,43 @@ async function uploadImage(
   endpoint: string,
   extraParams?: Record<string, string>,
   siteUrl?: string,
+  i18n?: I18n,
 ): Promise<WeChatJson> {
-  const image = await fetchImageBlob(imageUrl, siteUrl);
+  const image = await fetchImageBlob(imageUrl, siteUrl, i18n);
   const formData = new FormData();
   formData.append('media', image.blob, image.filename);
   const params = new URLSearchParams({ access_token: accessToken, ...(extraParams || {}) });
   return requestWeChatJson(`${WECHAT_API_BASE}${endpoint}?${params.toString()}`, {
     method: 'POST',
     body: formData,
-  }, label);
+  }, label, i18n);
 }
 
-async function uploadCoverImage(accessToken: string, imageUrl: string, siteUrl?: string): Promise<string> {
-  const data = await uploadImage(accessToken, imageUrl, '上传封面素材', '/cgi-bin/material/add_material', { type: 'image' }, siteUrl);
-  if (!data.media_id) throw new Error('微信公众号未返回封面素材 media_id');
+async function uploadCoverImage(accessToken: string, imageUrl: string, siteUrl?: string, i18n?: I18n): Promise<string> {
+  const data = await uploadImage(
+    accessToken,
+    imageUrl,
+    translate(i18n, 'plugin.typecho-plugin-wechat-publisher.message.operation.uploadCover', '上传封面素材'),
+    '/cgi-bin/material/add_material',
+    { type: 'image' },
+    siteUrl,
+    i18n,
+  );
+  if (!data.media_id) throw new Error(translate(i18n, 'plugin.typecho-plugin-wechat-publisher.message.coverMediaMissing', '微信公众号未返回封面素材 media_id'));
   return data.media_id;
 }
 
-async function uploadArticleImage(accessToken: string, imageUrl: string, siteUrl?: string): Promise<string> {
-  const data = await uploadImage(accessToken, imageUrl, '上传正文图片', '/cgi-bin/media/uploadimg', undefined, siteUrl);
-  if (!data.url) throw new Error('微信公众号未返回正文图片 URL');
+async function uploadArticleImage(accessToken: string, imageUrl: string, siteUrl?: string, i18n?: I18n): Promise<string> {
+  const data = await uploadImage(
+    accessToken,
+    imageUrl,
+    translate(i18n, 'plugin.typecho-plugin-wechat-publisher.message.operation.uploadArticle', '上传正文图片'),
+    '/cgi-bin/media/uploadimg',
+    undefined,
+    siteUrl,
+    i18n,
+  );
+  if (!data.url) throw new Error(translate(i18n, 'plugin.typecho-plugin-wechat-publisher.message.articleImageMissing', '微信公众号未返回正文图片 URL'));
   return data.url;
 }
 
@@ -370,17 +408,17 @@ async function saveSyncState(db: Database, cid: number, mediaId: string): Promis
   }));
 }
 
-async function addDraft(accessToken: string, article: WeChatArticle): Promise<string> {
+async function addDraft(accessToken: string, article: WeChatArticle, i18n?: I18n): Promise<string> {
   const data = await requestWeChatJson(`${WECHAT_API_BASE}/cgi-bin/draft/add?access_token=${encodeURIComponent(accessToken)}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ articles: [article] }),
-  }, '创建公众号草稿');
-  if (!data.media_id) throw new Error('微信公众号未返回草稿 media_id');
+  }, translate(i18n, 'plugin.typecho-plugin-wechat-publisher.message.operation.createDraft', '创建公众号草稿'), i18n);
+  if (!data.media_id) throw new Error(translate(i18n, 'plugin.typecho-plugin-wechat-publisher.message.draftMediaMissing', '微信公众号未返回草稿 media_id'));
   return data.media_id;
 }
 
-async function updateDraft(accessToken: string, mediaId: string, article: WeChatArticle): Promise<void> {
+async function updateDraft(accessToken: string, mediaId: string, article: WeChatArticle, i18n?: I18n): Promise<void> {
   await requestWeChatJson(`${WECHAT_API_BASE}/cgi-bin/draft/update?access_token=${encodeURIComponent(accessToken)}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -389,7 +427,7 @@ async function updateDraft(accessToken: string, mediaId: string, article: WeChat
       index: 0,
       articles: article,
     }),
-  }, '更新公众号草稿');
+  }, translate(i18n, 'plugin.typecho-plugin-wechat-publisher.message.operation.updateDraft', '更新公众号草稿'), i18n);
 }
 
 function isStaleDraftError(error: unknown): boolean {
@@ -403,20 +441,21 @@ async function syncPostToWeChat(
   options: Record<string, unknown> | undefined,
   payload: SyncPayload,
   user?: { uid?: number | null; group?: string | null; screenName?: string | null; name?: string | null },
+  i18n?: I18n,
 ): Promise<PluginActionResult> {
-  const config = normalizeConfig(parsePluginOption(options?.[`plugin:${PLUGIN_ID}`]));
+  const config = normalizeConfig(parsePluginOption(options?.[`plugin:${PLUGIN_ID}`]), i18n);
   const cid = Number(payload.cid);
-  if (!Number.isInteger(cid) || cid <= 0) throw new Error('文章 ID 不正确');
-  if (!db) throw new Error('数据库不可用');
+  if (!Number.isInteger(cid) || cid <= 0) throw new Error(translate(i18n, 'plugin.typecho-plugin-wechat-publisher.message.postIdInvalid', '文章 ID 不正确'));
+  if (!db) throw new Error(translate(i18n, 'plugin.typecho-plugin-wechat-publisher.message.databaseUnavailable', '数据库不可用'));
 
   const post = await db.query.contents.findFirst({
     where: eq(schema.contents.cid, cid),
   });
   if (!post || !['post', 'post_draft'].includes(post.type || '')) {
-    throw new Error('文章不存在或不是文章类型');
+    throw new Error(translate(i18n, 'plugin.typecho-plugin-wechat-publisher.message.postNotFound', '文章不存在或不是文章类型'));
   }
   if (!hasPermission(user?.group || 'visitor', 'editor') && post.authorId !== user?.uid) {
-    throw new Error('没有权限同步这篇文章');
+    throw new Error(translate(i18n, 'plugin.typecho-plugin-wechat-publisher.message.forbidden', '没有权限同步这篇文章'));
   }
 
   const siteUrl = typeof options?.siteUrl === 'string' ? options.siteUrl : '';
@@ -426,18 +465,18 @@ async function syncPostToWeChat(
     || await loadAttachmentCover(db, cid)
     || config.defaultCoverUrl;
   if (!coverSource) {
-    throw new Error('微信公众号草稿需要封面图，请在正文添加图片或配置默认封面图片 URL');
+    throw new Error(translate(i18n, 'plugin.typecho-plugin-wechat-publisher.message.coverRequired', '微信公众号草稿需要封面图，请在正文添加图片或配置默认封面图片 URL'));
   }
 
-  const accessToken = await getAccessTokenCached(config);
+  const accessToken = await getAccessTokenCached(config, i18n);
   const uploadResults = await Promise.all(imageUrls.map(async (src) => {
-    const uploadedUrl = await uploadArticleImage(accessToken, src, siteUrl);
+    const uploadedUrl = await uploadArticleImage(accessToken, src, siteUrl, i18n);
     return [src, uploadedUrl] as const;
   }));
   const replacements = new Map<string, string>(uploadResults);
   html = replaceImageUrls(html, replacements);
 
-  const coverMediaId = await uploadCoverImage(accessToken, coverSource, siteUrl);
+  const coverMediaId = await uploadCoverImage(accessToken, coverSource, siteUrl, i18n);
   const authorName = config.author
     || await loadAuthorName(db, post.authorId)
     || user?.screenName
@@ -453,7 +492,7 @@ async function syncPostToWeChat(
     : '';
 
   const article: WeChatArticle = {
-    title: (post.title || '无标题').slice(0, 64),
+    title: (post.title || translate(i18n, 'plugin.typecho-plugin-wechat-publisher.message.untitled', '无标题')).slice(0, 64),
     author: authorName.slice(0, 8),
     digest: plainDigest(html),
     content: html,
@@ -468,7 +507,7 @@ async function syncPostToWeChat(
   let mode: 'created' | 'updated' = 'created';
   if (mediaId) {
     try {
-      await updateDraft(accessToken, mediaId, article);
+      await updateDraft(accessToken, mediaId, article, i18n);
       mode = 'updated';
     } catch (error) {
       if (!isStaleDraftError(error)) throw error;
@@ -476,7 +515,7 @@ async function syncPostToWeChat(
     }
   }
   if (!mediaId) {
-    mediaId = await addDraft(accessToken, article);
+    mediaId = await addDraft(accessToken, article, i18n);
     mode = 'created';
   }
 
@@ -504,8 +543,9 @@ export function canRenderSyncTitleAction(post?: ManagePostTitleActionPost, optio
   return !!getConfig(options).defaultCoverUrl;
 }
 
-function titleActionButton(cid: number): string {
-  return `<a href="#" class="typecho-wechat-sync" data-cid="${cid}" title="同步到微信公众号草稿" aria-label="同步到微信公众号草稿">
+function titleActionButton(cid: number, i18n?: I18n): string {
+  const title = escapeAttr(translate(i18n, 'plugin.typecho-plugin-wechat-publisher.message.syncTitle', '同步到微信公众号草稿'));
+  return `<a href="#" class="typecho-wechat-sync" data-cid="${cid}" title="${title}" aria-label="${title}">
 <svg class="typecho-wechat-sync-icon" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
   <path d="M9.8 5C5.5 5 2 7.8 2 11.3c0 2 1.2 3.8 3.1 5l-.7 2.4 2.7-1.4c.8.2 1.7.4 2.7.4 4.3 0 7.8-2.8 7.8-6.3S14.1 5 9.8 5Z" fill="currentColor" opacity=".9"/>
   <path d="M15.3 11.2c3.7 0 6.7 2.4 6.7 5.3 0 1.6-.9 3.1-2.5 4.1l.6 2-2.3-1.2c-.8.2-1.6.3-2.5.3-3.7 0-6.7-2.4-6.7-5.3s3-5.2 6.7-5.2Z" fill="currentColor" opacity=".55"/>
@@ -515,7 +555,17 @@ function titleActionButton(cid: number): string {
 </a>`;
 }
 
-const ADMIN_FOOTER_HTML = `<style>
+function adminFooterHtml(i18n?: I18n): string {
+  const t = (key: string, fallback: string) => translate(i18n, key, fallback);
+  const messages = safeJsonForScript({
+    close: translate(i18n, 'admin.action.closeNotice', 'Close notice'),
+    csrfMissing: t('plugin.typecho-plugin-wechat-publisher.message.csrfMissing', '缺少 CSRF token，无法同步'),
+    syncing: t('plugin.typecho-plugin-wechat-publisher.message.syncing', '同步中'),
+    syncFailed: t('plugin.typecho-plugin-wechat-publisher.message.syncFailed', '微信公众号同步失败'),
+    updated: t('plugin.typecho-plugin-wechat-publisher.message.updated', '已更新微信公众号草稿：'),
+    synced: t('plugin.typecho-plugin-wechat-publisher.message.synced', '已同步到微信公众号草稿：'),
+  });
+  return `<style>
 .typecho-wechat-sync {
   display: inline-flex;
   align-items: center;
@@ -542,6 +592,7 @@ const ADMIN_FOOTER_HTML = `<style>
 </style>
 <script>
 (function() {
+  var messages = ${messages};
   function notice(message, type) {
     var old = document.querySelector('.typecho-wechat-notice');
     if (old && old.parentNode) old.parentNode.removeChild(old);
@@ -553,7 +604,7 @@ const ADMIN_FOOTER_HTML = `<style>
     box.style.borderRadius = '3px';
     box.style.background = isError ? '#ffeaea' : '#e7f5e7';
     box.style.color = isError ? '#c33' : '#3a3';
-    box.innerHTML = '<p style="margin:0"></p><button type="button" class="typecho-notice-close" aria-label="关闭提示">&times;</button>';
+    box.innerHTML = '<p style="margin:0"></p><button type="button" class="typecho-notice-close" aria-label="' + messages.close + '">&times;</button>';
     box.querySelector('p').textContent = message;
     var main = document.querySelector('.typecho-page-main');
     if (main) main.insertBefore(box, main.firstChild);
@@ -575,12 +626,12 @@ const ADMIN_FOOTER_HTML = `<style>
 
     var csrf = document.querySelector('input[name="_"]');
     if (!csrf) {
-      notice('缺少 CSRF token，无法同步', 'error');
+      notice(messages.csrfMissing, 'error');
       return;
     }
 
     var oldHtml = target.innerHTML;
-    target.textContent = '同步中';
+    target.textContent = messages.syncing;
     target.classList.add('is-busy');
     try {
       var response = await fetch('/api/admin/plugin-action', {
@@ -595,11 +646,11 @@ const ADMIN_FOOTER_HTML = `<style>
       });
       var data = await response.json().catch(function() { return {}; });
       if (!response.ok || data.success === false) {
-        throw new Error(readError(data) || '同步微信公众号失败');
+        throw new Error(readError(data) || messages.syncFailed);
       }
-      notice((data.mode === 'updated' ? '已更新微信公众号草稿：' : '已同步到微信公众号草稿：') + (data.mediaId || ''), 'success');
+      notice((data.mode === 'updated' ? messages.updated : messages.synced) + (data.mediaId || ''), 'success');
     } catch (error) {
-      notice(error && error.message ? error.message : '同步微信公众号失败', 'error');
+      notice(error && error.message ? error.message : messages.syncFailed, 'error');
     } finally {
       target.innerHTML = oldHtml;
       target.classList.remove('is-busy');
@@ -607,30 +658,36 @@ const ADMIN_FOOTER_HTML = `<style>
   });
 })();
 </script>`;
+}
 
-export default function init({ addHook, pluginId }: PluginInitContext): void {
-  addHook('admin:managePosts:titleActions', pluginId, (html: string, extra?: { post?: ManagePostTitleActionPost; options?: Record<string, unknown> }) => {
+export default function init({ addHook, pluginId, registerTranslations }: PluginInitContext): void {
+  registerTranslations?.('en', en);
+  registerTranslations?.('zh-CN', zhCN);
+
+  addHook('admin:managePosts:titleActions', pluginId, (html: string, extra?: { post?: ManagePostTitleActionPost; options?: Record<string, unknown>; i18n?: I18n }) => {
     const post = extra?.post;
     if (!canRenderSyncTitleAction(post, extra?.options)) return html;
-    return html + titleActionButton(post.cid);
+    return html + titleActionButton(post.cid, extra?.i18n);
   });
 
-  addHook('admin:footer', pluginId, (html: string, extra?: { activeMenu?: string }) => {
+  addHook('admin:footer', pluginId, (html: string, extra?: { activeMenu?: string; i18n?: I18n }) => {
     if (extra?.activeMenu !== 'manage-posts') return html;
-    return html + ADMIN_FOOTER_HTML;
+    return html + adminFooterHtml(extra?.i18n);
   });
 
   addHook(
     'plugin:config:beforeSave',
     pluginId,
-    (result: { success: boolean; settings?: Record<string, unknown>; error?: string }, extra?: { pluginId?: string; settings?: Record<string, unknown> }) => {
+    (result: { success: boolean; settings?: Record<string, unknown>; error?: string }, extra?: { pluginId?: string; settings?: Record<string, unknown>; i18n?: I18n }) => {
       if (extra?.pluginId !== pluginId) return result;
       try {
-        return { success: true, settings: normalizeConfig(extra.settings || {}) };
+        return { success: true, settings: normalizeConfig(extra.settings || {}, extra.i18n) };
       } catch (error) {
         return {
           success: false,
-          error: error instanceof Error ? error.message : '微信公众号配置校验失败',
+          error: error instanceof Error
+            ? error.message
+            : translate(extra?.i18n, 'plugin.typecho-plugin-wechat-publisher.message.configValidationFailed', '微信公众号配置校验失败'),
         };
       }
     },
@@ -653,16 +710,18 @@ export default function init({ addHook, pluginId }: PluginInitContext): void {
     pluginId,
     async (
       result: PluginActionResult,
-      extra?: { action?: string; payload?: SyncPayload; options?: Record<string, unknown>; db?: Database; user?: { uid?: number; group?: string; screenName?: string; name?: string } },
+      extra?: { action?: string; payload?: SyncPayload; options?: Record<string, unknown>; db?: Database; user?: { uid?: number; group?: string; screenName?: string; name?: string }; i18n?: I18n },
     ) => {
       if (extra?.action !== 'sync') return result;
       try {
-        return await syncPostToWeChat(extra.db, extra.options, extra.payload || {}, extra.user);
+        return await syncPostToWeChat(extra.db, extra.options, extra.payload || {}, extra.user, extra.i18n);
       } catch (error) {
         return {
           handled: true,
           success: false,
-          error: error instanceof Error ? error.message : '同步微信公众号失败',
+          error: error instanceof Error
+            ? error.message
+            : translate(extra?.i18n, 'plugin.typecho-plugin-wechat-publisher.message.syncFailed', '同步微信公众号失败'),
         };
       }
     },

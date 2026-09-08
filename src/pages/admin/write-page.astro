@@ -6,12 +6,13 @@ import { eq, and } from 'drizzle-orm';
 import { schema } from '@/db';
 import { buildPermalink } from '@/lib/content';
 import { applyFilterSafely } from '@/lib/plugin';
+import { escapeHtml, safeJsonForScript } from '@/lib/escape';
 
 const ctx = await createContext(Astro.locals, Astro.request);
 const authCheck = requireAuth(ctx);
 if (authCheck) return authCheck;
 if (!hasPermission(ctx.user!.group || 'visitor', 'editor')) {
-  return new Response('Forbidden', { status: 403 });
+  return new Response(ctx.i18n.t('core.error.forbidden', {}, 'Forbidden'), { status: 403 });
 }
 
 const { db, options, urls, user, csrfToken } = ctx;
@@ -69,14 +70,66 @@ const isMarkdown = !page || (page.text && page.text.indexOf('<!--markdown-->') >
 
 // Build preview URL
 const previewUrl = isEdit && page ? buildPermalink(page, urls.siteUrl, options.permalinkPattern, options.pagePattern) : '';
-const writePageHookExtra = { options, page, user, isEdit };
+const writePageHookExtra = { options, page, user, isEdit, i18n: ctx.i18n };
 const writePageOptionHtml = await applyFilterSafely(ctx, 'admin:writePage:option', '', writePageHookExtra);
 const writePageAdvanceOptionHtml = await applyFilterSafely(ctx, 'admin:writePage:advanceOption', '', writePageHookExtra);
-const writePageBottomHtml = await applyFilterSafely(ctx, 'admin:writePage:bottom', '', { options, page, user, isEdit });
+const writePageBottomHtml = await applyFilterSafely(ctx, 'admin:writePage:bottom', '', { options, page, user, isEdit, i18n: ctx.i18n });
+const t = ctx.i18n.t.bind(ctx.i18n);
+const tPlural = ctx.i18n.tPlural.bind(ctx.i18n);
+const formatAttachmentSize = (size: number): string => {
+  if (size < 1024) return `${size} ${t('admin.unit.bytes', {}, 'B')}`;
+  if (size < 1024 * 1024) return `${Math.ceil(size / 1024)} ${t('admin.unit.kilobytes', {}, 'KB')}`;
+  return `${(size / (1024 * 1024)).toFixed(1)} ${t('admin.unit.megabytes', {}, 'MB')}`;
+};
+const editorMessagesJson = safeJsonForScript({
+  bold: `${t('editor.bold', {}, 'Bold')} <strong> Ctrl+B`,
+  boldexample: t('editor.boldExample', {}, 'bold text'),
+  italic: `${t('editor.italic', {}, 'Italic')} <em> Ctrl+I`,
+  italicexample: t('editor.italicExample', {}, 'italic text'),
+  link: `${t('editor.link', {}, 'Link')} <a> Ctrl+L`,
+  linkdescription: t('editor.linkDescription', {}, 'Enter link description'),
+  quote: `${t('editor.quote', {}, 'Quote')} <blockquote> Ctrl+Q`,
+  quoteexample: t('editor.quoteExample', {}, 'quoted text'),
+  code: `${t('editor.code', {}, 'Code')} <pre><code> Ctrl+K`,
+  codeexample: t('editor.codeExample', {}, 'Enter code'),
+  image: `${t('editor.image', {}, 'Image')} <img> Ctrl+G`,
+  imagedescription: t('editor.imageDescription', {}, 'Enter image description'),
+  olist: `${t('editor.orderedList', {}, 'Numbered list')} <ol> Ctrl+O`,
+  ulist: `${t('editor.unorderedList', {}, 'Bulleted list')} <ul> Ctrl+U`,
+  litem: t('editor.listItem', {}, 'List item'),
+  heading: `${t('editor.heading', {}, 'Heading')} <h1>/<h2> Ctrl+H`,
+  headingexample: t('editor.headingExample', {}, 'heading text'),
+  hr: `${t('editor.horizontalRule', {}, 'Horizontal rule')} <hr> Ctrl+R`,
+  more: `${t('editor.more', {}, 'More separator')} <!--more--> Ctrl+M`,
+  undo: `${t('editor.undo', {}, 'Undo')} - Ctrl+Z`,
+  redo: `${t('editor.redo', {}, 'Redo')} - Ctrl+Y`,
+  redomac: `${t('editor.redoMac', {}, 'Redo')} - Ctrl+Shift+Z`,
+  fullscreen: `${t('editor.fullscreen', {}, 'Fullscreen')} - Ctrl+J`,
+  exitFullscreen: `${t('editor.exitFullscreen', {}, 'Exit fullscreen')} - Ctrl+E`,
+  fullscreenUnsupport: t('editor.fullscreenUnsupported', {}, 'This browser does not support fullscreen mode'),
+  imagedialog: `<p><b>${escapeHtml(t('editor.imageDialogTitle', {}, 'Insert image'))}</b></p><p>${escapeHtml(t('editor.imageDialogPrompt', {}, 'Enter the remote image URL below'))}</p>`,
+  linkdialog: `<p><b>${escapeHtml(t('editor.linkDialogTitle', {}, 'Insert link'))}</b></p><p>${escapeHtml(t('editor.linkDialogPrompt', {}, 'Enter the link URL below'))}</p>`,
+  ok: t('editor.ok', {}, 'OK'),
+  cancel: t('admin.action.cancel', {}, 'Cancel'),
+  help: t('editor.markdownHelp', {}, 'Markdown syntax help'),
+  compose: t('editor.compose', {}, 'Compose'),
+  preview: t('editor.preview', {}, 'Preview'),
+  fieldName: t('editor.fieldName', {}, 'Field name'),
+  stringType: t('admin.option.character', {}, 'String'),
+  integerType: t('admin.option.integer', {}, 'Integer'),
+  decimalType: t('admin.option.decimal', {}, 'Decimal'),
+  delete: t('admin.action.delete', {}, 'Delete'),
+  insertFile: t('editor.insertFile', {}, 'Click to insert file'),
+  uploadDrop: t('editor.uploadDrop', {}, 'Drop files here'),
+  chooseFileUpload: t('editor.chooseFileUpload', {}, 'or choose a file to upload'),
+  deleteFileConfirm: t('editor.deleteFileConfirm', { name: '{name}' }, 'Are you sure you want to delete the file {name}?'),
+  uploadFailed: t('editor.uploadFailed', {}, 'Upload failed'),
+  uploadFailedWithReason: t('editor.uploadFailedWithReason', { name: '{name}', reason: '{reason}' }, '{name} upload failed: {reason}'),
+});
 
 ---
 <Admin
-  title={isEdit ? '编辑页面' : '创建新页面'}
+  title={isEdit ? t('admin.form.editPage', {}, 'Edit page') : t('admin.form.newPage', {}, 'Create a new page')}
   options={options}
   urls={urls}
   user={user}
@@ -88,25 +141,25 @@ const writePageBottomHtml = await applyFilterSafely(ctx, 'admin:writePage:bottom
     <input type="hidden" name="_" value={csrfToken} />
     <div class="col-mb-12 col-tb-9" role="main">
       {isEdit && page.type === 'page_draft' && (
-        <cite class="edit-draft-notice">当前正在编辑的是未发布的草稿</cite>
+        <cite class="edit-draft-notice">{t('admin.notice.editingDraft', {}, 'You are editing an unpublished draft.')}</cite>
       )}
 
       <p class="title">
-        <label for="title" class="sr-only">标题</label>
+        <label for="title" class="sr-only">{t('admin.field.title', {}, 'Title')}</label>
         <input type="text" id="title" name="title" autocomplete="off"
-          value={page?.title || ''} placeholder="标题" class="w-100 text title" />
+          value={page?.title || ''} placeholder={t('admin.field.title', {}, 'Title')} class="w-100 text title" />
       </p>
 
       <p class="mono url-slug">
-        <label for="slug" class="sr-only">网址缩略名</label>
+        <label for="slug" class="sr-only">{t('admin.field.slug', {}, 'Slug')}</label>
         <span id="preview-url">{isEdit ? previewUrl : ''}</span>
         <input type="text" id="slug" name="slug" autocomplete="off"
-          value={page?.slug || ''} class="mono" placeholder={isEdit ? String(page?.cid) : '留空则使用页面ID'} style="display:none" />
-        <a href="#" id="edit-slug-btn" class="i-edit" title="编辑缩略名" style="margin-left:4px;"></a>
+          value={page?.slug || ''} class="mono" placeholder={isEdit ? String(page?.cid) : t('admin.description.autoGenerateSlug', {}, 'Leave blank to generate automatically')} style="display:none" />
+        <a href="#" id="edit-slug-btn" class="i-edit" title={t('admin.action.editSlug', {}, 'Edit slug')} style="margin-left:4px;"></a>
       </p>
 
       <p>
-        <label for="text" class="sr-only">页面内容</label>
+        <label for="text" class="sr-only">{t('admin.field.content', {}, 'Content')}</label>
         <textarea style={`height: ${options.editorSize || 350}px`} autocomplete="off"
           id="text" name="text" class="w-100 mono">{page?.text ? page.text.replace(/^<!--markdown-->/, '') : ''}</textarea>
       </p>
@@ -115,15 +168,15 @@ const writePageBottomHtml = await applyFilterSafely(ctx, 'admin:writePage:bottom
 
       <p class="submit clearfix">
         <span class="left">
-          <button type="button" id="btn-cancel-preview" class="btn">取消预览</button>
+          <button type="button" id="btn-cancel-preview" class="btn">{t('admin.action.cancel', {}, 'Cancel')}</button>
         </span>
         <span class="right">
           <input type="hidden" name="do" value={isEdit ? 'update' : 'create'} />
           <input type="hidden" name="type" value="page" />
           {isEdit && <input type="hidden" name="cid" value={String(page.cid)} />}
-          <button type="button" id="btn-preview" class="btn">预览页面</button>
-          <button type="submit" name="status" value="draft" id="btn-save" class="btn">保存草稿</button>
-          <button type="submit" name="status" value="publish" class="btn primary" id="btn-submit">发布页面</button>
+          <button type="button" id="btn-preview" class="btn">{t('admin.action.preview', {}, 'Preview')} {t('admin.field.page', {}, 'page')}</button>
+          <button type="submit" name="status" value="draft" id="btn-save" class="btn">{t('admin.action.save', {}, 'Save')} {t('admin.option.draft', {}, 'Draft')}</button>
+          <button type="submit" name="status" value="publish" class="btn primary" id="btn-submit">{t('admin.option.publish', {}, 'Publish')} {t('admin.field.page', {}, 'page')}</button>
           {isMarkdown && <input type="hidden" name="markdown" value="1" />}
         </span>
       </p>
@@ -131,57 +184,57 @@ const writePageBottomHtml = await applyFilterSafely(ctx, 'admin:writePage:bottom
 
     <div id="edit-secondary" class="col-mb-12 col-tb-3" role="complementary">
       <ul class="typecho-option-tabs clearfix">
-        <li class="active w-50"><a href="#tab-advance">选项</a></li>
-        <li class="w-50"><a href="#tab-files" id="tab-files-btn">附件</a></li>
+         <li class="active w-50"><a href="#tab-advance">{t('admin.menu.settings', {}, 'Settings')}</a></li>
+         <li class="w-50"><a href="#tab-files" id="tab-files-btn">{t('admin.field.attachments', {}, 'Attachments')}</a></li>
       </ul>
 
       <div id="tab-advance" class="tab-content">
         <section class="typecho-post-option">
-          <label for="order" class="typecho-label">页面顺序</label>
+          <label for="order" class="typecho-label">{t('admin.field.order', {}, 'Order')}</label>
           <p><input type="text" id="order" name="order" value={String(page?.order || 0)} class="w-100" /></p>
-          <p class="description">为你的自定义页面设定一个序列值以后, 能够使得它们按此值从小到大排列</p>
+          <p class="description">{t('admin.description.pageOrder', {}, 'Set a sequence value to sort custom pages from smallest to largest.')}</p>
         </section>
 
         {writePageOptionHtml && <Fragment set:html={writePageOptionHtml} />}
 
-        <button type="button" id="advance-panel-btn" class="btn btn-xs">高级选项 <i class="i-caret-down"></i></button>
+        <button type="button" id="advance-panel-btn" class="btn btn-xs">{t('admin.action.details', {}, 'Advanced options')} <i class="i-caret-down"></i></button>
         <div id="advance-panel">
           <section class="typecho-post-option visibility-option">
-            <label for="visibility" class="typecho-label">公开度</label>
+            <label for="visibility" class="typecho-label">{t('admin.field.status', {}, 'Visibility')}</label>
             <p>
               <select id="visibility" name="visibility">
-                <option value="publish" selected={(!page?.status || page?.status === 'publish')}>公开</option>
-                <option value="hidden" selected={page?.status === 'hidden'}>隐藏</option>
+                <option value="publish" selected={(!page?.status || page?.status === 'publish')}>{t('admin.option.publish', {}, 'Published')}</option>
+                <option value="hidden" selected={page?.status === 'hidden'}>{t('admin.option.hidden', {}, 'Hidden')}</option>
               </select>
             </p>
           </section>
 
           <section class="typecho-post-option">
-            <label for="template" class="typecho-label">自定义模板</label>
+            <label for="template" class="typecho-label">{t('admin.field.customTemplate', {}, 'Custom template')}</label>
             <p>
               <input type="text" id="template" name="template" class="text w-100"
-                value={page?.template || ''} placeholder="留空使用默认模板" />
+                value={page?.template || ''} placeholder={t('admin.field.customTemplate', {}, 'Custom template')} />
             </p>
-            <p class="description">如果你为页面指定了自定义模板, 系统将按此模板来渲染页面</p>
+            <p class="description">{t('admin.description.pageTemplate', {}, 'When a custom template is specified, the page is rendered with that template.')}</p>
           </section>
 
           <section class="typecho-post-option allow-option">
-            <label class="typecho-label">权限控制</label>
+            <label class="typecho-label">{t('admin.field.permissions', {}, 'Permissions')}</label>
             <ul>
               <li>
                 <input id="allowComment" name="allowComment" type="checkbox" value="1"
                   checked={page ? page.allowComment === '1' : true} />
-                <label for="allowComment">允许评论</label>
+                <label for="allowComment">{t('admin.field.allowComment', {}, 'Allow comments')}</label>
               </li>
               <li>
                 <input id="allowPing" name="allowPing" type="checkbox" value="1"
                   checked={page ? page.allowPing === '1' : true} />
-                <label for="allowPing">允许被引用</label>
+                <label for="allowPing">{t('admin.field.allowPing', {}, 'Allow pings')}</label>
               </li>
               <li>
                 <input id="allowFeed" name="allowFeed" type="checkbox" value="1"
                   checked={page ? page.allowFeed === '1' : true} />
-                <label for="allowFeed">允许在聚合中出现</label>
+                <label for="allowFeed">{t('admin.field.allowFeed', {}, 'Include in feeds')}</label>
               </li>
             </ul>
           </section>
@@ -191,14 +244,14 @@ const writePageBottomHtml = await applyFilterSafely(ctx, 'admin:writePage:bottom
 
         <div id="custom-field" class:list={[{ fold: customFields.length === 0 }]}>
           <label class="typecho-label">
-            <a href="#custom-field-toggle" id="custom-field-toggle">自定义字段</a>
+            <a href="#custom-field-toggle" id="custom-field-toggle">{t('admin.field.customFields', {}, 'Custom fields')}</a>
           </label>
           <table id="custom-fields-table">
             <thead>
               <tr>
-                <th>字段名称</th>
-                <th>类型</th>
-                <th>字段值</th>
+                <th>{t('editor.fieldName', {}, 'Field name')}</th>
+                <th>{t('admin.field.type', {}, 'Type')}</th>
+                <th>{t('admin.field.value', {}, 'Value')}</th>
                 <th></th>
               </tr>
             </thead>
@@ -208,19 +261,19 @@ const writePageBottomHtml = await applyFilterSafely(ctx, 'admin:writePage:bottom
                   <td><input type="text" name="fieldNames[]" value={f.name} class="text w-100" /></td>
                   <td>
                     <select name={`fieldTypes[${f.name}]`} class="field-type-select w-100">
-                      <option value="str" selected={f.type === 'str'}>字符</option>
-                      <option value="int" selected={f.type === 'int'}>整数</option>
-                      <option value="float" selected={f.type === 'float'}>小数</option>
+                      <option value="str" selected={f.type === 'str'}>{t('admin.option.character', {}, 'String')}</option>
+                      <option value="int" selected={f.type === 'int'}>{t('admin.option.integer', {}, 'Integer')}</option>
+                      <option value="float" selected={f.type === 'float'}>{t('admin.option.decimal', {}, 'Decimal')}</option>
                     </select>
                   </td>
                   <td><textarea name={`fieldValues[${f.name}]`} class="text w-100 mono" rows="2">{f.value}</textarea></td>
-                  <td><button type="button" class="btn btn-xs remove-field">删除</button></td>
+                  <td><button type="button" class="btn btn-xs remove-field">{t('admin.action.delete', {}, 'Delete')}</button></td>
                 </tr>
               ))}
             </tbody>
           </table>
           <div class="description">
-            <button type="button" id="add-field-btn" class="btn btn-xs">增加字段</button>
+            <button type="button" id="add-field-btn" class="btn btn-xs">{t('admin.action.add', {}, 'Add')} {t('editor.fieldName', {}, 'field')}</button>
           </div>
         </div>
       </div>
@@ -228,17 +281,17 @@ const writePageBottomHtml = await applyFilterSafely(ctx, 'admin:writePage:bottom
       <div id="tab-files" class="tab-content hidden">
         <div id="upload-panel" class="p" data-cid={isEdit ? String(page.cid) : '0'}>
           <div class="upload-area" draggable="true">
-            <p>拖放文件到这里<br />或 <a href="#" class="upload-file">选择文件上传</a></p>
+            <p>{t('editor.uploadDrop', {}, 'Drop files here')}<br />{t('editor.chooseFileUpload', {}, 'or choose a file to upload')}</p>
             <input type="file" id="file-input" multiple style="display:none" />
           </div>
           <ul id="file-list">
             {attachments.map(att => (
               <li data-cid={String(att.cid)} data-url={att.url} data-image={att.isImage ? '1' : '0'}>
                 <input type="hidden" name="attachment[]" value={String(att.cid)} />
-                <a class="insert" title="点击插入文件" href="#">{att.title}</a>
+                <a class="insert" title={t('editor.insertFile', {}, 'Click to insert file')} href="#">{att.title || t('admin.form.noName', {}, 'Unnamed')}</a>
                 <div class="info">
-                  {att.size < 1024 ? att.size + ' B' : att.size < 1024*1024 ? Math.ceil(att.size/1024) + ' KB' : (att.size/(1024*1024)).toFixed(1) + ' MB'}
-                  {' '}<a class="delete" href="#" title="删除"><i class="i-delete"></i></a>
+                  {formatAttachmentSize(att.size)}
+                  {' '}<a class="delete" href="#" title={t('admin.action.delete', {}, 'Delete')}><i class="i-delete"></i></a>
                 </div>
               </li>
             ))}
@@ -252,10 +305,15 @@ const writePageBottomHtml = await applyFilterSafely(ctx, 'admin:writePage:bottom
     <script is:inline src="/vendor/hyperdown.js"></script>
     <script is:inline src="/vendor/pagedown.js"></script>
     <script is:inline src="/vendor/paste.js"></script>
-    <script is:inline src="/vendor/purify.js"></script>
-    <script is:inline src="/vendor/typecho-tags.js"></script>
-    <script is:inline>
-    $(document).ready(function () {
+      <script is:inline src="/vendor/purify.js"></script>
+      <script is:inline src="/vendor/typecho-tags.js"></script>
+      <script is:inline>
+      const editorMessages = {editorMessagesJson};
+      function escapeClientHtml(value) {
+        return $('<div>').text(value == null ? '' : String(value)).html();
+      }
+
+      $(document).ready(function () {
       var textarea = $('#text'),
           isFullScreen = false,
           toolbar = $('<div class="editor" id="wmd-button-bar" />').insertBefore(textarea.parent()),
@@ -264,36 +322,36 @@ const writePageBottomHtml = await applyFilterSafely(ctx, 'admin:writePage:bottom
       var options = {};
 
       options.strings = {
-        bold: '加粗 <strong> Ctrl+B',
-        boldexample: '加粗文字',
-        italic: '斜体 <em> Ctrl+I',
-        italicexample: '斜体文字',
-        link: '链接 <a> Ctrl+L',
-        linkdescription: '请输入链接描述',
-        quote: '引用 <blockquote> Ctrl+Q',
-        quoteexample: '引用文字',
-        code: '代码 <pre><code> Ctrl+K',
-        codeexample: '请输入代码',
-        image: '图片 <img> Ctrl+G',
-        imagedescription: '请输入图片描述',
-        olist: '数字列表 <ol> Ctrl+O',
-        ulist: '普通列表 <ul> Ctrl+U',
-        litem: '列表项目',
-        heading: '标题 <h1>/<h2> Ctrl+H',
-        headingexample: '标题文字',
-        hr: '分割线 <hr> Ctrl+R',
-        more: '摘要分割线 <!--more--> Ctrl+M',
-        undo: '撤销 - Ctrl+Z',
-        redo: '重做 - Ctrl+Y',
-        redomac: '重做 - Ctrl+Shift+Z',
-        fullscreen: '全屏 - Ctrl+J',
-        exitFullscreen: '退出全屏 - Ctrl+E',
-        fullscreenUnsupport: '此浏览器不支持全屏操作',
-        imagedialog: '<p><b>插入图片</b></p><p>请在下方的输入框内输入要插入的远程图片地址</p>',
-        linkdialog: '<p><b>插入链接</b></p><p>请在下方的输入框内输入要插入的链接地址</p>',
-        ok: '确定',
-        cancel: '取消',
-        help: 'Markdown语法帮助'
+        bold: editorMessages.bold,
+        boldexample: editorMessages.boldexample,
+        italic: editorMessages.italic,
+        italicexample: editorMessages.italicexample,
+        link: editorMessages.link,
+        linkdescription: editorMessages.linkdescription,
+        quote: editorMessages.quote,
+        quoteexample: editorMessages.quoteexample,
+        code: editorMessages.code,
+        codeexample: editorMessages.codeexample,
+        image: editorMessages.image,
+        imagedescription: editorMessages.imagedescription,
+        olist: editorMessages.olist,
+        ulist: editorMessages.ulist,
+        litem: editorMessages.litem,
+        heading: editorMessages.heading,
+        headingexample: editorMessages.headingexample,
+        hr: editorMessages.hr,
+        more: editorMessages.more,
+        undo: editorMessages.undo,
+        redo: editorMessages.redo,
+        redomac: editorMessages.redomac,
+        fullscreen: editorMessages.fullscreen,
+        exitFullscreen: editorMessages.exitFullscreen,
+        fullscreenUnsupport: editorMessages.fullscreenUnsupport,
+        imagedialog: editorMessages.imagedialog,
+        linkdialog: editorMessages.linkdialog,
+        ok: editorMessages.ok,
+        cancel: editorMessages.cancel,
+        help: editorMessages.help
       };
 
       var converter = new HyperDown(),
@@ -360,8 +418,11 @@ const writePageBottomHtml = await applyFilterSafely(ctx, 'admin:writePage:bottom
       editor.run();
 
       // 编辑预览切换
-      var edittab = $('.editor').prepend('<div class="wmd-edittab"><a href="#wmd-editarea" class="active">撰写</a><a href="#wmd-preview">预览</a></div>'),
+      var edittab = $('<div class="wmd-edittab"><a href="#wmd-editarea" class="active"></a><a href="#wmd-preview"></a></div>'),
           editarea = $(textarea.parent()).attr("id", "wmd-editarea");
+      edittab.find('a[href="#wmd-editarea"]').text(editorMessages.compose);
+      edittab.find('a[href="#wmd-preview"]').text(editorMessages.preview);
+      $('.editor').prepend(edittab);
 
       $(".wmd-edittab a").click(function() {
         $(".wmd-edittab a").removeClass('active');
@@ -417,12 +478,18 @@ const writePageBottomHtml = await applyFilterSafely(ctx, 'admin:writePage:bottom
           fieldIdx++;
           var name = 'newfield_' + fieldIdx;
           var row = '<tr>'
-            + '<td><input type="text" name="fieldNames[]" value="" class="text w-100" placeholder="字段名" /></td>'
-            + '<td><select name="fieldTypes[' + name + ']" class="field-type-select"><option value="str">字符</option><option value="int">整数</option><option value="float">小数</option></select></td>'
+            + '<td><input type="text" name="fieldNames[]" value="" class="text w-100" /></td>'
+            + '<td><select name="fieldTypes[' + name + ']" class="field-type-select"><option value="str">String</option><option value="int">Integer</option><option value="float">Decimal</option></select></td>'
             + '<td><textarea name="fieldValues[' + name + ']" class="text w-100 mono" rows="2"></textarea></td>'
-            + '<td><button type="button" class="btn btn-xs remove-field">删除</button></td>'
+            + '<td><button type="button" class="btn btn-xs remove-field"></button></td>'
             + '</tr>';
-          $('#custom-fields-table tbody').append(row);
+          var rowElement = $(row);
+          rowElement.find('input[name="fieldNames[]"]').attr('placeholder', editorMessages.fieldName);
+          rowElement.find('select option[value="str"]').text(editorMessages.stringType);
+          rowElement.find('select option[value="int"]').text(editorMessages.integerType);
+          rowElement.find('select option[value="float"]').text(editorMessages.decimalType);
+          rowElement.find('.remove-field').text(editorMessages.delete);
+          $('#custom-fields-table tbody').append(rowElement);
           // 自动展开
           customField.removeClass('fold');
         });
@@ -479,9 +546,11 @@ const writePageBottomHtml = await applyFilterSafely(ctx, 'admin:writePage:bottom
           var li = $('#upload-' + id).removeClass('loading')
             .data('cid', data.cid).data('url', data.url).data('image', data.isImage)
             .html('<input type="hidden" name="attachment[]" value="' + data.cid + '" />'
-              + '<a class="insert" target="_blank" href="#" title="点击插入文件">' + data.title + '</a>'
+              + '<a class="insert" target="_blank" href="#" title="">' + escapeClientHtml(data.title || '') + '</a>'
               + '<div class="info">' + data.bytes
-              + ' <a class="delete" href="#" title="删除"><i class="i-delete"></i></a></div>');
+              + ' <a class="delete" href="#" title=""><i class="i-delete"></i></a></div>');
+          li.find('.insert').attr('title', editorMessages.insertFile);
+          li.find('.delete').attr('title', editorMessages.delete);
           attachInsertEvent(li);
           attachDeleteEvent(li);
           updateAttachmentNumber();
@@ -517,11 +586,11 @@ const writePageBottomHtml = await applyFilterSafely(ctx, 'admin:writePage:bottom
                     fileUploadComplete(uid, resp[1]);
                     if (!cid && resp[1].cid) cid = resp[1].cid;
                   } else if (resp && resp.error) {
-                    fileUploadError(uid, file.name + ' 上传失败: ' + resp.error);
+                    fileUploadError(uid, editorMessages.uploadFailedWithReason.replace('{name}', file.name).replace('{reason}', resp.error));
                   }
                 },
                 error: function () {
-                  fileUploadError(uid, file.name + ' 上传失败');
+                  fileUploadError(uid, editorMessages.uploadFailedWithReason.replace('{name}', file.name).replace('{reason}', editorMessages.uploadFailed));
                 }
               });
             })(files[i], i);
@@ -567,7 +636,7 @@ const writePageBottomHtml = await applyFilterSafely(ctx, 'admin:writePage:bottom
           var name = $('a.insert', el).text();
           $('.delete', el).click(function (e) {
             e.preventDefault();
-            if (!confirm('确认要删除文件 ' + name + ' 吗?')) return;
+            if (!confirm(editorMessages.deleteFileConfirm.replace('{name}', name))) return;
             var attachCid = $(el).data('cid');
             $.ajax({
               url: '/api/admin/upload?cid=' + attachCid,

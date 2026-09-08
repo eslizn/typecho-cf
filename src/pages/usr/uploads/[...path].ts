@@ -1,12 +1,15 @@
 import type { APIRoute } from 'astro';
 import { getFromR2 } from '@/lib/upload';
 import { applySecurityHeaders } from '@/lib/security-headers';
+import { getRequestCoreContextFromLocals } from '@/lib/context';
+import { createCoreRequestI18n } from '@/lib/i18n-runtime';
 import { env } from 'cloudflare:workers';
 
 export const GET: APIRoute = async ({ params, locals, request }) => {
   const path = `usr/uploads/${params.path}`;
   const bucket = env.BUCKET;
   const cache = caches.default;
+  const i18n = getRequestCoreContextFromLocals(locals)?.i18n ?? createCoreRequestI18n(request).i18n;
 
   try {
     // Cache API entries are local to a PoP, so deleting one cache key from an
@@ -15,7 +18,7 @@ export const GET: APIRoute = async ({ params, locals, request }) => {
     // fail before cache lookup, while replacements automatically use a new key.
     const metadata = await bucket.head(path);
     if (!metadata) {
-      return new Response('Not Found', { status: 404 });
+      return new Response(i18n.t('core.error.notFound', {}, 'Not Found'), { status: 404 });
     }
     const cacheUrl = new URL(request.url);
     cacheUrl.searchParams.set('__typecho_upload_etag', metadata.httpEtag);
@@ -26,7 +29,7 @@ export const GET: APIRoute = async ({ params, locals, request }) => {
 
     const object = await getFromR2(bucket, path);
     if (!object) {
-      return new Response('Not Found', { status: 404 });
+      return new Response(i18n.t('core.error.notFound', {}, 'Not Found'), { status: 404 });
     }
 
     const headers = new Headers();
@@ -72,7 +75,7 @@ export const GET: APIRoute = async ({ params, locals, request }) => {
     }
     return browserRevalidatedResponse(response);
   } catch {
-    return new Response('Not Found', { status: 404 });
+    return new Response(i18n.t('core.error.notFound', {}, 'Not Found'), { status: 404 });
   }
 };
 

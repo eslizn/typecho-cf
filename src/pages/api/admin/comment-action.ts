@@ -7,15 +7,20 @@ import {
   purgeCommentModerationCache,
 } from '@/lib/comment-moderation';
 import { readAdminFormOrError } from '@/lib/input';
+import { createCoreRequestI18n } from '@/lib/i18n-runtime';
+import { i18nMessage } from '@/lib/i18n';
+import { textError } from '@/lib/http';
 
-export const GET: APIRoute = async () =>
-  new Response('Method Not Allowed', { status: 405 });
+export const GET: APIRoute = async ({ request }) =>
+  textError(405, i18nMessage('core.error.methodNotAllowed', 'Method Not Allowed'), undefined, createCoreRequestI18n(request).i18n);
 
 export const POST: APIRoute = async ({ request, locals, url }) => {
   const auth = await requireAdminAction(request, 'contributor');
   if (isAdminActionResponse(auth)) return auth;
+  const error = (status: number, key: string, variables: Record<string, string | number> = {}, fallback = key) =>
+    textError(status, i18nMessage(key, fallback, variables), undefined, auth.i18n);
 
-  const formData = await readAdminFormOrError(request);
+  const formData = await readAdminFormOrError(request, undefined, auth.i18n);
   if (formData instanceof Response) return formData;
   const action = normalizeCommentAction(
     formData.get('action')?.toString() || url.searchParams.get('action') || '',
@@ -24,9 +29,9 @@ export const POST: APIRoute = async ({ request, locals, url }) => {
     formData.get('coid')?.toString() || url.searchParams.get('coid') || '0',
     10,
   );
-  if (!action || !coid) return new Response('Bad Request', { status: 400 });
+  if (!action || !coid) return error(400, 'core.error.badRequest', {}, 'Bad Request');
 
-  const comment = await getModeratableComment(auth.db, coid, auth.user);
+  const comment = await getModeratableComment(auth.db, coid, auth.user, auth.i18n);
   if (comment instanceof Response) return comment;
 
   await applyCommentAction(auth.pluginCtx, auth.db, comment, action, auth.options);

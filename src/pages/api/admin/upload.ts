@@ -1,13 +1,14 @@
 import type { APIRoute } from 'astro';
 import { schema } from '@/db';
-import { isAdminActionResponse, requireAdminAction } from '@/lib/admin-auth';
-import { uploadToR2 } from '@/lib/upload';
+import { isAdminActionResponse, jsonAdminActionError, requireAdminAction } from '@/lib/admin-auth';
+import { uploadToR2, UploadError } from '@/lib/upload';
 import { deleteAttachments } from '@/lib/attachment-lifecycle';
 import { applyFilter, doHook } from '@/lib/plugin';
 import { trackSlidingWindow } from '@/lib/login-rate-limit';
 import { REQUEST_BODY_LIMITS, UPLOAD_RATE_LIMIT } from '@/lib/constants';
-import { InputError, readBoundedFormData } from '@/lib/input';
+import { InputError, inputErrorMessage, readBoundedFormData } from '@/lib/input';
 import { jsonError, jsonOk } from '@/lib/http';
+import { i18nMessage } from '@/lib/i18n';
 import { env } from 'cloudflare:workers';
 
 /**
@@ -30,19 +31,17 @@ function isImageType(mime: string): boolean {
   return mime.startsWith('image/');
 }
 
-function jsonAuthError(response: Response): Response {
-  return jsonError(response.status, response.status === 401 ? 'Unauthorized' : 'Forbidden');
-}
-
 export const POST: APIRoute = async ({ request, locals }) => {
   const ctx = await requireAdminAction(request, 'contributor', { maxBodyBytes: REQUEST_BODY_LIMITS.uploadEnvelope });
-  if (isAdminActionResponse(ctx)) return jsonAuthError(ctx);
+  if (isAdminActionResponse(ctx)) return jsonAdminActionError(request, ctx);
   const { db, options, pluginCtx } = ctx;
 
   // G5-4: cap per-user upload rate. Self-signed admin tokens that get
   // exfiltrated can otherwise rapidly exhaust the R2 bucket quota.
   if (!trackSlidingWindow(`upload:${ctx.uid}`, UPLOAD_RATE_LIMIT)) {
-    return jsonError(429, '上传频率过高，请稍后再试', { 'Retry-After': String(UPLOAD_RATE_LIMIT.windowSeconds) });
+    return jsonError(429, i18nMessage('admin.upload.rateLimited', 'Uploads are temporarily rate limited. Try again later.'), {
+      'Retry-After': String(UPLOAD_RATE_LIMIT.windowSeconds),
+    }, ctx.i18n);
   }
 
   try {
@@ -50,7 +49,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const file = formData.get('file') as File | null;
 
     if (!file) {
-      return jsonError(400, '没有上传文件');
+      return jsonError(400, i18nMessage('admin.upload.fileRequired', 'No file was uploaded.'), undefined, ctx.i18n);
     }
 
     // upload:before — plugins can reject the upload by
@@ -92,7 +91,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const cid = inserted[0]?.cid;
 
     // upload:after — post-upload notification.
-    await doHook(pluginCtx, 'upload:after', { ...result, cid }, { request, options, user: ctx.user });
+    await doHook(pluginCtx, 'upload:after', { ...result, cid }, { request, options, user: ctx.user, i18n: ctx.i18n });
 
     return jsonOk([
       result.url,
@@ -105,8 +104,22 @@ export const POST: APIRoute = async ({ request, locals }) => {
       },
     ]);
   } catch (error) {
-    if (error instanceof InputError) return jsonError(error.status, error.message);
-    return jsonError(500, error instanceof Error ? error.message : '上传失败');
+    if (error instanceof UploadError) {
+      const message = error.code === 'extension_unknown'
+        ? i18nMessage('admin.upload.extensionUnknown', 'The file extension could not be recognized: {name}', error.variables)
+        : error.code === 'type_not_allowed'
+          ? i18nMessage('admin.upload.typeNotAllowed', 'This file type is not allowed: {type}', error.variables)
+          : error.code === 'file_too_large'
+            ? i18nMessage('admin.upload.fileTooLarge', 'The file is larger than the 10 MB limit.')
+            : error.code === 'filename_required'
+              ? i18nMessage('admin.upload.filenameRequired', 'A filename is required.')
+              : error.code === 'filename_invalid'
+                ? i18nMessage('admin.upload.filenameInvalid', 'The filename is invalid.')
+                : i18nMessage('admin.upload.extensionNotAllowed', 'This file extension is not allowed: {extension}', error.variables);
+      return jsonError(400, message, undefined, ctx.i18n);
+    }
+    if (error instanceof InputError) return jsonError(error.status, inputErrorMessage(error), undefined, ctx.i18n);
+    return jsonError(500, i18nMessage('admin.upload.failed', 'Upload failed.'), undefined, ctx.i18n);
   }
 };
 
@@ -115,10 +128,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
  */
 export const DELETE: APIRoute = async ({ request, locals, url }) => {
   const ctx = await requireAdminAction(request, 'contributor');
-  if (isAdminActionResponse(ctx)) return jsonAuthError(ctx);
+  if (isAdminActionResponse(ctx)) return jsonAdminActionError(request, ctx);
   const cid = parseInt(url.searchParams.get('cid') || '0', 10);
   if (!cid) {
-    return jsonError(400, '缺少 cid 参数');
+    return jsonError(400, i18nMessage('admin.upload.cidRequired', 'The cid parameter is required.'), undefined, ctx.i18n);
   }
 
   try {
@@ -130,10 +143,10 @@ export const DELETE: APIRoute = async ({ request, locals, url }) => {
       request,
       options: ctx.options,
     }, [cid]);
-    if (result.missing.includes(cid)) return jsonError(404, '附件不存在');
-    if (result.forbidden.includes(cid)) return jsonError(403, '无权删除此附件');
+    if (result.missing.includes(cid)) return jsonError(404, i18nMessage('admin.upload.attachmentNotFound', 'The attachment does not exist.'), undefined, ctx.i18n);
+    if (result.forbidden.includes(cid)) return jsonError(403, i18nMessage('admin.upload.attachmentForbidden', 'You do not have permission to delete this attachment.'), undefined, ctx.i18n);
     return jsonOk({ success: true, orphanRisk: result.orphanRisk });
   } catch (error) {
-    return jsonError(500, error instanceof Error ? error.message : '删除失败');
+    return jsonError(500, i18nMessage('admin.upload.deleteFailed', 'The attachment could not be deleted.'), undefined, ctx.i18n);
   }
 };

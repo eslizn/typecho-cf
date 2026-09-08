@@ -11,7 +11,7 @@ const authCheck = requireAuth(ctx);
 if (authCheck) return authCheck;
 
 if (!hasPermission(ctx.user!.group || 'visitor', 'editor')) {
-  return new Response('Forbidden', { status: 403 });
+  return new Response(ctx.i18n.t('core.error.forbidden', {}, 'Forbidden'), { status: 403 });
 }
 
 const { db, options, urls, user, csrfToken } = ctx;
@@ -73,7 +73,7 @@ function formatBytes(bytes: number): string {
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 }
 ---
-<Admin title="编辑文件" options={options} urls={urls} user={user} activeMenu="manage-medias" pluginCtx={ctx}>
+<Admin title={ctx.i18n.t('admin.form.editMedia', {}, 'Edit media')} options={options} urls={urls} user={user} activeMenu="manage-medias" pluginCtx={ctx}>
   <div class="col-mb-12 col-tb-4" role="complementary">
     {isImage && fileUrl ? (
       <p><a href={fileUrl} target="_blank" rel="noopener noreferrer">
@@ -87,29 +87,29 @@ function formatBytes(bytes: number): string {
 
     <ul class="typecho-option" style="margin-top: 15px;">
       <li>
-        <span class="typecho-label">文件名</span>
-        <p>{meta.name || attachment.title || '未知'}</p>
+        <span class="typecho-label">{ctx.i18n.t('admin.field.name', {}, 'Name')}</span>
+        <p>{meta.name || attachment.title || ctx.i18n.t('admin.status.unknown', {}, 'Unknown')}</p>
       </li>
       <li>
-        <span class="typecho-label">类型</span>
-        <p>{mimeType || '未知'}</p>
+        <span class="typecho-label">{ctx.i18n.t('admin.field.type', {}, 'Type')}</span>
+        <p>{mimeType || ctx.i18n.t('admin.status.unknown', {}, 'Unknown')}</p>
       </li>
       <li>
-        <span class="typecho-label">大小</span>
+        <span class="typecho-label">{ctx.i18n.t('admin.field.size', {}, 'Size')}</span>
         <p>{formatBytes(parseInt(String(meta.size || '0'), 10) || 0)}</p>
       </li>
       <li>
-        <span class="typecho-label">上传者</span>
-        <p>{author?.screenName || author?.name || '未知'}</p>
+        <span class="typecho-label">{ctx.i18n.t('admin.field.author', {}, 'Author')}</span>
+        <p>{author?.screenName || author?.name || ctx.i18n.t('admin.status.unknown', {}, 'Unknown')}</p>
       </li>
       <li>
-        <span class="typecho-label">上传日期</span>
-        <p>{formatDate(attachment.created || 0, 'Y-m-d H:i', options.timezone)}</p>
+        <span class="typecho-label">{ctx.i18n.t('admin.field.date', {}, 'Date')}</span>
+        <p>{formatDate(attachment.created || 0, 'Y-m-d H:i', options.timezone, ctx.i18n.locale)}</p>
       </li>
       {parentContent && (
         <li>
-          <span class="typecho-label">所属内容</span>
-          <p><a href={`/admin/write-post?cid=${parentContent.cid}`}>{parentContent.title || '无标题'}</a></p>
+          <span class="typecho-label">{ctx.i18n.t('admin.field.content', {}, 'Content')}</span>
+          <p><a href={`/admin/write-post?cid=${parentContent.cid}`}>{parentContent.title || ctx.i18n.t('core.content.untitled', {}, 'Untitled')}</a></p>
         </li>
       )}
     </ul>
@@ -122,25 +122,25 @@ function formatBytes(bytes: number): string {
 
       <ul class="typecho-option">
         <li>
-          <label for="name" class="typecho-label">文件标题</label>
+          <label for="name" class="typecho-label">{ctx.i18n.t('admin.form.fileTitle', {}, 'File title')}</label>
           <p><input type="text" id="name" name="name" class="text w-100" value={attachment.title || ''} /></p>
-          <p class="description">文件标题用于前台展示，可自行修改</p>
+          <p class="description">{ctx.i18n.t('admin.description.fileTitle', {}, 'The file title is shown on the public site and can be changed.')}</p>
         </li>
         <li>
-          <label for="slug" class="typecho-label">缩略名</label>
+          <label for="slug" class="typecho-label">{ctx.i18n.t('admin.field.slug', {}, 'Slug')}</label>
           <p><input type="text" id="slug" name="slug" class="text w-100" value={attachment.slug || ''} /></p>
         </li>
         <li>
-          <label class="typecho-label">文件链接</label>
+          <label class="typecho-label">{ctx.i18n.t('admin.form.fileLink', {}, 'File URL')}</label>
           <p><input type="text" class="text w-100 mono" value={relativeUrl} readonly onclick="this.select();" /></p>
-          <p class="description">此链接可直接被引用, 使用相对路径便于切换网址后使用</p>
+          <p class="description">{ctx.i18n.t('admin.description.fileLink', {}, 'This URL can be referenced directly. Use a relative path so it remains portable.')}</p>
         </li>
       </ul>
 
       <ul class="typecho-option typecho-option-submit">
         <li>
-          <button type="submit" class="btn primary">保存修改</button>
-          <a href="/admin/manage-medias" class="btn">返回</a>
+          <button type="submit" class="btn primary">{ctx.i18n.t('admin.form.saveChanges', {}, 'Save changes')}</button>
+          <a href="/admin/manage-medias" class="btn">{ctx.i18n.t('admin.action.back', {}, 'Back')}</a>
         </li>
       </ul>
     </form>
@@ -153,8 +153,8 @@ function formatBytes(bytes: number): string {
       <input type="hidden" name="do" value="delete" />
       <p>
         <button type="submit" class="btn btn-warn"
-          onclick="return confirm('你确认要删除此文件吗? 此操作无法撤销.');">
-          删除此文件
+          onclick={`return confirm(${JSON.stringify(ctx.i18n.t('admin.notice.confirmDelete', {}, 'Are you sure you want to delete this item?'))});`}>
+          {ctx.i18n.t('admin.form.deleteFile', {}, 'Delete file')}
         </button>
       </p>
     </form>

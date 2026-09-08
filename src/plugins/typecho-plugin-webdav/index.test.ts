@@ -174,6 +174,7 @@ function collectHooks() {
     addHook: (point: string, _pluginId: string, handler: Function) => {
       hooks.set(point, handler);
     },
+    registerTranslations: () => {},
   });
   const get = hooks.get.bind(hooks);
   hooks.get = ((point: string) => get(normalizeHookPoint(point))) as typeof hooks.get;

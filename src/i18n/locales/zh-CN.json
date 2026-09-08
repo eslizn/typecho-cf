@@ -1,0 +1,9 @@
+{
+  "core.locale.auto": "自动（跟随浏览器语言）",
+  "core.locale.zhCN": "中文（简体）",
+  "core.locale.en": "English",
+  "core.error.forbidden": "没有权限",
+  "core.error.notFound": "页面不存在",
+  "core.error.server": "服务器错误",
+  "core.error.serviceUnavailable": "服务暂不可用"
+}

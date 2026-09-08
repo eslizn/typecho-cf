@@ -1,0 +1,9 @@
+{
+  "core.locale.auto": "Auto (browser language)",
+  "core.locale.zhCN": "Chinese (Simplified)",
+  "core.locale.en": "English",
+  "core.error.forbidden": "Forbidden",
+  "core.error.notFound": "Not Found",
+  "core.error.server": "Server error",
+  "core.error.serviceUnavailable": "Service unavailable"
+}

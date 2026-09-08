@@ -20,6 +20,22 @@ import {
   parseConfigFormData,
   type ConfigField,
 } from '@/lib/config';
+import {
+  beginPluginTranslationStage,
+  commitPluginTranslationStage,
+  discardPluginTranslationStage,
+  getAvailableTranslationLocales,
+  getGlobalTranslationCatalogs,
+  getTranslationCatalogVersion,
+  resetPluginTranslationRegistry,
+  stagePluginTranslation,
+} from '@/lib/i18n-registry';
+export {
+  getAvailableTranslationLocales,
+  getGlobalTranslationCatalogs,
+  getTranslationCatalogVersion,
+} from '@/lib/i18n-registry';
+export type { AvailableTranslationLocale, PluginTranslationRegistration } from '@/lib/i18n-registry';
 
 // ==================== Types ====================
 
@@ -89,6 +105,11 @@ export interface PluginInitContext {
   addHook: typeof addHook;
   HookPoints: typeof HookPoints;
   pluginId: string;
+  registerTranslations: (
+    locale: string,
+    messages: Record<string, string>,
+    displayName?: string,
+  ) => void;
 }
 
 export interface PluginRouteResult {
@@ -325,6 +346,7 @@ export function resetPluginInitState(): void {
   initialisedPlugins.clear();
   initialisingPlugins.clear();
   failedPlugins.clear();
+  resetPluginTranslationRegistry();
 }
 
 /**
@@ -428,9 +450,10 @@ export function registerPlugin(
  * the per-isolate startup cost proportional to active plugin count.
  */
 export async function setActivatedPlugins(ctx: HookContext, ids: string[]): Promise<void> {
-  ctx.activatedPlugins = new Set(ids);
+  const orderedIds = [...new Set(ids.filter(id => typeof id === 'string' && id.length > 0))];
+  ctx.activatedPlugins = new Set(orderedIds);
   if (!pluginInitContext) return;
-  for (const id of ids) {
+  for (const id of orderedIds) {
     if (initialisedPlugins.has(id)) continue;
     const failure = failedPlugins.get(id);
     if (failure) {
@@ -445,17 +468,25 @@ export async function setActivatedPlugins(ctx: HookContext, ids: string[]): Prom
     const loader = pluginInitLoaders.get(id);
     if (!loader) continue;
     const pending = Promise.resolve()
-      .then(() => loader())
+      .then(() => {
+        beginPluginTranslationStage(id);
+        return loader();
+      })
       .then(init => init({
           addHook: pluginInitContext!.addHook,
           HookPoints: pluginInitContext!.HookPoints,
           pluginId: id,
+          registerTranslations: (locale, messages, displayName) => {
+            stagePluginTranslation(id, locale, messages, displayName);
+          },
         }))
       .then(() => {
+        commitPluginTranslationStage(id);
         initialisedPlugins.add(id);
         failedPlugins.delete(id);
       })
       .catch(err => {
+        discardPluginTranslationStage(id);
         const message = err instanceof Error ? err.message : String(err);
         const prior = failedPlugins.get(id);
         failedPlugins.set(id, {
@@ -699,7 +730,9 @@ export function parseActivatedPlugins(value: string | null | undefined): string[
   if (!value) return [];
   try {
     const arr = JSON.parse(value);
-    return Array.isArray(arr) ? arr.filter(id => typeof id === 'string') : [];
+    return Array.isArray(arr)
+      ? [...new Set(arr.filter(id => typeof id === 'string' && id.length > 0))]
+      : [];
   } catch {
     return [];
   }

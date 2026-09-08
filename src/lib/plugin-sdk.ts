@@ -4,6 +4,7 @@
 
 // ── Types ──
 export type { PluginInitContext, PluginRouteResult, PluginManifest, PluginConfigField } from './plugin';
+export type { I18n, I18nMessage, MessageVariables } from './i18n';
 export type { AttachmentMeta } from './attachment';
 export type { Database } from '../db/index';
 

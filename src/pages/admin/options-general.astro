@@ -3,7 +3,16 @@ import Admin from '@/layouts/Admin.astro';
 import { createContext, requireAuth } from '@/lib/context';
 import { hasPermission } from '@/lib/auth';
 import { getAvailableTranslationLocales } from '@/lib/i18n-registry';
-import { normalizeLocale } from '@/lib/i18n';
+import { matchSupportedLocale, normalizeLocale } from '@/lib/i18n';
+import {
+  DEFAULT_TIMEZONE,
+  STANDARD_TIMEZONES,
+  TIMEZONE_REGIONS,
+  TIMEZONE_REGION_LABEL_KEYS,
+  formatTimezoneLabel,
+  getTimezoneRegion,
+  isIanaTimezone,
+} from '@/lib/timezone';
 
 const ctx = await createContext(Astro.locals, Astro.request);
 const authCheck = requireAuth(ctx);
@@ -15,9 +24,17 @@ if (!hasPermission(ctx.user!.group || 'visitor', 'administrator')) {
 
 const { options, urls, user, csrfToken } = ctx;
 const configuredLanguage = typeof options.lang === 'string' ? options.lang : 'zh_CN';
-const normalizedConfiguredLanguage = normalizeLocale(configuredLanguage);
 const availableLanguages = getAvailableTranslationLocales(ctx.activatedPlugins);
-const languageIsAvailable = configuredLanguage === '' || availableLanguages.some(({ locale }) => normalizeLocale(locale) === normalizedConfiguredLanguage);
+const configuredLanguageMatch = configuredLanguage === ''
+  ? null
+  : matchSupportedLocale(configuredLanguage, availableLanguages.map(({ locale }) => locale));
+const languageIsAvailable = configuredLanguage === '' || configuredLanguageMatch !== null;
+const configuredTimezone = isIanaTimezone(options.timezone) ? options.timezone : DEFAULT_TIMEZONE;
+const timezoneGroups = TIMEZONE_REGIONS.map((region) => ({
+  region,
+  labelKey: TIMEZONE_REGION_LABEL_KEYS[region],
+  timezones: STANDARD_TIMEZONES.filter((timezone) => getTimezoneRegion(timezone) === region),
+}));
 ---
 <Admin title={ctx.i18n.t('admin.page.generalOptions', {}, 'General settings')} options={options} urls={urls} user={user} activeMenu="options" pluginCtx={ctx}>
   <div class="col-mb-12 col-tb-8 col-tb-offset-2" role="form">
@@ -51,8 +68,8 @@ const languageIsAvailable = configuredLanguage === '' || availableLanguages.some
               <option value="" selected={configuredLanguage === ''}>{ctx.i18n.t('admin.option.auto', {}, 'Auto (browser language)')}</option>
               {availableLanguages.map(({ locale, displayName }) => (
                 <option
-                  value={normalizeLocale(locale) === normalizedConfiguredLanguage && configuredLanguage !== '' ? configuredLanguage : locale}
-                  selected={normalizeLocale(locale) === normalizedConfiguredLanguage}
+                  value={normalizeLocale(locale) === configuredLanguageMatch && configuredLanguage !== '' ? configuredLanguage : locale}
+                  selected={normalizeLocale(locale) === configuredLanguageMatch}
                 >
                   {displayName || (locale === 'zh-CN'
                     ? ctx.i18n.t('admin.option.zhCN', {}, 'Chinese (Simplified)')
@@ -74,13 +91,17 @@ const languageIsAvailable = configuredLanguage === '' || availableLanguages.some
           <label class="typecho-label">{ctx.i18n.t('admin.field.timezone', {}, 'Timezone')}</label>
           <p>
             <select name="timezone" id="timezone">
-              <option value="28800" selected={options.timezone === 28800}>UTC+8 ({ctx.i18n.t('admin.timezone.china', {}, 'China Standard Time')})</option>
-              <option value="0" selected={options.timezone === 0}>UTC</option>
-              <option value="-18000" selected={options.timezone === -18000}>UTC-5 ({ctx.i18n.t('admin.timezone.usEastern', {}, 'US Eastern')})</option>
-              <option value="32400" selected={options.timezone === 32400}>UTC+9 ({ctx.i18n.t('admin.timezone.japanKorea', {}, 'Japan/Korea')})</option>
-              <option value="3600" selected={options.timezone === 3600}>UTC+1 ({ctx.i18n.t('admin.timezone.centralEurope', {}, 'Central Europe')})</option>
+              <option value="UTC" selected={configuredTimezone === 'UTC'}>{formatTimezoneLabel('UTC')}</option>
+              {timezoneGroups.map(({ region, labelKey, timezones }) => (
+                <optgroup label={ctx.i18n.t(labelKey, {}, region)}>
+                  {timezones.map((timezone) => (
+                    <option value={timezone} selected={configuredTimezone === timezone}>{formatTimezoneLabel(timezone)}</option>
+                  ))}
+                </optgroup>
+              ))}
             </select>
           </p>
+          <p class="description">{ctx.i18n.t('admin.description.timezone', {}, 'Select an IANA time zone with regional rules.')}</p>
         </li>
         <li>
           <label class="typecho-label">
@@ -101,27 +122,6 @@ const languageIsAvailable = configuredLanguage === '' || availableLanguages.some
             {ctx.i18n.t('admin.field.cache', {}, 'Page cache')}
           </label>
           <p class="description">{ctx.i18n.t('admin.description.cache', {}, 'Cache anonymous pages at the edge for five minutes. Content changes clear the cache.')}</p>
-        </li>
-      </ul>
-
-      <ul class="typecho-option">
-        <li>
-          <label class="typecho-label">{ctx.i18n.t('admin.field.mailSettings', {}, 'Mail settings')}</label>
-          <ul>
-            <li>
-              <input type="checkbox" id="mailEnabled" name="mailEnabled" value="1" checked={!!options.mailEnabled && options.mailEnabled !== 0} />
-              <label for="mailEnabled">{ctx.i18n.t('admin.field.mailEnabled', {}, 'Enable mail')}</label>
-              <p class="description">{ctx.i18n.t('admin.description.mailEnabled', {}, 'A mail adapter plugin is required for password reset and comment notifications.')}</p>
-            </li>
-            <li>
-              <label for="mailFrom" class="typecho-label">{ctx.i18n.t('admin.field.mailFrom', {}, 'From address')}</label>
-              <p><input type="email" id="mailFrom" name="mailFrom" class="text w-100" value={options.mailFrom || ''} /></p>
-            </li>
-            <li>
-              <label for="mailFromName" class="typecho-label">{ctx.i18n.t('admin.field.mailFromName', {}, 'Sender name')}</label>
-              <p><input type="text" id="mailFromName" name="mailFromName" class="text w-100" value={options.mailFromName || ''} /></p>
-            </li>
-          </ul>
         </li>
       </ul>
 

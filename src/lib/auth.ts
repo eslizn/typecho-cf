@@ -1,7 +1,8 @@
 import { eq, and } from 'drizzle-orm';
 import type { Database } from '@/db';
 import { schema } from '@/db';
-import type { I18n } from '@/lib/i18n';
+import { i18nMessage, type I18n } from '@/lib/i18n';
+import { textError } from '@/lib/http';
 
 // Typecho user groups: administrator(0), editor(1), contributor(2), subscriber(3), visitor(4)
 export const UserGroup = {
@@ -213,14 +214,14 @@ export async function requireAdminCSRF(
   uid: number,
   i18n?: I18n,
 ): Promise<Response | null> {
-  const failureMessage = i18n?.t('core.error.csrf', {}, 'CSRF validation failed') || 'CSRF validation failed';
+  const failureMessage = i18nMessage('core.error.csrf', 'CSRF validation failed');
   const token = await extractAdminCSRFToken(request);
   if (!token) {
-    return new Response(failureMessage, { status: 403 });
+    return textError(403, failureMessage, undefined, i18n);
   }
   const valid = await validateSecurityToken(token, secret, authCode, uid);
   if (!valid) {
-    return new Response(failureMessage, { status: 403 });
+    return textError(403, failureMessage, undefined, i18n);
   }
   return null;
 }

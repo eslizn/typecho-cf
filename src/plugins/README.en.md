@@ -253,7 +253,6 @@ Adding a hook requires updating `HookPoints`, the call site, and this guide toge
 | `feed:render` | After the complete XML document is built | `(xml, extra)` | Filters the complete RSS/Atom/RSS1 document; content type and cache headers remain system-owned |
 | `sidebar:data` | After sidebar data is built | `(sidebarData, extra)` | Filters sidebar data |
 | `csp:directives` | Security-header generation | `(directives, extra)` | Append required CSP sources without clearing defaults |
-| `mail:send` | Mail adapter dispatch | `(result, extra)` | The first plugin returning `sent: true` completes delivery |
 | `plugin:<id>:action:authorize` | Plugin-action authorization | `(role, extra)` | Declares the minimum role for an action; default is administrator |
 | `plugin:<id>:action` | `/api/admin/plugin-action` | `(result, extra)` | Runs a plugin admin action and returns a handled result |
 
@@ -345,7 +344,7 @@ The host project supplies the `typecho` package at install time, and `typecho/pl
 
 | Category | Exports |
 |----------|---------|
-| Types | `PluginInitContext`, `PluginRouteResult`, `PluginManifest`, `PluginConfigField`, `AttachmentMeta`, `Database` |
+| Types | `PluginInitContext`, `PluginRouteResult`, `PluginManifest`, `PluginConfigField`, `AttachmentMeta`, `Database`, `IanaTimezone`, `TimezoneSetting` |
 | Plugin system | `HookPoints`, `parsePluginOption`, `parsePluginConfigFormData`, `loadPluginConfig`, `escapeAttr`, `registerPluginAdminPath`, `getClientIp` |
 | Auth | `hasPermission`, `verifyPassword` |
 | Content | `buildPermalink`, `formatDate`, `buildAuthorLink`, `buildCategoryLink` |
@@ -354,6 +353,9 @@ The host project supplies the `typecho` package at install time, and `typecho/pl
 | Attachments | `parseAttachmentMeta` |
 | URL | `normalizeHttpUrl` |
 | Options | `getOption`, `setOption` |
+
+`formatDate(timestamp, format, timezone, locale)` uses an IANA identifier
+(for example `Asia/Shanghai` or `America/New_York`) so regional DST rules are applied.
 
 ---
 

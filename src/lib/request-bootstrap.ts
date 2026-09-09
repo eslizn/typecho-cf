@@ -144,11 +144,20 @@ export async function finalizeRequestResponse(
   response: Response,
   finalization: ResponseFinalization,
 ): Promise<Response> {
-  const finalized = await applySecurityHeaders(
+  let finalized = await applySecurityHeaders(
     response,
     { request: finalization.request, i18n: finalization.i18n },
     finalization.pluginCtx,
   );
+  if (finalization.autoLocale) {
+    const headers = new Headers(finalized.headers);
+    headers.set('Vary', mergeVary(headers.get('Vary'), ['Accept-Language']));
+    finalized = new Response(finalized.body, {
+      status: finalized.status,
+      statusText: finalized.statusText,
+      headers,
+    });
+  }
   if (finalization.cacheKey && finalized.status === 200) {
     const cacheHeaders = new Headers(finalized.headers);
     if (!cacheHeaders.has('Cache-Control')) cacheHeaders.set('Cache-Control', 'public, s-maxage=300');

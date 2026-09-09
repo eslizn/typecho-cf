@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createI18n,
   interpolateMessage,
+  matchSupportedLocale,
   parseAcceptLanguage,
   resolveLocale,
   type TranslationCatalog,
@@ -26,6 +27,11 @@ describe('parseAcceptLanguage()', () => {
     const ranges = Array.from({ length: 30 }, () => 'en-US;q=0.5').join(',');
     expect(parseAcceptLanguage(ranges)).toHaveLength(20);
     expect(parseAcceptLanguage('en,'.padEnd(4097, 'x'))).toEqual([]);
+  });
+
+  it('caps the first 20 raw ranges before discarding invalid entries', () => {
+    const header = [...Array.from({ length: 20 }, () => '???'), 'fr'].join(',');
+    expect(parseAcceptLanguage(header)).toEqual([]);
   });
 });
 
@@ -61,6 +67,12 @@ describe('resolveLocale()', () => {
   it('uses a unique plugin-provided family locale', () => {
     expect(resolveLocale('', 'fr-CA', ['en', 'fr-FR']).locale).toBe('fr-FR');
     expect(resolveLocale('', 'fr', ['en', 'fr-FR', 'fr-CA']).locale).toBe('en');
+  });
+
+  it('matches configured aliases only against registered locales', () => {
+    expect(matchSupportedLocale('en-US', supported)).toBe('en');
+    expect(matchSupportedLocale('zh_CN', supported)).toBe('zh-CN');
+    expect(matchSupportedLocale('fr-FR', supported)).toBeNull();
   });
 
   it('does not let a wildcard choose an arbitrary plugin locale', () => {

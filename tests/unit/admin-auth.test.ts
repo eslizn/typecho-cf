@@ -1,5 +1,20 @@
 import { describe, it, expect, vi } from 'vitest';
-import { safeAdminRedirectUrl } from '@/lib/admin-auth';
+import { jsonAdminActionError, safeAdminRedirectUrl } from '@/lib/admin-auth';
+import { setRequestCoreContext } from '@/lib/context';
+import { createI18n } from '@/lib/i18n';
+import { coreCatalogs } from '@/i18n/catalogs';
+
+function attachCoreI18n(request: Request) {
+  const i18n = createI18n({ locale: 'zh-CN', catalogs: coreCatalogs });
+  setRequestCoreContext({} as App.Locals, {
+    db: {} as any,
+    options: {} as any,
+    pluginCtx: { activatedPlugins: new Set<string>() },
+    i18n,
+    resolvedLocale: { locale: 'zh-CN', bundleName: 'zh-CN@test', source: 'fixed' },
+    autoLocale: false,
+  }, request);
+}
 
 describe('safeAdminRedirectUrl', () => {
   const siteUrl = 'https://example.com';
@@ -102,5 +117,26 @@ describe('safeAdminRedirectUrl', () => {
       '/admin/',
     );
     expect(result).toBe('/admin/');
+  });
+});
+
+describe('jsonAdminActionError', () => {
+  it('preserves descriptor status and message for JSON clients', async () => {
+    const request = new Request('https://example.com/api/admin/action');
+    attachCoreI18n(request);
+    const response = new Response('请求体过大', {
+      status: 413,
+      headers: { 'X-Typecho-I18n-Code': 'core.error.requestBodyTooLarge' },
+    });
+
+    const result = jsonAdminActionError(request, response);
+    expect(result.status).toBe(413);
+    expect(await result.json()).toEqual({ error: '请求体过大', code: 'core.error.requestBodyTooLarge' });
+  });
+
+  it('does not rewrite unrelated response statuses as forbidden', () => {
+    const request = new Request('https://example.com/api/admin/action');
+    const response = new Response('service unavailable', { status: 503 });
+    expect(jsonAdminActionError(request, response)).toBe(response);
   });
 });

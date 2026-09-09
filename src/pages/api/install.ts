@@ -196,7 +196,7 @@ export const POST: APIRoute = async ({ request }) => {
 
     const defaultOptions: Record<string, string> = {
       theme: 'typecho-theme-minimal',
-      timezone: '28800',
+      timezone: 'Asia/Shanghai',
       lang: '',
       charset: 'UTF-8',
       contentType: 'text/html',

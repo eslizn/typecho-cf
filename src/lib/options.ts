@@ -12,10 +12,12 @@ import {
   advanceOptionsSnapshotGeneration,
   getOptionsSnapshotGeneration,
 } from '@/lib/options-snapshot-generation';
+import { DEFAULT_TIMEZONE, isIanaTimezone, type TimezoneSetting } from '@/lib/timezone';
 
 export interface SiteOptions {
   theme: string;
-  timezone: number;
+  /** IANA time zone identifier. */
+  timezone: TimezoneSetting;
   lang: string;
   charset: string;
   contentType: string;
@@ -81,7 +83,7 @@ export interface SiteOptions {
 
 const defaultOptions: Partial<SiteOptions> = {
   theme: 'typecho-theme-minimal',
-  timezone: 28800,
+  timezone: DEFAULT_TIMEZONE,
   lang: 'zh_CN',
   charset: 'UTF-8',
   contentType: 'text/html',
@@ -136,9 +138,6 @@ const defaultOptions: Partial<SiteOptions> = {
   loginFailBanMaxFailures: 5,
   loginFailBanSeconds: 900,
   feedItems: 10,
-  mailEnabled: 0,
-  commentEmailEnabled: 0,
-  commentEmailReplyEnabled: 1,
 };
 
 // Site options change rarely. Local writes invalidate this snapshot
@@ -258,7 +257,7 @@ async function loadOptionsFresh(db: Database): Promise<SiteOptions> {
   // than reloading all rows).
   const cached = await getCachedOptions(db);
   if (cached) {
-    return cached as unknown as SiteOptions;
+    return normalizeOptions(cached);
   }
 
   const rows = await db
@@ -273,7 +272,7 @@ async function loadOptionsFresh(db: Database): Promise<SiteOptions> {
 
   // Parse numeric values
   const numericKeys = [
-    'timezone', 'frontArchive', 'pageSize', 'postsListSize',
+    'frontArchive', 'pageSize', 'postsListSize',
     'commentsListSize', 'defaultCategory', 'allowRegister', 'defaultAllowComment',
     'defaultAllowPing', 'defaultAllowFeed', 'feedFullText', 'markdown',
     'commentsRequireMail', 'commentsRequireURL', 'commentsRequireModeration',
@@ -286,8 +285,7 @@ async function loadOptionsFresh(db: Database): Promise<SiteOptions> {
     'gzip', 'cacheEnabled', 'cacheVersion',
     'loginFailBanEnabled', 'loginFailBanWindowSeconds',
     'loginFailBanMaxFailures', 'loginFailBanSeconds',
-    'feedItems', 'mailEnabled', 'commentEmailEnabled',
-    'commentEmailReplyEnabled',
+    'feedItems',
   ];
 
   for (const key of numericKeys) {
@@ -296,11 +294,24 @@ async function loadOptionsFresh(db: Database): Promise<SiteOptions> {
     }
   }
 
+  const normalizedOptions = normalizeOptions(opts);
+
   // Write to cache for subsequent requests, keyed by the version stamp
   // present at read time.
-  await setCachedOptions(opts, opts.cacheVersion ?? 0);
+  await setCachedOptions(normalizedOptions, normalizedOptions.cacheVersion ?? 0);
 
-  return opts as unknown as SiteOptions;
+  return normalizedOptions;
+}
+
+/** Normalize option rows to the current runtime representation. */
+function normalizeOptions(options: Record<string, unknown>): SiteOptions {
+  const normalized = { ...options };
+  if (normalized.lang === null || normalized.lang === undefined) normalized.lang = 'zh_CN';
+  const timezone = normalized.timezone;
+  if (typeof timezone !== 'string' || !isIanaTimezone(timezone)) {
+    normalized.timezone = DEFAULT_TIMEZONE;
+  }
+  return normalized as SiteOptions;
 }
 
 /**

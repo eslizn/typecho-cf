@@ -148,7 +148,7 @@ pnpm run reset-password:cloudflare   # Cloudflare
 
 参考 [插件开发规范](src/plugins/README.md)。
 
-邮件发送没有内置 SMTP/API 适配器。忘记密码与评论通知仅在启用邮件设置且已安装实现 `mail:send` Hook 的插件后才会投递；未安装适配器时安全降级为未发送。
+核心不提供邮件发送、评论邮件通知或忘记密码邮件入口；需要邮件能力时由插件自行提供。用户资料和评论中的邮箱字段仍可正常使用。
 
 ---
 

@@ -251,7 +251,6 @@ addHook('comment:beforeSave', pluginId, async (commentData: { _rejected?: string
 | `feed:render` | 完整 XML 生成后 | `(xml, extra)` | 过滤整份 RSS/Atom/RSS1 文档；响应类型和缓存头由系统控制 |
 | `sidebar:data` | 侧边栏数据生成后 | `(sidebarData, extra)` | 过滤侧边栏数据 |
 | `csp:directives` | 安全响应头生成 | `(directives, extra)` | 追加插件所需 CSP 来源，不应清空默认项 |
-| `mail:send` | 邮件发送适配 | `(result, extra)` | 首个返回 `sent: true` 的插件完成投递 |
 | `plugin:<id>:action:authorize` | 插件动作鉴权 | `(role, extra)` | 为指定 action 声明最低角色，默认 administrator |
 | `plugin:<id>:action` | `/api/admin/plugin-action` | `(result, extra)` | 执行插件管理动作并返回 handled 结果 |
 
@@ -345,7 +344,7 @@ import { schema } from 'typecho/db';
 
 | 类别 | 导出 |
 |------|------|
-| 类型 | `PluginInitContext`, `PluginRouteResult`, `PluginManifest`, `PluginConfigField`, `AttachmentMeta`, `Database` |
+| 类型 | `PluginInitContext`, `PluginRouteResult`, `PluginManifest`, `PluginConfigField`, `AttachmentMeta`, `Database`, `IanaTimezone`, `TimezoneSetting` |
 | 插件系统 | `HookPoints`, `parsePluginOption`, `parsePluginConfigFormData`, `loadPluginConfig`, `escapeAttr`, `registerPluginAdminPath`, `registerPluginRoute`, `getClientIp` |
 | 认证 | `hasPermission`, `verifyPassword` |
 | 内容 | `buildPermalink`, `formatDate`, `buildAuthorLink`, `buildCategoryLink` |
@@ -354,6 +353,9 @@ import { schema } from 'typecho/db';
 | 附件 | `parseAttachmentMeta` |
 | URL | `normalizeHttpUrl` |
 | 选项 | `getOption`, `setOption` |
+
+`formatDate(timestamp, format, timezone, locale)` 的 `timezone` 参数使用 IANA
+标识（例如 `Asia/Shanghai` 或 `America/New_York`），会按地区规则处理夏令时。
 
 ---
 

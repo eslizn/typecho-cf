@@ -213,7 +213,7 @@ async function buildCtx() {
       pagePattern: '/{slug}.html',
       commentsAvatarRating: 'G',
       commentsOrder: 'ASC',
-      timezone: 0,
+      timezone: 'UTC',
       commentsAntiSpam: 0,
       secret: '',
     } as any,

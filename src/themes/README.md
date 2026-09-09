@@ -179,7 +179,7 @@ const footerText = typeof themeConfig.footerText === 'string' ? themeConfig.foot
 
 ```typescript
 interface ThemeBaseProps {
-  options: SiteOptions;          // 站点配置（title, description, timezone 等）
+  options: SiteOptions;          // 站点配置（timezone 使用 IANA 标识）
   urls: {                        // 计算后的 URL 集合
     siteUrl: string;
     adminUrl: string;

@@ -170,26 +170,6 @@ const commentsPostIntervalMinutes = options.commentsPostInterval
         </li>
       </ul>
 
-      <ul class="typecho-option">
-        <li>
-          <label class="typecho-label">{ctx.i18n.t('admin.option.commentsEmail', {}, 'Email notifications')}</label>
-          <ul>
-            <li>
-              <input type="checkbox" id="commentEmailEnabled" name="commentEmailEnabled" value="1"
-                checked={!!options.commentEmailEnabled && options.commentEmailEnabled !== 0} />
-              <label for="commentEmailEnabled">{ctx.i18n.t('admin.description.commentEmailLabel', {}, 'Send an email when a new comment is posted.')}</label>
-              <p class="description">{ctx.i18n.t('admin.description.commentEmail', {}, 'Notify the post author and parent commenter (mail must be enabled in General settings).')}</p>
-            </li>
-            <li>
-              <input type="checkbox" id="commentEmailReplyEnabled" name="commentEmailReplyEnabled" value="1"
-                checked={!options.commentEmailReplyEnabled || options.commentEmailReplyEnabled !== 0} />
-              <label for="commentEmailReplyEnabled">{ctx.i18n.t('admin.description.commentEmailReplyLabel', {}, 'Include comment reply notifications.')}</label>
-              <p class="description">{ctx.i18n.t('admin.description.commentEmailReply', {}, 'Notify the person whose comment received a reply.')}</p>
-            </li>
-          </ul>
-        </li>
-      </ul>
-
       <ul class="typecho-option typecho-option-submit">
         <li>
           <button type="submit" class="btn primary">{ctx.i18n.t('admin.action.save', {}, 'Save settings')}</button>

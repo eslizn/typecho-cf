@@ -8,6 +8,7 @@
 import { eq, and, desc, asc, lt, gt, or, sql } from 'drizzle-orm';
 import { schema, type Database } from '@/db';
 import type { SiteOptions } from '@/lib/options';
+import { DEFAULT_TIMEZONE } from '@/lib/timezone';
 import { loadSidebarData, loadNavPages, type SidebarData } from '@/lib/sidebar';
 import { createThemeI18n, loadThemeConfig } from '@/lib/theme';
 import { buildFtsMatchExpression, contentsFtsTableRef, FTS_MIN_CHARS, isFtsAvailable } from '@/lib/fulltext';
@@ -231,7 +232,7 @@ function buildCommentOptions(options: SiteOptions, securityToken: string): Comme
     avatarRating: options.commentsAvatarRating || 'G',
     order: options.commentsOrder === 'DESC' ? 'DESC' : 'ASC',
     dateFormat: options.commentDateFormat || 'Y-m-d H:i',
-    timezone: options.timezone || 28800,
+    timezone: options.timezone ?? DEFAULT_TIMEZONE,
     securityToken,
     showCommentOnly: !!options.commentsShowCommentOnly,
     markdown: !!options.commentsMarkdown,

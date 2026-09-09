@@ -37,7 +37,13 @@ export function jsonError(status: number, message: HttpMessage, extraHeaders?: R
   const headers = extraHeaders ? { ...JSON_HEADERS, ...extraHeaders } : JSON_HEADERS;
   const descriptor = typeof message === 'string' ? null : normalizeI18nMessage(message);
   const body: Record<string, unknown> = {
-    error: descriptor ? resolveI18nMessage(descriptor, i18n) : message,
+    error: descriptor
+      ? resolveI18nMessage(descriptor, i18n)
+      : typeof message === 'string'
+        ? message
+        : status >= 500
+          ? 'Request failed'
+          : 'Invalid request',
   };
   if (descriptor) {
     body.code = descriptor.key;

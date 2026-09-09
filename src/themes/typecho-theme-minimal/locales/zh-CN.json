@@ -22,6 +22,7 @@
   "theme.comments.reply": "回复",
   "theme.comments.loginAs": "登录身份:",
   "theme.comments.author": "称呼",
+  "theme.comments.email": "邮箱",
   "theme.comments.website": "网站",
   "theme.comments.content": "内容",
   "theme.comments.submit": "提交评论",
@@ -44,5 +45,6 @@
   "theme.empty.archivePosts": "暂时没有文章。",
   "theme.notFound.description": "你想查看的页面已被转移或删除了, 要不要搜索看看:",
   "theme.footer.poweredBy": "由",
+  "theme.footer.poweredBySuffix": " 驱动",
   "theme.password.protected": "密码保护"
 }

@@ -100,8 +100,6 @@ const refererValue = safeAdminRedirectUrl(refererAbsolute, urls.siteUrl || Astro
         </p>
       </form>
       <p class="more-link">
-        <a href="/admin/forgot-password">{i18n.t('admin.auth.forgotPassword', {}, 'Forgot password?')}</a>
-        &nbsp;·&nbsp;
         <a href={urls.siteUrl + '/'}>{i18n.t('admin.auth.returnHome', {}, 'Return to home')}</a>
       </p>
     </div>

@@ -189,31 +189,41 @@ describe('formatDate()', () => {
   const ts = Math.floor(new Date('2026-03-15T12:30:45Z').getTime() / 1000);
 
   it('formats Y-m-d correctly', () => {
-    // timezone offset 0 = UTC
-    expect(formatDate(ts, 'Y-m-d', 0)).toBe('2026-03-15');
+    expect(formatDate(ts, 'Y-m-d', 'UTC')).toBe('2026-03-15');
   });
 
   it('formats Y-m-d H:i:s correctly', () => {
-    expect(formatDate(ts, 'Y-m-d H:i:s', 0)).toBe('2026-03-15 12:30:45');
+    expect(formatDate(ts, 'Y-m-d H:i:s', 'UTC')).toBe('2026-03-15 12:30:45');
   });
 
-  it('applies timezone offset correctly (UTC+8)', () => {
+  it('applies an IANA timezone correctly (UTC+8)', () => {
     // ts at UTC 12:30 → UTC+8 20:30
-    const formatted = formatDate(ts, 'H:i', 28800);
+    const formatted = formatDate(ts, 'H:i', 'Asia/Shanghai');
     expect(formatted).toBe('20:30');
   });
 
+  it('formats IANA zones with daylight-saving rules', () => {
+    const winter = Math.floor(new Date('2026-01-15T12:30:45Z').getTime() / 1000);
+    const summer = Math.floor(new Date('2026-07-15T12:30:45Z').getTime() / 1000);
+    expect(formatDate(winter, 'Y-m-d H:i', 'America/New_York')).toBe('2026-01-15 07:30');
+    expect(formatDate(summer, 'Y-m-d H:i', 'America/New_York')).toBe('2026-07-15 08:30');
+  });
+
+  it('uses the configured Chinese IANA zone by default', () => {
+    expect(formatDate(ts, 'Y-m-d H:i')).toBe('2026-03-15 20:30');
+  });
+
   it('formats month name (F)', () => {
-    expect(formatDate(ts, 'F', 0)).toBe('March');
+    expect(formatDate(ts, 'F', 'UTC')).toBe('March');
   });
 
   it('formats short month name (M)', () => {
-    expect(formatDate(ts, 'M', 0)).toBe('Mar');
+    expect(formatDate(ts, 'M', 'UTC')).toBe('Mar');
   });
 
   it('escapes backslash-prefixed characters', () => {
     // \a\t in format should be literal "at"
-    const result = formatDate(ts, 'Y-m-d \\a\\t H:i', 0);
+    const result = formatDate(ts, 'Y-m-d \\a\\t H:i', 'UTC');
     expect(result).toBe('2026-03-15 at 12:30');
   });
 });

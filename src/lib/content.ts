@@ -3,6 +3,7 @@
  * Corresponds to Typecho's Widget/Base/Contents.php
  */
 import { renderPermalinkPattern } from '@/lib/permalink-pattern';
+import { DEFAULT_TIMEZONE, getTimezoneDateParts, type TimezoneSetting } from '@/lib/timezone';
 
 /**
  * Generate a URL-safe slug from a string
@@ -164,31 +165,58 @@ export function buildSearchLink(keywords: string, siteUrl: string): string {
 
 /**
  * Format a Unix timestamp using PHP-style date formatting
- * Supports common PHP date format characters
+ * Supports common PHP date format characters. The timezone uses an IANA
+ * identifier with regional DST rules.
  */
-export function formatDate(timestamp: number, format: string, timezoneOffset = 28800, locale = 'en'): string {
-  const date = new Date((timestamp + timezoneOffset) * 1000);
-  const utcDate = new Date(date.getTime() + date.getTimezoneOffset() * 60000);
+export function formatDate(
+  timestamp: number,
+  format: string,
+  timezone: TimezoneSetting = DEFAULT_TIMEZONE,
+  locale = 'en',
+): string {
+  const date = new Date(Math.trunc(timestamp) * 1000);
+  const { parts, formatTimezone } = getTimezoneDateParts(timestamp, timezone);
 
-  const Y = String(utcDate.getFullYear());
-  const m = String(utcDate.getMonth() + 1).padStart(2, '0');
-  const d = String(utcDate.getDate()).padStart(2, '0');
-  const H = String(utcDate.getHours()).padStart(2, '0');
-  const i = String(utcDate.getMinutes()).padStart(2, '0');
-  const s = String(utcDate.getSeconds()).padStart(2, '0');
-  const n = String(utcDate.getMonth() + 1);
-  const j = String(utcDate.getDate());
+  const Y = String(parts.year);
+  const m = String(parts.month).padStart(2, '0');
+  const d = String(parts.day).padStart(2, '0');
+  const H = String(parts.hour).padStart(2, '0');
+  const i = String(parts.minute).padStart(2, '0');
+  const s = String(parts.second).padStart(2, '0');
+  const n = String(parts.month);
+  const j = String(parts.day);
   const c = new Date(timestamp * 1000).toISOString();
 
-  const monthDate = new Date(Date.UTC(utcDate.getFullYear(), utcDate.getMonth(), 1));
+  // For UTC, use a synthetic UTC date matching the local calendar fields. For
+  // an IANA zone, format the original instant in that zone so month names
+  // follow DST-aware local date boundaries.
+  const monthDate = formatTimezone === 'UTC'
+    ? new Date(Date.UTC(parts.year, parts.month - 1, 1))
+    : date;
   let F: string;
   let M: string;
   try {
-    F = new Intl.DateTimeFormat(locale, { month: 'long', timeZone: 'UTC' }).format(monthDate);
-    M = new Intl.DateTimeFormat(locale, { month: 'short', timeZone: 'UTC' }).format(monthDate);
+    F = new Intl.DateTimeFormat(locale, {
+      month: 'long',
+      timeZone: formatTimezone,
+      calendar: 'gregory',
+    }).format(monthDate);
+    M = new Intl.DateTimeFormat(locale, {
+      month: 'short',
+      timeZone: formatTimezone,
+      calendar: 'gregory',
+    }).format(monthDate);
   } catch {
-    F = new Intl.DateTimeFormat('en', { month: 'long', timeZone: 'UTC' }).format(monthDate);
-    M = new Intl.DateTimeFormat('en', { month: 'short', timeZone: 'UTC' }).format(monthDate);
+    F = new Intl.DateTimeFormat('en', {
+      month: 'long',
+      timeZone: formatTimezone,
+      calendar: 'gregory',
+    }).format(monthDate);
+    M = new Intl.DateTimeFormat('en', {
+      month: 'short',
+      timeZone: formatTimezone,
+      calendar: 'gregory',
+    }).format(monthDate);
   }
 
   const replacements: Record<string, string> = { Y, m, d, H, i, s, n, j, F, M, c };

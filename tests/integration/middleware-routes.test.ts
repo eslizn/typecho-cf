@@ -90,7 +90,6 @@ const routes: TestCase[] = [
   // Public pages
   { method: 'GET', path: '/', expectStatus: 200 },
   { method: 'GET', path: '/admin/login', expectStatus: 200 },
-  { method: 'GET', path: '/admin/forgot-password', expectStatus: 200 },
   { method: 'GET', path: '/admin/reset-password', expectStatus: 200 },
   { method: 'GET', path: '/sitemap.xml', expectStatus: 200 },
   { method: 'GET', path: '/robots.txt', expectStatus: 200 },

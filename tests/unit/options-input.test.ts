@@ -12,16 +12,37 @@ describe('parseSiteOptionsInput()', () => {
     expect(parse({
       title: 'Blog',
       siteUrl: 'https://example.com/',
-      timezone: '28800',
+      timezone: 'Asia/Shanghai',
       allowRegister: '1',
     })).toMatchObject({
       title: 'Blog',
       siteUrl: 'https://example.com',
-      timezone: '28800',
+      timezone: 'Asia/Shanghai',
       allowRegister: '1',
       cacheEnabled: '0',
-      mailEnabled: '0',
     });
+  });
+
+  it('accepts supported IANA time zones', () => {
+    expect(parse({ timezone: 'America/New_York' })).toMatchObject({
+      timezone: 'America/New_York',
+    });
+  });
+
+  it('ignores removed mail settings instead of persisting them', () => {
+    const parsed = parse({
+      mailEnabled: '1',
+      mailFrom: 'blog@example.com',
+      mailFromName: 'Blog',
+      commentEmailEnabled: '1',
+      commentEmailReplyEnabled: '1',
+    });
+
+    expect(parsed).not.toHaveProperty('mailEnabled');
+    expect(parsed).not.toHaveProperty('mailFrom');
+    expect(parsed).not.toHaveProperty('mailFromName');
+    expect(parsed).not.toHaveProperty('commentEmailEnabled');
+    expect(parsed).not.toHaveProperty('commentEmailReplyEnabled');
   });
 
   it('converts discussion units only after validating their ranges', () => {
@@ -41,7 +62,8 @@ describe('parseSiteOptionsInput()', () => {
     ['siteUrl', 'https://example.com/blog'],
     ['pageSize', '0'],
     ['feedItems', '51'],
-    ['timezone', 'Infinity'],
+    ['timezone', '28800'],
+    ['timezone', 'Not/A_Timezone'],
     ['allowRegister', 'true'],
     ['commentsOrder', 'RANDOM'],
     ['lang', '../en'],

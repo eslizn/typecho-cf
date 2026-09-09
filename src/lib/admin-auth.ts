@@ -7,8 +7,8 @@ import { getRequestCoreContext } from '@/lib/context';
 import { REQUEST_BODY_LIMITS } from '@/lib/constants';
 import { assertBoundedContentLength, InputError, inputErrorResponse } from '@/lib/input';
 import { createRequestI18n } from '@/lib/i18n-runtime';
-import { i18nMessage, type I18n } from '@/lib/i18n';
-import { jsonError } from '@/lib/http';
+import { i18nMessage, normalizeI18nMessage, type I18n, type I18nMessage } from '@/lib/i18n';
+import { jsonError, textError } from '@/lib/http';
 
 export interface AdminActionContext {
   db: Database;
@@ -92,12 +92,16 @@ export async function requireAdminAction(
     }
   }
   const { token } = getAuthCookies(request.headers.get('cookie'));
-  if (!token || !options.secret) return new Response(errorI18n.t('core.error.unauthorized', {}, 'Unauthorized'), { status: 401 });
+  if (!token || !options.secret) {
+    return textError(401, i18nMessage('core.error.unauthorized', 'Unauthorized'), undefined, errorI18n);
+  }
 
   const auth = await validateAuthToken(token, options.secret, db);
-  if (!auth) return new Response(errorI18n.t('core.error.unauthorized', {}, 'Unauthorized'), { status: 401 });
+  if (!auth) {
+    return textError(401, i18nMessage('core.error.unauthorized', 'Unauthorized'), undefined, errorI18n);
+  }
   if (!hasPermission(auth.user.group || 'visitor', requiredGroup)) {
-    return new Response(errorI18n.t('core.error.forbidden', {}, 'Forbidden'), { status: 403 });
+    return textError(403, i18nMessage('core.error.forbidden', 'Forbidden'), undefined, errorI18n);
   }
 
   if (csrf) {
@@ -105,7 +109,7 @@ export async function requireAdminAction(
     // the CSRF token. Even if a token is leaked, cross-site POSTs are
     // rejected at the request boundary.
     if (!isSameOriginRequest(request, options.siteUrl || '')) {
-      return new Response(errorI18n.t('core.error.forbidden', {}, 'Forbidden'), { status: 403 });
+      return textError(403, i18nMessage('core.error.forbidden', 'Forbidden'), undefined, errorI18n);
     }
     const csrfError = await requireAdminCSRF(request, options.secret as string, auth.user.authCode!, auth.uid, errorI18n);
     if (csrfError) return csrfError;
@@ -137,9 +141,25 @@ export function isAdminActionResponse(value: AdminActionContext | Response): val
  * AdminActionContext can be returned. */
 export function jsonAdminActionError(request: Request, response: Response): Response {
   const core = getRequestCoreContext(request);
+  const descriptor = readResponseI18nMessage(response);
+  if (descriptor) return jsonError(response.status, descriptor, undefined, core?.i18n);
+  if (response.status !== 401 && response.status !== 403) return response;
+
   const key = response.status === 401 ? 'core.error.unauthorized' : 'core.error.forbidden';
   const fallback = response.status === 401 ? 'Unauthorized' : 'Forbidden';
   return jsonError(response.status, i18nMessage(key, fallback), undefined, core?.i18n);
+}
+
+function readResponseI18nMessage(response: Response): I18nMessage | null {
+  const key = response.headers.get('X-Typecho-I18n-Code');
+  if (!key) return null;
+
+  let variables: unknown;
+  const rawVariables = response.headers.get('X-Typecho-I18n-Params');
+  if (rawVariables) {
+    try { variables = JSON.parse(rawVariables); } catch { variables = undefined; }
+  }
+  return normalizeI18nMessage({ key, variables });
 }
 
 export function safeAdminRedirectUrl(referer: string | null, siteUrl: string, fallback: string): string {

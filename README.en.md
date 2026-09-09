@@ -141,7 +141,7 @@ pnpm run reset-password:cloudflare   # Cloudflare
 
 See [Plugin Development Guide](src/plugins/README.en.md).
 
-There is no built-in SMTP or mail API adapter. Password-reset messages and comment notifications are delivered only when mail is enabled and an active plugin implements the `mail:send` hook; without one, delivery safely degrades to an unsent result.
+The core no longer provides mail delivery, comment email notifications, or a password-reset email entry point. Plugins may provide mail capabilities independently; user and comment email fields remain available.
 
 ---
 

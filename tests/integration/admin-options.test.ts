@@ -136,6 +136,35 @@ describe('POST /api/admin/options', () => {
     expect(await getOption(testDb, 'siteUrl')).toBe('https://myblog.com');
   });
 
+  it('saves an IANA timezone identifier', async () => {
+    const req = await makeAdminRequest(testDb, { timezone: 'America/New_York' });
+    const res = await POST({ request: req, locals: {} } as any);
+    expect(res.status).toBe(302);
+    expect(await getOption(testDb, 'timezone')).toBe('America/New_York');
+  });
+
+  it('rejects numeric timezone values without partially saving', async () => {
+    const req = await makeAdminRequest(testDb, {
+      timezone: '28800',
+      title: 'must-not-save',
+    });
+    const res = await POST({ request: req, locals: {} } as any);
+    expect(res.status).toBe(400);
+    expect(await getOption(testDb, 'timezone')).toBeNull();
+    expect(await getOption(testDb, 'title')).toBeNull();
+  });
+
+  it('rejects a valid but unregistered locale without partially saving', async () => {
+    const req = await makeAdminRequest(testDb, {
+      lang: 'fr-FR',
+      title: 'must-not-save',
+    });
+    const res = await POST({ request: req, locals: {} } as any);
+    expect(res.status).toBe(400);
+    expect(await getOption(testDb, 'lang')).toBeNull();
+    expect(await getOption(testDb, 'title')).toBeNull();
+  });
+
   // -- Unit conversions --
 
   it('converts commentsPostTimeout from days to seconds', async () => {

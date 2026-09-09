@@ -62,6 +62,15 @@ describe('finalizeRequestResponse()', () => {
     put.mockRestore();
   });
 
+  it('adds Accept-Language to automatic responses that are not cached', async () => {
+    const response = await finalizeRequestResponse(new Response('not found', { status: 404 }), {
+      request: new Request('https://example.com/missing'),
+      autoLocale: true,
+    });
+
+    expect(response.headers.get('vary')).toContain('Accept-Language');
+  });
+
   it('fires request:end once when middleware finalizes the same request repeatedly', async () => {
     const pluginId = 'request-end-test';
     const pluginCtx: HookContext = { activatedPlugins: new Set([pluginId]) };

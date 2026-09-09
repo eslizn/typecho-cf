@@ -29,7 +29,14 @@ describe('loadOptions()', () => {
     expect(opts.title).toBe('Hello World');
     expect(opts.pageSize).toBe(5);
     expect(opts.commentsPostInterval).toBe(60);
-    expect(opts.timezone).toBe(28800);
+    expect(opts.timezone).toBe('Asia/Shanghai');
+  });
+
+  it('keeps legacy NULL lang rows fixed to the Chinese default', async () => {
+    const db = await createOptionsTestDb();
+    await db.insert(schema.options).values({ name: 'lang', user: 0, value: null });
+    const opts = await loadOptions(db);
+    expect(opts.lang).toBe('zh_CN');
   });
 
   it('overrides defaults with values from DB', async () => {
@@ -47,6 +54,15 @@ describe('loadOptions()', () => {
     const opts = await loadOptions(db);
     expect(typeof opts.allowRegister).toBe('number');
     expect(opts.allowRegister).toBe(1);
+  });
+
+  it('keeps IANA time zones and normalizes invalid rows to the default', async () => {
+    const db = await createOptionsTestDb();
+    await setOption(db, 'timezone', 'America/New_York');
+    expect((await loadOptions(db)).timezone).toBe('America/New_York');
+
+    await setOption(db, 'timezone', '28800');
+    expect((await loadOptions(db)).timezone).toBe('Asia/Shanghai');
   });
 
   it('does not auto-generate secret in the read path', async () => {

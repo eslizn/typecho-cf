@@ -8,7 +8,6 @@ const read = (path: string) => readFileSync(join(root, path), 'utf8');
 describe('admin accessibility contracts', () => {
   it.each([
     'src/pages/admin/login.astro',
-    'src/pages/admin/forgot-password.astro',
     'src/pages/admin/reset-password.astro',
   ])('%s permits browser zoom', (path) => {
     const source = read(path);

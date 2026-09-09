@@ -179,7 +179,7 @@ All template component Props types are defined in the main project at `src/lib/t
 
 ```typescript
 interface ThemeBaseProps {
-  options: SiteOptions;          // Site config (title, description, timezone, etc.)
+  options: SiteOptions;          // Site config (timezone uses an IANA ID)
   urls: {                        // Computed URL set
     siteUrl: string;
     adminUrl: string;

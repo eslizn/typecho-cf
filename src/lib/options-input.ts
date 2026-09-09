@@ -1,5 +1,6 @@
 import { compilePermalinkPattern, DEFAULT_PERMALINK_PATTERNS, type PermalinkPatternKind } from '@/lib/permalink-pattern';
 import { normalizeLocale } from '@/lib/i18n';
+import { isIanaTimezone } from '@/lib/timezone';
 
 export class SiteOptionsInputError extends Error {
   constructor(
@@ -27,8 +28,7 @@ const OPTION_KEYS = new Set([
   'frontPage', 'frontArchive', 'attachmentTypes', 'editorSize',
   'cacheEnabled', 'loginFailBanEnabled', 'loginFailBanWindowSeconds',
   'loginFailBanMaxFailures', 'loginFailBanSeconds', 'feedItems',
-  'robotsTxt', 'mailEnabled', 'mailFrom', 'mailFromName',
-  'commentEmailEnabled', 'commentEmailReplyEnabled',
+  'robotsTxt',
 ]);
 
 const BOOLEAN_KEYS = new Set([
@@ -39,25 +39,22 @@ const BOOLEAN_KEYS = new Set([
   'commentsPageBreak', 'commentsThreaded', 'commentsCheckReferer',
   'commentsAutoClose', 'commentsPostIntervalEnable', 'commentsAntiSpam',
   'commentsAvatar', 'commentsShowCommentOnly', 'frontArchive',
-  'cacheEnabled', 'loginFailBanEnabled', 'mailEnabled',
-  'commentEmailEnabled', 'commentEmailReplyEnabled',
+  'cacheEnabled', 'loginFailBanEnabled',
 ]);
 
 const CHECKBOXES_BY_PAGE: Record<string, readonly string[]> = {
-  '/admin/options-general': ['allowRegister', 'cacheEnabled', 'mailEnabled'],
+  '/admin/options-general': ['allowRegister', 'cacheEnabled'],
   '/admin/options-discussion': [
     'commentsShowCommentOnly', 'commentsAvatar', 'commentsShowUrl',
     'commentsMarkdown', 'commentsUrlNofollow', 'commentsRequireMail',
     'commentsRequireURL', 'commentsCheckReferer', 'commentsAntiSpam',
     'commentsRequireModeration', 'commentsWhitelist', 'commentsAutoClose',
     'commentsThreaded', 'commentsPageBreak', 'commentsPostIntervalEnable',
-    'commentEmailEnabled', 'commentEmailReplyEnabled',
   ],
   '/admin/options-reading': ['feedFullText', 'markdown'],
 };
 
 const INTEGER_RANGES: Record<string, readonly [number, number]> = {
-  timezone: [-43_200, 50_400],
   pageSize: [1, 100],
   postsListSize: [1, 100],
   commentsListSize: [1, 100],
@@ -163,6 +160,13 @@ export function parseSiteOptionsInput({ formData, sourcePath }: ParseSiteOptions
   if (entries.siteUrl !== undefined) entries.siteUrl = normalizeSiteUrl(entries.siteUrl);
   if (entries.lang !== undefined && normalizeLocale(entries.lang) === null) {
     invalid('lang', 'expected an empty value or a valid locale tag');
+  }
+  if (entries.timezone !== undefined) {
+    const timezone = entries.timezone.trim();
+    if (!isIanaTimezone(timezone)) {
+      invalid('timezone', 'expected a supported IANA time zone identifier');
+    }
+    entries.timezone = timezone;
   }
 
   for (const key of BOOLEAN_KEYS) {

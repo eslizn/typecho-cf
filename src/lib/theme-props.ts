@@ -146,8 +146,8 @@ export interface CommentOptions {
   order: 'ASC' | 'DESC';
   /** Date format string for comments */
   dateFormat: string;
-  /** Timezone offset in seconds */
-  timezone: number;
+  /** IANA time zone identifier. */
+  timezone: SiteOptions['timezone'];
   /**
    * CSRF token for the comment form `<input name="_">`.
    * Empty string when anti-spam is disabled (commentsAntiSpam = 0).

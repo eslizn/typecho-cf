@@ -22,6 +22,7 @@
   "theme.comments.reply": "Reply",
   "theme.comments.loginAs": "Logged in as:",
   "theme.comments.author": "Name",
+  "theme.comments.email": "Email",
   "theme.comments.website": "Website",
   "theme.comments.content": "Content",
   "theme.comments.submit": "Submit comment",
@@ -44,5 +45,6 @@
   "theme.empty.archivePosts": "No posts yet.",
   "theme.notFound.description": "The page you are looking for has been moved or deleted. Would you like to search?",
   "theme.footer.poweredBy": "Powered by",
+  "theme.footer.poweredBySuffix": "",
   "theme.password.protected": "Password protected"
 }

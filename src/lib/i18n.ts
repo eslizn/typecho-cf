@@ -149,7 +149,8 @@ export function parseAcceptLanguage(header: string | null | undefined): AcceptLa
 
   const parsed: AcceptLanguageRange[] = [];
   const rawRanges = header.split(',');
-  for (let order = 0; order < rawRanges.length && parsed.length < MAX_ACCEPT_LANGUAGE_RANGES; order += 1) {
+  const rangeLimit = Math.min(rawRanges.length, MAX_ACCEPT_LANGUAGE_RANGES);
+  for (let order = 0; order < rangeLimit; order += 1) {
     const parts = rawRanges[order]?.split(';') ?? [];
     const rawRange = parts.shift()?.trim() ?? '';
     if (rawRange !== '*' && !normalizeLocale(rawRange)) continue;
@@ -300,6 +301,13 @@ function normalizeSupportedLocales(locales: Iterable<string>): Set<string> {
     if (value) normalized.add(value);
   }
   return normalized;
+}
+
+/** Match a configured locale against registered locales, accepting legacy aliases. */
+export function matchSupportedLocale(raw: unknown, supportedLocales: Iterable<string>): string | null {
+  const normalized = normalizeLocale(raw);
+  if (normalized === null || normalized === '') return null;
+  return findSupportedLocale(normalized, normalizeSupportedLocales(supportedLocales));
 }
 
 function firstLocale(locales: Set<string>): string {

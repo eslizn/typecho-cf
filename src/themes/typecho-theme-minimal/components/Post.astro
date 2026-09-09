@@ -172,7 +172,7 @@ const totalComments = commentPagination.totalComments;
                           <input type="text" name="author" id="author" class="text" required />
                         </p>
                         <p>
-                          <label for="mail" class:list={[{ required: commentOptions.requireMail }]}>Email</label>
+                          <label for="mail" class:list={[{ required: commentOptions.requireMail }]}>{t('theme.comments.email', {}, 'Email')}</label>
                           <input type="email" name="mail" id="mail" class="text" required={commentOptions.requireMail} />
                         </p>
                         <p>
@@ -305,6 +305,6 @@ const totalComments = commentPagination.totalComments;
 
   <footer id="footer" role="contentinfo">
     &copy; {new Date().getFullYear()} <a href={urls.siteUrl}>{options.title}</a>.
-    {t('theme.footer.poweredBy', {}, 'Powered by')} <a href="https://github.com/eslizn/typecho-cf">Typecho CF</a>.
+    {t('theme.footer.poweredBy', {}, 'Powered by')} <a href="https://github.com/eslizn/typecho-cf">Typecho CF</a>{t('theme.footer.poweredBySuffix', {}, '')}.
   </footer>
 </Base>

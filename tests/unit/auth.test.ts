@@ -11,6 +11,7 @@ import {
   verifyPassword,
   generateAuthToken,
   validateAuthToken,
+  requireAdminCSRF,
   generateSecurityToken,
   validateSecurityToken,
   generateCommentToken,
@@ -390,6 +391,20 @@ describe('generateSecurityToken() / validateSecurityToken()', () => {
     const t1 = await generateSecurityToken('secret', 'auth1', 1);
     const t2 = await generateSecurityToken('secret', 'auth2', 1);
     expect(t1).not.toBe(t2);
+  });
+});
+
+describe('requireAdminCSRF()', () => {
+  it('preserves the stable error descriptor for failed validation', async () => {
+    const response = await requireAdminCSRF(
+      new Request('https://example.com/api/admin/action', { method: 'POST' }),
+      'secret',
+      'authcode',
+      1,
+    );
+
+    expect(response?.status).toBe(403);
+    expect(response?.headers.get('X-Typecho-I18n-Code')).toBe('core.error.csrf');
   });
 });
 

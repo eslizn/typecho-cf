@@ -225,7 +225,6 @@ const CanonicalHookPoints = {
   'feed:render': 'feed:render',
   'sidebar:data': 'sidebar:data',
   'csp:directives': 'csp:directives',
-  'mail:send': 'mail:send',
 } as const;
 
 /** @deprecated Hook names retained for third-party plugin compatibility. */
@@ -662,34 +661,6 @@ export async function applyFilterSafely(ctx: HookContext, hookPoint: string, val
       result = await (reg.handler as FilterHandler)(result, ...args);
     } catch (err) {
       console.error(`[plugin] Error in safe filter ${normalizedPoint} from plugin ${reg.pluginId}:`, err);
-    }
-  }
-  return result;
-}
-
-/**
- * Run safe filter handlers until one returns a value accepted by `stopWhen`.
- * This is for single-owner operations such as mail delivery, where continuing
- * after a successful adapter would duplicate an external side effect.
- */
-export async function applyFilterUntil(
-  ctx: HookContext,
-  hookPoint: string,
-  value: any,
-  stopWhen: (value: any) => boolean,
-  ...args: any[]
-): Promise<any> {
-  const normalizedPoint = normalizeHookPoint(hookPoint);
-  if (!hasHook(ctx, normalizedPoint)) return value;
-
-  let result = value;
-  for (const reg of hookRegistry.get(normalizedPoint)!) {
-    if (!ctx.activatedPlugins.has(reg.pluginId)) continue;
-    try {
-      result = await (reg.handler as FilterHandler)(result, ...args);
-      if (stopWhen(result)) return result;
-    } catch (err) {
-      console.error(`[plugin] Error in short-circuit filter ${normalizedPoint} from plugin ${reg.pluginId}:`, err);
     }
   }
   return result;

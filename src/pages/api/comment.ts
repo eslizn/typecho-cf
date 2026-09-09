@@ -5,7 +5,6 @@ import { getAuthCookies, validateAuthToken, validateCommentToken, timeSafeEqual 
 import { setActivatedPlugins, parseActivatedPlugins, applyFilter, doHook, type HookContext } from '@/lib/plugin';
 import { bumpCacheVersion, purgeContentCache } from '@/lib/cache';
 import { getClientIp, getRequestCoreContextFromLocals, getRequestI18n } from '@/lib/context';
-import { notifyOnComment } from '@/lib/comment-email';
 import { buildPermalink } from '@/lib/content';
 import { normalizeHttpUrl } from '@/lib/url';
 import { isSameOriginRequest } from '@/lib/admin-auth';
@@ -291,39 +290,6 @@ export const POST: APIRoute = async ({ request, locals }) => {
   await doHook(pluginCtx, 'comment:afterCreate', commentData);
   if (parent > 0) {
     await doHook(pluginCtx, 'comment:reply', commentData, { parent });
-  }
-
-  // Email notification (fire-and-forget via waitUntil)
-  if (finalStatus === 'approved') {
-    const notifyP = notifyOnComment({
-      pluginCtx,
-      db,
-      options,
-      siteUrl: (options.siteUrl as string) || '',
-      permalinkPattern: options.permalinkPattern as string | undefined,
-      pagePattern: options.pagePattern as string | undefined,
-      comment: {
-        coid: newCoid,
-        cid,
-        author: commentData.author as string | null ?? null,
-        mail: commentData.mail as string | null ?? null,
-        text: commentData.text as string | null ?? null,
-        parent: commentData.parent as number,
-        authorId: commentData.authorId as number | null ?? null,
-      },
-      content: {
-        cid: content.cid,
-        title: content.title,
-        slug: content.slug,
-        type: content.type || 'post',
-        created: content.created || 0,
-        authorId: content.authorId,
-      },
-      request,
-    });
-    if (locals.cfContext?.waitUntil) {
-      locals.cfContext.waitUntil(notifyP);
-    }
   }
 
   const contentUrl = buildPermalink(

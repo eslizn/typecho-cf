@@ -560,3 +560,43 @@ scripts/
 ├── migrate.ts                       # PHP Typecho 数据迁移
 └── reset-password.ts                # 密码重置工具
 ```
+
+---
+
+## 13. 定时与异步任务系统
+
+本节是实现和后续插件开发必须遵守的任务系统规范；若需改变架构边界，先更新本节并完成评审。
+
+### 13.1 固定架构
+
+- 使用自定义 `src/worker.ts` 导出 `fetch`、`scheduled`、`queue`；HTTP 交给 Astro Cloudflare handler。
+- Cloudflare Cron 固定每分钟触发一次（`* * * * *`），只负责按当前 UTC instant 和站点 IANA timezone 找出当前 local slot，并向 Queue 投递。
+- Cloudflare Queue 是异步传输、批处理、重试和 DLQ 边界；Queue consumer 的 `max_concurrency = 1` 只限制外层 consumer，不代表所有任务串行。
+- 核心 dispatcher 允许不同 `{pluginId}:{taskId}` 并发；同一 task 的并发由插件声明的 `concurrency` 控制，并受核心 `globalMaxInFlight` 安全上限约束。
+- 第一阶段不新增任务专用 D1 表，不用 D1 保存任务 cursor、历史、队列状态或通用幂等记录；已有 D1 仍用于站点配置、插件激活状态和插件配置。
+- Queue 是至少一次投递；不承诺精确一次、跨 PoP 强全局互斥或错过 Cron 槽位的可靠补偿。插件必须保证任务幂等。
+
+### 13.2 插件接口约束
+
+- 定时任务和请求态异步任务必须使用不同接口：`registerScheduledTask()`、`registerAsyncTask()`、`enqueueAsyncTask()`。
+- 任务必须先注册再执行；普通请求不能通过参数选择任意插件任务或绕过插件激活状态。
+- 每条消息使用版本化 `TaskEnvelope`，包含稳定 `jobId`、`taskKey`、`idempotencyKey`、来源和时间信息；投递侧、消费侧都要校验。
+- 插件 handler 必须处理重复投递，使用业务唯一键、provider 幂等键或天然幂等操作；核心不隐式引入 D1 去重表。
+- 插件可以返回 `success`、`retry` 或 `discard`；异常和超时默认可重试，但受 Queue `max_retries` 和 DLQ 约束。
+- payload 必须可 JSON 序列化并受大小、字段和 schema 校验；不得携带密码、Cookie、CSRF token、访问令牌或完整请求头。
+- 长耗时、多步骤、需要持久化恢复的流程不应塞入 Queue 单条消息；按设计规范升级为拆分任务、Durable Object 或 Workflow。
+
+### 13.3 时间、生命周期与可靠性
+
+- Cron 的 `controller.scheduledTime` 是 UTC instant；本地时间必须从现有 `options.timezone` 的 IANA 标识运行时计算，不能使用固定 offset。
+- 默认定时 `taskKey` 按 `{pluginId}:{taskId}:{localSlot}` 生成；夏令时回拨默认合并重复本地槽位，需要区分真实 instant 时由任务提供自定义 key。
+- 插件 loader 在构建时登记，任务注册在激活插件 `init()` 中完成；HTTP、scheduled、queue 冷启动都必须先加载 registry，再以当前激活插件集合为准。
+- 插件停用后，即使当前 isolate 仍保留旧注册表条目，queue dispatch 也必须跳过其副作用。
+- 任务专用模块放在 `src/lib/tasks/`，不要继续膨胀 `src/lib/plugin.ts`；公共类型通过 `src/lib/plugin-sdk.ts` 导出。
+
+### 13.4 协作与验证约定
+
+- 任务系统属于架构级变更；实施前先更新设计规范和实施计划，文档评审通过后再写代码。
+- 可并行的工作必须按不重叠文件集合拆分；`plugin.ts`、`plugin-sdk.ts`、`wrangler.toml`、`src/worker.ts` 等共享边界由主协作者或单一子任务负责集成，避免并发冲突。
+- 新增模块必须配套单元/集成测试；至少覆盖 Cron 解析与时区、envelope 校验、ack/retry/discard、插件停用、任务级并发和 Worker 冷启动注册表。
+- 修改完成后运行 `pnpm run test`、`pnpm run typecheck`，涉及构建入口或 Wrangler 配置时再运行 `pnpm run build`，并执行 `git diff --check`。

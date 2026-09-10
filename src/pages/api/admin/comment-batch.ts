@@ -25,7 +25,7 @@ async function handler({ request, locals, url }: { request: Request; locals: App
   // Special action: delete all spam
   if (action === 'delete-spam') {
     await deleteSpamCommentsForUser(auth.db, auth.user);
-    await purgeCommentModerationCache(auth.db, auth.options);
+    await purgeCommentModerationCache(auth.db);
 
     const referer = safeAdminRedirectUrl(
       request.headers.get('referer'),
@@ -66,7 +66,7 @@ async function handler({ request, locals, url }: { request: Request; locals: App
   await applyCommentActions(pluginCtx, auth.db, comments, normalizedAction, auth.options);
 
   // Comments affect post pages and feeds
-  await purgeCommentModerationCache(auth.db, auth.options);
+  await purgeCommentModerationCache(auth.db);
 
   const referer = safeAdminRedirectUrl(
     request.headers.get('referer'),

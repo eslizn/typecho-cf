@@ -1,12 +1,12 @@
 ---
 import Admin from '@/layouts/Admin.astro';
 import { createContext, requirePermission } from '@/lib/context';
-import { hasPermission } from '@/lib/auth';
 import { buildGravatarUrl } from '@/lib/gravatar';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { schema } from '@/db';
 import { buildPermalink, formatDate } from '@/lib/content';
 import { parsePageNumber, parsePositiveInteger, withQueryParams } from '@/lib/input';
+import { commentModerationScope } from '@/lib/comment-moderation';
 
 const ctx = await createContext(Astro.locals, Astro.request);
 // Comment moderation page exposes commenter mail + IP — gate behind
@@ -16,8 +16,6 @@ const authCheck = requirePermission(ctx, 'contributor');
 if (authCheck) return authCheck;
 
 const { db, options, urls, user, csrfToken } = ctx;
-const isAdmin = hasPermission(user!.group || 'visitor', 'administrator');
-
 const avatarRating = options.commentsAvatarRating || 'G';
 
 const page = parsePageNumber(Astro.url.searchParams.get('page'));
@@ -27,18 +25,14 @@ const cid = Astro.url.searchParams.get('cid') || '';
 const cidFilter = parsePositiveInteger(cid);
 const pageSize = 20;
 
-const conditions: any[] = [eq(schema.comments.status, status)];
-if (!isAdmin) {
-  conditions.push(eq(schema.contents.authorId, user!.uid));
-}
-if (keywords) {
-  conditions.push(sql`${schema.comments.text} LIKE ${'%' + keywords + '%'}`);
-}
-if (cidFilter) {
-  conditions.push(eq(schema.comments.cid, cidFilter));
-}
-
-const where = and(...conditions);
+// Moderation scope lives in one place: administrators see every comment,
+// everyone else only comments on content they authored (contents.authorId).
+//
+// Note: trackback/pingback rows live in the same table and are intentionally
+// NOT filtered out here (AGENTS.md §4.1) — they share the comment status column
+// and therefore this queue, exactly like PHP Typecho. `commentsRequireModeration`
+// decides whether an accepted (backlink-verified) pingback starts as `waiting`.
+const where = commentModerationScope(user!, { status, keywords, cid: cidFilter });
 
 const [countResult, commentsList, statusCounts] = await db.batch([
   db.select({ count: sql<number>`count(*)` }).from(schema.comments)
@@ -78,7 +72,7 @@ const [countResult, commentsList, statusCounts] = await db.batch([
   db.select({ status: schema.comments.status, count: sql<number>`count(*)` })
     .from(schema.comments)
     .leftJoin(schema.contents, eq(schema.comments.cid, schema.contents.cid))
-    .where(and(...(!isAdmin ? [eq(schema.contents.authorId, user!.uid)] : [])))
+    .where(commentModerationScope(user!))
     .groupBy(schema.comments.status),
 ]);
 const totalComments = Number(countResult?.[0]?.count ?? 0);
@@ -159,14 +153,14 @@ for (const [coid, avatar] of avatarEntries) avatarMap.set(coid, avatar);
       <div class="typecho-table-wrap">
         <table class="typecho-list-table">
           <colgroup>
-            <col width="3%" class="kit-hidden-mb" />
+            <col class="typecho-select-cell" />
             <col width="6%" class="kit-hidden-mb" />
             <col width="20%" />
             <col width="71%" />
           </colgroup>
           <thead>
             <tr>
-              <th class="kit-hidden-mb"> </th>
+              <th class="typecho-select-cell"></th>
               <th>{ctx.i18n.t('admin.field.author', {}, 'Author')}</th>
               <th class="kit-hidden-mb"> </th>
               <th>{ctx.i18n.t('admin.field.content', {}, 'Content')}</th>
@@ -180,7 +174,7 @@ for (const [coid, avatar] of avatarEntries) avatarMap.set(coid, avatar);
             ) : (
               commentsList.map((comment) => (
                 <tr id={`comment-${comment.coid}`}>
-                  <td valign="top" class="kit-hidden-mb">
+                  <td valign="top" class="typecho-select-cell">
                     <input type="checkbox" value={String(comment.coid)} name="coid[]" />
                   </td>
                   <td valign="top" class="kit-hidden-mb">

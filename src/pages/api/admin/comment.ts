@@ -65,7 +65,7 @@ export const POST: APIRoute = async ({ request, url }) => {
   await doHook(auth.pluginCtx, 'comment:action', existing, {
     action: 'edit', oldStatus, newStatus: oldStatus, options: auth.options,
   });
-  await purgeCommentModerationCache(auth.db, auth.options, existing.cid);
+  await purgeCommentModerationCache(auth.db);
   return new Response(null, {
     status: 302,
     headers: { Location: safeAdminRedirectUrl(request.headers.get('referer'), auth.options.siteUrl || '', '/admin/manage-comments') },

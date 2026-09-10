@@ -220,6 +220,9 @@ export const POST: APIRoute = async ({ request }) => {
       markdown: '1',
       commentsRequireMail: '1',
       commentsRequireURL: '0',
+      // Left off by default: whether comments need review is the operator's
+      // call (admin → 讨论设置 →「评论需审核」), and inbound feedback is only
+      // accepted when its source backlink verifies.
       commentsRequireModeration: '0',
       commentsWhitelist: '0',
       commentsMaxNestingLevels: '5',

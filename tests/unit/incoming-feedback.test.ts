@@ -8,10 +8,14 @@ const { filter, hook } = vi.hoisted(() => ({
   filter: vi.fn(async (_ctx: any, _point: string, value: any) => value),
   hook: vi.fn(async () => {}),
 }));
+const { verifySource } = vi.hoisted(() => ({ verifySource: vi.fn(async () => true) }));
 vi.mock('@/lib/plugin', async () => {
   const actual = await vi.importActual<typeof import('@/lib/plugin')>('@/lib/plugin');
   return { ...actual, applyFilter: filter, doHook: hook };
 });
+// Outbound verification is mocked: these cases test the status decision, and
+// the fetch path itself is covered by feedback-verification tests.
+vi.mock('@/lib/feedback-verification', () => ({ verifyFeedbackSource: verifySource }));
 
 let db: TestDatabase;
 const ctx = { activatedPlugins: new Set<string>() } as any;
@@ -27,6 +31,8 @@ describe('incoming trackback and pingback', () => {
     db = await createTestDb();
     filter.mockImplementation(async (_ctx: any, _point: string, value: any) => value);
     hook.mockClear();
+    verifySource.mockReset();
+    verifySource.mockResolvedValue(true);
   });
 
   it('stores an approved trackback and increments commentsNum', async () => {
@@ -44,6 +50,27 @@ describe('incoming trackback and pingback', () => {
     expect(typeof result).toBe('number');
     expect((await db.select().from(schema.comments))[0].status).toBe('waiting');
     expect((await db.query.contents.findFirst())?.commentsNum).toBe(0);
+  });
+
+  it('rejects feedback whose source cannot be verified without writing a row', async () => {
+    const post = await seed();
+    verifySource.mockResolvedValueOnce(false);
+
+    const result = await saveIncomingFeedback(db as any, ctx, options, { cid: post.cid, author: 'Spammer', url: 'https://unverified.test/x', text: 'Buy things', type: 'trackback', ip: '1.1.1.1', agent: 'test' });
+
+    expect(result).toBeInstanceOf(Response);
+    expect((result as Response).status).toBe(403);
+    expect(await db.select().from(schema.comments)).toHaveLength(0);
+    expect((await db.query.contents.findFirst())?.commentsNum).toBe(0);
+  });
+
+  it('keeps verified feedback in the moderation queue when the switch is on', async () => {
+    const post = await seed();
+    verifySource.mockResolvedValueOnce(true);
+
+    await saveIncomingFeedback(db as any, ctx, { ...options, commentsRequireModeration: true }, { cid: post.cid, author: 'Blog', url: 'https://source.test/b', text: 'Ping', type: 'pingback', ip: '1.1.1.1', agent: 'test' });
+
+    expect((await db.select().from(schema.comments))[0].status).toBe('waiting');
   });
 
   it.each([

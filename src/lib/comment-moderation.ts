@@ -1,13 +1,44 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { schema, type Database } from '@/db';
 import { hasPermission } from '@/lib/auth';
-import { bumpCacheVersion, purgeContentCache } from '@/lib/cache';
+import { invalidateSiteCache } from '@/lib/cache';
 import type { SiteOptions } from '@/lib/options';
 import { doHook, type HookContext } from '@/lib/plugin';
 import type { I18n } from '@/lib/i18n';
 
 export const COMMENT_ACTIONS = ['approve', 'approved', 'waiting', 'spam', 'delete'] as const;
 export type CommentAction = typeof COMMENT_ACTIONS[number];
+
+export interface CommentModerationFilters {
+  /** Comment status to list; omit to scope by author only (status totals). */
+  status?: string;
+  keywords?: string;
+  cid?: number | null;
+}
+
+/**
+ * WHERE scope for the admin comment list and its per-status totals.
+ *
+ * Moderation rights follow `contents.authorId` — the *current* author of the
+ * content — and never `comments.ownerId`, which is only a historical snapshot
+ * (AGENTS.md §4.1). Administrators see everything; everyone else sees only
+ * comments on content they authored.
+ */
+export function commentModerationScope(
+  viewer: { uid: number; group?: string | null },
+  filters: CommentModerationFilters = {},
+) {
+  const conditions = [];
+  if (filters.status) conditions.push(eq(schema.comments.status, filters.status));
+  if (!hasPermission(viewer.group || 'visitor', 'administrator')) {
+    conditions.push(eq(schema.contents.authorId, viewer.uid));
+  }
+  if (filters.keywords) {
+    conditions.push(sql`${schema.comments.text} LIKE ${`%${filters.keywords}%`}`);
+  }
+  if (filters.cid) conditions.push(eq(schema.comments.cid, filters.cid));
+  return and(...conditions);
+}
 
 type CommentRow = typeof schema.comments.$inferSelect;
 type UserRow = typeof schema.users.$inferSelect;
@@ -219,11 +250,8 @@ export async function deleteSpamCommentsForUser(
 
 export async function purgeCommentModerationCache(
   db: Database,
-  options: SiteOptions,
-  cid?: number | null,
 ): Promise<void> {
-  await bumpCacheVersion(db);
-  await purgeContentCache(options.siteUrl || '', cid || undefined);
+  await invalidateSiteCache(db);
 }
 
 async function incrementCommentCount(db: Database, cid: number): Promise<void> {

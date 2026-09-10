@@ -115,7 +115,7 @@ function formatBytes(bytes: number): string {
       <div class="typecho-table-wrap">
         <table class="typecho-list-table">
           <colgroup>
-            <col width="20" class="kit-hidden-mb" />
+            <col class="typecho-select-cell" />
             <col width="45%" />
             <col width="" class="kit-hidden-mb" />
             <col width="18%" class="kit-hidden-mb" />
@@ -123,7 +123,7 @@ function formatBytes(bytes: number): string {
           </colgroup>
           <thead>
             <tr>
-              <th class="kit-hidden-mb"></th>
+              <th class="typecho-select-cell"></th>
               <th>{ctx.i18n.t('admin.field.fileName', {}, 'File name')}</th>
               <th class="kit-hidden-mb">{ctx.i18n.t('admin.field.owner', {}, 'Owner')}</th>
               <th class="kit-hidden-mb">{ctx.i18n.t('admin.field.contentOwner', {}, 'Attached to')}</th>
@@ -145,7 +145,7 @@ function formatBytes(bytes: number): string {
                 const fileUrl = resolveFileUrl(meta);
                 return (
                   <tr>
-                    <td class="kit-hidden-mb"><input type="checkbox" value={String(att.cid)} name="cid[]" /></td>
+                    <td class="typecho-select-cell"><input type="checkbox" value={String(att.cid)} name="cid[]" /></td>
                     <td>
                       <a href={`/admin/media?cid=${att.cid}`}>{att.title || ctx.i18n.t('admin.form.noName', {}, 'Unnamed')}</a>
                       <a href={`/admin/media?cid=${att.cid}`} title={`${ctx.i18n.t('admin.action.edit', {}, 'Edit')} ${att.title || ctx.i18n.t('admin.form.noName', {}, 'Unnamed')}`}><i class="i-edit"></i></a>

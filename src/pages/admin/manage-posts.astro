@@ -178,7 +178,7 @@ const titleActionHtml = new Map<number, string>(
       <div class="typecho-table-wrap">
         <table class="typecho-list-table">
           <colgroup>
-            <col width="20" class="kit-hidden-mb" />
+            <col class="typecho-select-cell" />
             <col width="6%" class="kit-hidden-mb" />
             <col width="45%" />
             <col width="" class="kit-hidden-mb" />
@@ -187,7 +187,7 @@ const titleActionHtml = new Map<number, string>(
           </colgroup>
           <thead>
             <tr>
-              <th class="kit-hidden-mb"></th>
+              <th class="typecho-select-cell"></th>
               <th class="kit-hidden-mb"></th>
               <th>{ctx.i18n.t('admin.field.title', {}, 'Title')}</th>
               <th class="kit-hidden-mb">{ctx.i18n.t('admin.field.author', {}, 'Author')}</th>
@@ -207,7 +207,7 @@ const titleActionHtml = new Map<number, string>(
                 const isDraft = post.type === 'post_draft';
                 return (
                   <tr>
-                    <td class="kit-hidden-mb"><input type="checkbox" value={String(post.cid)} name="cid[]" /></td>
+                    <td class="typecho-select-cell"><input type="checkbox" value={String(post.cid)} name="cid[]" /></td>
                     <td class="kit-hidden-mb">
                       <a href={`/admin/manage-comments?cid=${post.cid}`}
                         class="balloon-button size-small"

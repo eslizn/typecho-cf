@@ -177,6 +177,7 @@
   "admin.status.unarchived": "Unarchived",
   "admin.status.image": "Image",
   "admin.status.file": "File",
+  "admin.user.selfSelect": "You cannot select your own account",
   "admin.status.available": "Available",
   "admin.status.custom": "Custom",
   "admin.status.none": "None",

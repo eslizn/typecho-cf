@@ -82,7 +82,7 @@ select { border: 1px solid #CCC; height: 28px; }
 
 .primary:disabled { background-color: #508cab; cursor: default; }
 
-.btn-group { display: inline-block; }
+.btn-group { display: inline-block; vertical-align: middle; }
 
 .btn-warn { border: none; background-color: #B94A48; cursor: pointer; border-radius: 2px; color: #FFF; }
 
@@ -318,9 +318,24 @@ select { border: 1px solid #CCC; height: 28px; }
 /** 列表页选项 */
 .typecho-list-operate { margin: 1em 0; }
 
+/* 操作条：勾选框、下拉菜单与按钮统一垂直居中，避免"选中项"和"新增"按钮错位 */
+.typecho-list-operate .operate { display: flex; align-items: center; gap: 8px; }
+.typecho-list-operate .operate > label { display: inline-flex; align-items: center; margin: 0; }
+.typecho-list-operate .operate > .btn-group { display: inline-flex; }
+.typecho-list-operate .operate .btn { margin: 0; }
+
+/* 勾选列：固定宽度、去掉左右内边距，保证复选框在固定表格布局与窄屏下都可见可点 */
+.typecho-list-table col.typecho-select-cell { width: 34px; }
+.typecho-list-table th.typecho-select-cell,
+.typecho-list-table td.typecho-select-cell { width: 34px; padding-left: 0; padding-right: 0; text-align: center; }
+.typecho-list-table td.typecho-select-cell input[type="checkbox"] { margin: 0; }
+/* 兜底：任何重置样式都不应把选择框藏起来 */
+.typecho-list-table th.typecho-select-cell input[type="checkbox"],
+.typecho-list-table td.typecho-select-cell input[type="checkbox"] { display: inline-block; visibility: visible; }
+
 .typecho-list-operate input, .typecho-list-operate button, .typecho-list-operate select { vertical-align: bottom; }
 
-.typecho-list-operate input[type="checkbox"] { vertical-align: text-top; }
+.typecho-list-operate input[type="checkbox"] { vertical-align: middle; }
 
 @media (min-width: 576px) { .typecho-list-operate .operate { float: left; }
   .typecho-list-operate .search { float: right; } }

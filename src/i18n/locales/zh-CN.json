@@ -177,6 +177,7 @@
   "admin.status.unarchived": "未归档",
   "admin.status.image": "图片",
   "admin.status.file": "文件",
+  "admin.user.selfSelect": "不能选择自己的账号",
   "admin.status.available": "可用",
   "admin.status.custom": "自定义",
   "admin.status.none": "无",

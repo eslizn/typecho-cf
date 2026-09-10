@@ -241,8 +241,13 @@ const adminClientMessageJson = safeJsonForScript({
   <script is:inline src="/vendor/jquery.js"></script>
   <script is:inline src="/vendor/jquery-ui.js"></script>
   <script is:inline src="/vendor/typecho.js"></script>
+  <script type="application/json" id="admin-client-messages" set:html={adminClientMessageJson}></script>
   <script is:inline>
-    const adminClientMessages = {adminClientMessageJson};
+    // Astro does not interpolate expressions inside `is:inline` scripts, so the
+    // bundle is read from the JSON script tag above. (Emitting `{...}` here made
+    // the browser throw `adminClientMessageJson is not defined`, which killed
+    // every handler in this file: nav, notices, select-all, dropdown actions.)
+    const adminClientMessages = JSON.parse(document.getElementById('admin-client-messages')?.textContent || '{}');
     (function () {
       $(document).ready(function() {
         // 导航菜单
@@ -334,10 +339,22 @@ const adminClientMessageJson = safeJsonForScript({
           });
         });
 
-        // 表格全选 - 在 .typecho-list 范围内查找所有 checkbox
+        // 表格全选 - 在 .typecho-list 范围内查找所有 checkbox（同步整行高亮）
         $('.typecho-table-select-all').click(function () {
           var scope = $(this).closest('.typecho-list, form.operate-form');
-          $('input[type=checkbox]', scope).prop('checked', this.checked);
+          var boxes = $('input[type=checkbox]', scope).not('.typecho-table-select-all').not(':disabled');
+          boxes.prop('checked', this.checked);
+          boxes.closest('tr').toggleClass('checked', this.checked);
+        });
+
+        // 点击整行即可勾选/取消：勾选列在窄屏被隐藏时，批量选择依然可用
+        $('.typecho-list-table tbody').on('click', 'tr', function (e) {
+          var target = $(e.target);
+          if (target.closest('a, button, input, select, textarea, label').length) return;
+          var box = $(this).find('input[type=checkbox][name]').not('.typecho-table-select-all').first();
+          if (!box.length) return;
+          box.prop('checked', !box.prop('checked'));
+          $(this).toggleClass('checked', box.prop('checked'));
         });
 
         // 下拉菜单显示/隐藏
@@ -365,8 +382,9 @@ const adminClientMessageJson = safeJsonForScript({
           }
         });
 
-        // 点击其他区域关闭下拉菜单
-        $(document).click(function () {
+        // 点击其他区域关闭下拉菜单（点击下拉容器内部不关闭，避免刚打开就被收起）
+        $(document).click(function (e) {
+          if ($(e.target).closest('.btn-drop').length) return;
           $('.dropdown-menu').hide().prev('.dropdown-toggle').attr('aria-expanded', 'false');
         }).on('keydown', '.dropdown-menu a', function (e) {
           if (e.key === 'Escape') {

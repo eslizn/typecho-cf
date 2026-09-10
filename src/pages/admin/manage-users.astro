@@ -82,7 +82,7 @@ const groupNames: Record<string, string> = {
       <div class="typecho-table-wrap">
         <table class="typecho-list-table">
           <colgroup>
-            <col width="20" class="kit-hidden-mb" />
+            <col class="typecho-select-cell" />
             <col width="30%" />
             <col width="" class="kit-hidden-mb" />
             <col width="20%" class="kit-hidden-mb" />
@@ -91,7 +91,7 @@ const groupNames: Record<string, string> = {
           </colgroup>
           <thead>
             <tr>
-              <th class="kit-hidden-mb"></th>
+              <th class="typecho-select-cell"></th>
               <th>{ctx.i18n.t('admin.field.username', {}, 'Username')}</th>
               <th class="kit-hidden-mb">{ctx.i18n.t('admin.field.nickname', {}, 'Nickname')}</th>
               <th class="kit-hidden-mb">{ctx.i18n.t('admin.field.email', {}, 'Email')}</th>
@@ -107,8 +107,15 @@ const groupNames: Record<string, string> = {
             ) : (
               users.map((u) => (
                 <tr>
-                  <td class="kit-hidden-mb">
-                    {u.uid !== user!.uid && (
+                  <td class="typecho-select-cell">
+                    {u.uid === user!.uid ? (
+                      <input
+                        type="checkbox"
+                        disabled
+                        aria-label={ctx.i18n.t('admin.user.selfSelect', {}, 'You cannot select your own account')}
+                        title={ctx.i18n.t('admin.user.selfSelect', {}, 'You cannot select your own account')}
+                      />
+                    ) : (
                       <input type="checkbox" value={String(u.uid)} name="uid[]" />
                     )}
                   </td>

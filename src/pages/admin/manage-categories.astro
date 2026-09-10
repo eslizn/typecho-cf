@@ -51,7 +51,7 @@ const isDefault = (mid: number) => options.defaultCategory === mid;
       <div class="typecho-table-wrap">
         <table class="typecho-list-table">
           <colgroup>
-            <col width="20" class="kit-hidden-mb" />
+            <col class="typecho-select-cell" />
             <col width="" />
             <col width="25%" class="kit-hidden-mb" />
             <col width="15%" />
@@ -59,7 +59,7 @@ const isDefault = (mid: number) => options.defaultCategory === mid;
           </colgroup>
           <thead>
             <tr class="nodrag">
-              <th class="kit-hidden-mb"></th>
+              <th class="typecho-select-cell"></th>
               <th>{ctx.i18n.t('admin.field.name', {}, 'Name')}</th>
               <th class="kit-hidden-mb">{ctx.i18n.t('admin.field.slug', {}, 'Slug')}</th>
               <th></th>
@@ -74,7 +74,7 @@ const isDefault = (mid: number) => options.defaultCategory === mid;
             ) : (
               categories.map((cat) => (
                 <tr id={`mid-${cat.mid}`}>
-                  <td class="kit-hidden-mb"><input type="checkbox" value={String(cat.mid)} name="mid[]" /></td>
+                  <td class="typecho-select-cell"><input type="checkbox" value={String(cat.mid)} name="mid[]" /></td>
                   <td>
                     <a href={`/admin/manage-categories?mid=${cat.mid}`}>{cat.name}</a>
                     <a href={buildCategoryLink(cat.slug, urls.siteUrl, options.categoryPattern as string | undefined)} title={`${ctx.i18n.t('admin.action.browse', {}, 'Browse')} ${cat.name}`}><i class="i-exlink"></i></a>

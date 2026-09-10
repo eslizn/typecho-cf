@@ -23,6 +23,28 @@ function optionsCacheKey(version: string | number): Request {
   return new Request(`${INTERNAL_ORIGIN}/__options?v=${encodeURIComponent(String(version))}`);
 }
 
+/**
+ * Query parameters that must not fragment the public cache key: campaign and
+ * click-id noise would otherwise create an unbounded number of Cache API
+ * entries for the same page.
+ */
+const CACHE_KEY_IGNORED_PARAMS = [
+  'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
+  'gclid', 'fbclid', 'msclkid', 'yclid', 'igshid', 'spm',
+];
+
+/**
+ * Canonicalise a request URL for use as a public cache key: drop campaign
+ * noise and sort the remaining parameters so `?a=1&b=2` and `?b=2&a=1` share
+ * a single entry.
+ */
+export function normalizeCacheKeyUrl(requestUrl: string): URL {
+  const url = new URL(requestUrl);
+  for (const param of CACHE_KEY_IGNORED_PARAMS) url.searchParams.delete(param);
+  url.searchParams.sort();
+  return url;
+}
+
 // In-memory cache-version memo (per isolate). Cross-PoP invalidation of
 // the options blob is bounded by CACHE_VERSION_MEMO_TTL_MS: a bump made
 // on PoP-A takes at most this long to be seen on PoP-B. In exchange we
@@ -97,37 +119,6 @@ export function isCacheablePublicPath(
   return false;
 }
 
-/**
- * Purge a list of public URLs from the edge cache.
- * Safe to call with empty array — returns immediately.
- * Relative URLs are skipped gracefully (no-op).
- */
-export async function purgeCache(urls: string[]): Promise<void> {
-  if (urls.length === 0) return;
-  const cache = caches.default;
-  await Promise.all(urls.map(async (url) => {
-    try {
-      // Only try to purge absolute URLs (skip relative paths)
-      if (url.startsWith('http://') || url.startsWith('https://')) {
-        await cache.delete(new Request(url));
-      }
-    } catch {
-      // Silently ignore errors (e.g., invalid URLs)
-    }
-  }));
-}
-
-/**
- * Purge the cached site options. Kept for legacy call sites; the version-
- * stamped cache key makes explicit purge redundant, but purging the
- * current-PoP entry costs nothing extra.
- */
-export async function purgeOptionsCache(): Promise<void> {
-  // No longer strictly necessary — the version stamp on the cache key
-  // means bumpCacheVersion() makes every PoP miss on the next read. Kept
-  // as a defensive no-op so old call sites still compile.
-}
-
 export async function bumpCacheVersion(db: Database): Promise<void> {
   const [updated] = await db.insert(schema.options)
     .values({ name: 'cacheVersion', user: 0, value: '1' })
@@ -182,70 +173,14 @@ export async function setCachedOptions(data: Record<string, unknown>, version: s
 }
 
 /**
- * Build a list of URLs that should be purged after a content write operation.
- * Covers index, feed, and the specific post page.
+ * Invalidate every cached public artifact (pages, feeds, options blob).
+ *
+ * Public cache keys embed `cacheVersion`, so advancing that stamp is the only
+ * invalidation primitive this project needs — it works across PoPs without a
+ * purge API. The previous URL-by-URL `purgeCache` / `purgeContentCache` /
+ * `purgeSiteCache` helpers had degraded into no-ops and were removed so that
+ * write paths have exactly one call to make.
  */
-export interface ContentPurgeUrlsOptions {
-  contentUrl?: string | null;
-  categoryUrls?: Array<string | null | undefined>;
-  tagUrls?: Array<string | null | undefined>;
-  authorUrl?: string | null;
-}
-
-export function buildContentPurgeUrls(
-  siteUrl: string,
-  cid?: number,
-  related: ContentPurgeUrlsOptions = {},
-): string[] {
-  const base = siteUrl.replace(/\/$/, '');
-  
-  // Skip if siteUrl is empty or not an absolute URL (test environment)
-  if (!base || !base.startsWith('http')) {
-    return [];
-  }
-  
-  const urls = [
-    base + '/',
-    base + '/feed',
-    base + '/feed/atom',
-    base + '/feed/rss',
-    base + '/feed/comments',
-    base + '/feed/rss/comments',
-    base + '/feed/atom/comments',
-  ];
-  if (cid) {
-    urls.push(base + `/archives/${cid}/`);
-  }
-  if (related.contentUrl) urls.push(related.contentUrl);
-  if (related.authorUrl) urls.push(related.authorUrl);
-  for (const url of related.categoryUrls || []) {
-    if (url) urls.push(url);
-  }
-  for (const url of related.tagUrls || []) {
-    if (url) urls.push(url);
-  }
-  return [...new Set(urls)];
-}
-
-/**
- * Purge content-related cache entries (index + feeds + specific post).
- * Does NOT purge the options cache — use purgeSiteCache for settings changes.
- */
-export async function purgeContentCache(
-  _siteUrl: string,
-  _cid?: number,
-  _related: ContentPurgeUrlsOptions = {},
-): Promise<void> {
-  // Public page keys include cacheVersion. Every caller bumps that version
-  // before reaching this compatibility function, so deleting raw URLs cannot
-  // hit the stored keys and only adds Cache API work to the write path.
-}
-
-/**
- * Purge site-wide cache: index + all feeds + options.
- * Used when site settings, theme, or plugin change.
- */
-export async function purgeSiteCache(_siteUrl: string): Promise<void> {
-  // Kept for plugin/source compatibility. The preceding cacheVersion bump
-  // invalidates page and options keys across every PoP.
+export async function invalidateSiteCache(db: Database): Promise<void> {
+  await bumpCacheVersion(db);
 }

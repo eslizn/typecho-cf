@@ -82,11 +82,6 @@ if (Astro.request.method === 'POST') {
         ctx.i18n = runtime.i18n;
         ctx.resolvedLocale = runtime.resolvedLocale;
         ctx.autoLocale = runtime.autoLocale;
-
-        // Bump cache version so public pages and other isolates see plugin changes.
-        const { bumpCacheVersion, purgeSiteCache } = await import('@/lib/cache');
-        await bumpCacheVersion(db);
-        await purgeSiteCache(options.siteUrl || '');
       }
     }
   } catch (e) {

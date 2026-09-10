@@ -1,7 +1,6 @@
 import type { APIRoute } from 'astro';
 import { setOptionsBatch } from '@/lib/options';
 import { isAdminActionResponse, requireAdminAction, safeAdminRedirectUrl } from '@/lib/admin-auth';
-import { purgeSiteCache } from '@/lib/cache';
 import { REQUEST_BODY_LIMITS } from '@/lib/constants';
 import { InputError, inputErrorMessage, readBoundedFormData } from '@/lib/input';
 import { parseSiteOptionsInput, SiteOptionsInputError } from '@/lib/options-input';
@@ -46,7 +45,6 @@ export const POST: APIRoute = async ({ request, locals }) => {
   }
 
   await setOptionsBatch(auth.db, entries);
-  await purgeSiteCache(auth.options.siteUrl || '');
 
   return new Response(null, {
     status: 302,

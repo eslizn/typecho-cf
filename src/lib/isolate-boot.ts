@@ -96,6 +96,9 @@ export async function ensureDatabaseReady(
     if (schemaVersion === RUNTIME_SCHEMA_VERSION) {
       state.passwordResetSchemaPassed = true;
       state.indexEnsurePassed = true;
+      // The marker is only persisted once indexes *and* FTS were ready, so a
+      // matching version is proof that MATCH is safe on this isolate.
+      setFtsAvailable(true);
       state.databaseReadyPassed = true;
       return;
     }
@@ -277,23 +280,6 @@ export async function ensurePasswordResetSchema(d1: D1Database): Promise<void> {
   } finally {
     if (state.passwordResetSchemaPending === pending) state.passwordResetSchemaPending = undefined;
   }
-}
-
-/**
- * Backfills any newly-added indexes exactly once per isolate.
- *
- * Off the request path via waitUntil if available; otherwise
- * fire-and-forget. CREATE INDEX IF NOT EXISTS is idempotent.
- */
-export function ensureIndexes(
-  d1: D1Database,
-  executionContext?: Pick<ExecutionContext, 'waitUntil'>,
-): void {
-  if (state.indexEnsurePassed) return;
-  const backfill = ensureIndexesReady(d1).catch(
-    err => console.warn('[isolate-boot] ensureIndexes failed:', err),
-  );
-  if (executionContext) executionContext.waitUntil(backfill);
 }
 
 async function ensureIndexesReady(d1: D1Database): Promise<boolean> {

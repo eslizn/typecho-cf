@@ -1,5 +1,4 @@
 import type { AdminActionContext } from '@/lib/admin-auth';
-import { purgeSiteCache } from '@/lib/cache';
 import { PLUGIN_CONFIG_TIMEOUT_MS } from '@/lib/constants';
 import { setOption, type SiteOptions } from '@/lib/options';
 import {
@@ -150,7 +149,6 @@ export async function savePluginConfiguration(
   const finalAllowed = allowlistSettings(fields, validatedInput, restored);
   const finalSettings = restoreSecrets(fields, finalAllowed, previous);
   await setOption(auth.db, `plugin:${pluginId}`, JSON.stringify(finalSettings));
-  await purgeSiteCache(auth.options.siteUrl || '');
 
   return {
     success: true,

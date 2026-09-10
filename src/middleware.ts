@@ -11,7 +11,7 @@ import {
 } from '@/lib/request-bootstrap';
 import { eq, and, inArray } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
-import { isCacheablePublicPath } from '@/lib/cache';
+import { isCacheablePublicPath, normalizeCacheKeyUrl } from '@/lib/cache';
 import { CONTENT_ROUTE_PATHS, isContentPathAllowed } from '@/lib/content-path';
 import type { I18nMessage } from '@/lib/i18n';
 import { i18nMessage, normalizeI18nMessage } from '@/lib/i18n';
@@ -427,7 +427,7 @@ function isReservedCorePath(path: string): boolean {
 }
 
 function withCacheVersion(requestUrl: string, cacheVersion?: number, bundleName?: string): string {
-  const url = new URL(requestUrl);
+  const url = normalizeCacheKeyUrl(requestUrl);
   url.searchParams.set('__typecho_cache', String(cacheVersion || 0));
   if (bundleName) url.searchParams.set('__typecho_i18n', bundleName);
   return url.toString();

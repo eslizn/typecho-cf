@@ -3,7 +3,7 @@ import { getDb, schema } from '@/db';
 import { loadOptions } from '@/lib/options';
 import { getAuthCookies, validateAuthToken, validateCommentToken, timeSafeEqual } from '@/lib/auth';
 import { setActivatedPlugins, parseActivatedPlugins, applyFilter, doHook, type HookContext } from '@/lib/plugin';
-import { bumpCacheVersion, purgeContentCache } from '@/lib/cache';
+import { invalidateSiteCache } from '@/lib/cache';
 import { getClientIp, getRequestCoreContextFromLocals, getRequestI18n } from '@/lib/context';
 import { buildPermalink } from '@/lib/content';
 import { normalizeHttpUrl } from '@/lib/url';
@@ -298,10 +298,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     options.permalinkPattern as string | undefined,
     options.pagePattern as string | undefined,
   );
-  await Promise.all([
-    bumpCacheVersion(db),
-    purgeContentCache(options.siteUrl || '', cid, { contentUrl }),
-  ]);
+  await invalidateSiteCache(db);
 
   // Redirect back to the post. Fall back to the configured permalink (not the
   // hard-coded default path, which may be deprecated); the referer is only

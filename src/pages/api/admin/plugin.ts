@@ -6,7 +6,6 @@ import type { APIRoute } from 'astro';
 import { setOption, deleteOption } from '@/lib/options';
 import { isAdminActionResponse, jsonAdminActionError, requireAdminAction } from '@/lib/admin-auth';
 import { pluginExists, parseActivatedPlugins, setActivatedPlugins, getAvailablePlugins, pluginHasConfig, getPluginConfigDefaults } from '@/lib/plugin';
-import { bumpCacheVersion, purgeSiteCache } from '@/lib/cache';
 import { jsonError, jsonOk } from '@/lib/http';
 import { REQUEST_BODY_LIMITS } from '@/lib/constants';
 import { readBoundedJson } from '@/lib/input';
@@ -64,9 +63,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
     await setActivatedPlugins(auth.pluginCtx, newIds);
     await setOption(auth.db, 'activatedPlugins', JSON.stringify(newIds));
 
-    // Plugin changes affect page rendering
-    await bumpCacheVersion(auth.db);
-    await purgeSiteCache(auth.options.siteUrl || '');
+    // setOption() advanced cacheVersion above: public pages and other PoPs
+    // pick up the new plugin set on their next request.
 
     return jsonOk({
       success: true,

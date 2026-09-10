@@ -20,8 +20,12 @@ export const FTS_MIN_CHARS = 3;
 
 /**
  * Per-isolate FTS availability, flipped by isolate-boot's ensureFtsReady().
- * 'unknown' (fresh isolate before boot, or tests) is treated as available
- * because boot always completes before routing in production.
+ *
+ * 'unknown' means the bootstrap has not confirmed the virtual table yet and is
+ * treated as *unavailable*. isolate-boot defers index/FTS creation to
+ * waitUntil() while upgrading a legacy database, so a request routed inside
+ * that window would otherwise run MATCH against a table that does not exist
+ * yet. Falling back to LIKE is correct in every 'unknown' case.
  */
 type FtsAvailability = 'unknown' | 'ready' | 'failed';
 let ftsAvailability: FtsAvailability = 'unknown';
@@ -35,9 +39,9 @@ export function resetFtsAvailability(): void {
   ftsAvailability = 'unknown';
 }
 
-/** True when FTS5 can be used for search; a failed setup falls back to LIKE. */
+/** True only when the FTS5 index is known to exist; otherwise search falls back to LIKE. */
 export function isFtsAvailable(): boolean {
-  return ftsAvailability !== 'failed';
+  return ftsAvailability === 'ready';
 }
 
 /** Raw SQL reference (backtick-quoted) for use in Drizzle join/where clauses. */

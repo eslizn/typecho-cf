@@ -35,11 +35,6 @@ if (Astro.request.method === 'POST') {
         // Update local options to reflect change
         (options as any).theme = themeId;
 
-        // Bump cache version so public pages and other isolates see theme changes.
-        const { bumpCacheVersion, purgeSiteCache } = await import('@/lib/cache');
-        await bumpCacheVersion(ctx.db);
-        await purgeSiteCache(options.siteUrl || '');
-
         message = ctx.i18n.t('admin.theme.activated', { id: themeId }, `Theme switched to "${themeId}"`);
         messageType = 'success';
       } else {

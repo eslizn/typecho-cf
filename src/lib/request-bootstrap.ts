@@ -158,9 +158,16 @@ export async function finalizeRequestResponse(
       headers,
     });
   }
-  if (finalization.cacheKey && finalized.status === 200) {
+  // Public HTML is cached for 5 minutes; a not-found response gets a short
+  // negative TTL so a bot walking random /{slug} URLs cannot force a D1 lookup
+  // (or a full page render) on every single request.
+  const cacheableStatus = finalized.status === 200 || finalized.status === 404;
+  if (finalization.cacheKey && cacheableStatus) {
+    const isNotFound = finalized.status === 404;
     const cacheHeaders = new Headers(finalized.headers);
-    if (!cacheHeaders.has('Cache-Control')) cacheHeaders.set('Cache-Control', 'public, s-maxage=300');
+    if (!cacheHeaders.has('Cache-Control')) {
+      cacheHeaders.set('Cache-Control', isNotFound ? 'public, s-maxage=60' : 'public, s-maxage=300');
+    }
     const vary = ['Cookie', 'Accept-Encoding'];
     if (finalization.autoLocale) vary.push('Accept-Language');
     cacheHeaders.set('Vary', mergeVary(cacheHeaders.get('Vary'), vary));

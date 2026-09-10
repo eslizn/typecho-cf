@@ -48,13 +48,15 @@ describe('fulltext FTS5 helpers', () => {
     expect(buildFtsMatchExpression('say "hi" now')).toBe('"say" """hi""" "now"');
   });
 
-  it('treats the pre-boot state as available and flips on setFtsAvailable', () => {
-    expect(isFtsAvailable()).toBe(true);
-    setFtsAvailable(false);
+  it('treats the pre-boot state as unavailable and flips on setFtsAvailable', () => {
+    // Before bootstrap confirms the virtual table exists, search must fall back
+    // to LIKE: isolate-boot defers FTS creation to waitUntil() on upgrades.
     expect(isFtsAvailable()).toBe(false);
     setFtsAvailable(true);
     expect(isFtsAvailable()).toBe(true);
+    setFtsAvailable(false);
+    expect(isFtsAvailable()).toBe(false);
     resetFtsAvailability();
-    expect(isFtsAvailable()).toBe(true);
+    expect(isFtsAvailable()).toBe(false);
   });
 });

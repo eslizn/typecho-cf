@@ -7,7 +7,6 @@
  * placeholders → store JSON under "theme:<themeId>" → purge site cache.
  */
 import type { AdminActionContext } from '@/lib/admin-auth';
-import { purgeSiteCache } from '@/lib/cache';
 import { setOption, type SiteOptions } from '@/lib/options';
 import {
   allowlistConfigSettings,
@@ -99,7 +98,6 @@ export async function saveThemeConfiguration(
   const finalSettings = restoreConfigSecrets(fields, sanitized, previous);
 
   await setOption(auth.db, `theme:${themeId}`, JSON.stringify(finalSettings));
-  await purgeSiteCache(auth.options.siteUrl || '');
 
   return {
     success: true,

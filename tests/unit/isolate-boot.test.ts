@@ -4,7 +4,6 @@ import {
   ensureDatabaseReady,
   ensureTablesReady,
   ensurePasswordResetSchema,
-  ensureIndexes,
   TablesMissingError,
 } from '@/lib/isolate-boot';
 import { isFtsAvailable, resetFtsAvailability } from '@/lib/fulltext';
@@ -321,54 +320,6 @@ describe('ensureDatabaseReady', () => {
 
     expect(markerRun).not.toHaveBeenCalled();
     expect(isFtsAvailable()).toBe(false);
-  });
-});
-
-describe('ensureIndexes', () => {
-  it('only runs once per isolate', async () => {
-    const run = vi.fn().mockResolvedValue({});
-    const d1 = { prepare: vi.fn().mockReturnValue({ run }) } as unknown as D1Database;
-    ensureIndexes(d1);
-    ensureIndexes(d1);
-    await vi.waitFor(() => expect(run).toHaveBeenCalled());
-    const calls = run.mock.calls.length;
-    await Promise.resolve();
-    expect(run).toHaveBeenCalledTimes(calls);
-  });
-
-  it('uses waitUntil when available', () => {
-    let waited: Promise<unknown> | undefined;
-    const d1 = {
-      prepare: vi.fn().mockReturnValue({ run: vi.fn().mockResolvedValue({}) }),
-    } as unknown as D1Database;
-    const executionContext = {
-      waitUntil: (p: Promise<unknown>) => { waited = p; },
-    };
-
-    ensureIndexes(d1, executionContext);
-    expect(waited).toBeDefined();
-  });
-
-  it('preserves the ExecutionContext receiver when scheduling index backfill', () => {
-    const d1 = {
-      prepare: vi.fn().mockReturnValue({ run: vi.fn().mockResolvedValue({}) }),
-    } as unknown as D1Database;
-    const executionContext = {
-      waitUntil(this: unknown, _promise: Promise<unknown>) {
-        if (this !== executionContext) {
-          throw new TypeError('Illegal invocation: incorrect this reference');
-        }
-      },
-    };
-
-    expect(() => ensureIndexes(d1, executionContext)).not.toThrow();
-  });
-
-  it('does not crash when index creation fails', () => {
-    const d1 = {
-      prepare: vi.fn().mockReturnValue({ run: vi.fn().mockRejectedValue(new Error('D1 down')) }),
-    } as unknown as D1Database;
-    expect(() => ensureIndexes(d1)).not.toThrow();
   });
 });
 

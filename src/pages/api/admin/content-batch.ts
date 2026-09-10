@@ -3,7 +3,7 @@ import { schema } from '@/db';
 import { hasPermission } from '@/lib/auth';
 import { isAdminActionResponse, requireAdminAction, safeAdminRedirectUrl } from '@/lib/admin-auth';
 import { doHook } from '@/lib/plugin';
-import { bumpCacheVersion, purgeContentCache } from '@/lib/cache';
+import { invalidateSiteCache } from '@/lib/cache';
 import { readAdminFormOrError } from '@/lib/input';
 import { eq, sql } from 'drizzle-orm';
 import { i18nMessage } from '@/lib/i18n';
@@ -126,8 +126,7 @@ async function handler({ request, locals, url }: { request: Request; locals: App
     }
   }
 
-  await bumpCacheVersion(auth.db);
-  await purgeContentCache(auth.options.siteUrl || '');
+  await invalidateSiteCache(auth.db);
 
   const referer = safeAdminRedirectUrl(
     request.headers.get('referer'),

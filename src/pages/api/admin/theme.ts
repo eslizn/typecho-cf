@@ -6,7 +6,6 @@ import type { APIRoute } from 'astro';
 import { setOption } from '@/lib/options';
 import { isAdminActionResponse, jsonAdminActionError, requireAdminAction } from '@/lib/admin-auth';
 import { themeExists } from '@/lib/theme';
-import { bumpCacheVersion, purgeSiteCache } from '@/lib/cache';
 import { REQUEST_BODY_LIMITS } from '@/lib/constants';
 import { readBoundedJson } from '@/lib/input';
 import { i18nMessage } from '@/lib/i18n';
@@ -34,9 +33,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
     // Save to options
     await setOption(auth.db, 'theme', themeId);
 
-    // Theme change affects all pages
-    await bumpCacheVersion(auth.db);
-    await purgeSiteCache(auth.options.siteUrl || '');
+    // setOption() advanced cacheVersion above: every public page re-renders
+    // with the new theme on the next request, in every PoP.
 
     return jsonOk({
       success: true, 

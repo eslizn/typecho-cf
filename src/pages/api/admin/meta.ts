@@ -2,7 +2,7 @@ import type { APIRoute } from 'astro';
 import { schema } from '@/db';
 import { isAdminActionResponse, jsonAdminActionError, requireAdminAction } from '@/lib/admin-auth';
 import { resolveUniqueMetaSlug } from '@/lib/slug';
-import { bumpCacheVersion, purgeSiteCache } from '@/lib/cache';
+import { invalidateSiteCache } from '@/lib/cache';
 import { readAdminFormOrError } from '@/lib/input';
 import { i18nMessage } from '@/lib/i18n';
 import { jsonError, textError } from '@/lib/http';
@@ -83,8 +83,7 @@ async function handler({ request, url }: { request: Request; locals: App.Locals;
       order: 0,
     });
 
-    await bumpCacheVersion(db);
-    await purgeSiteCache(options.siteUrl || '');
+    await invalidateSiteCache(db);
     return new Response(null, { status: 302, headers: { Location: redirectTo } });
   }
 
@@ -104,8 +103,7 @@ async function handler({ request, url }: { request: Request; locals: App.Locals;
       description: description || null,
     }).where(and(eq(schema.metas.mid, mid), eq(schema.metas.type, type)));
 
-    await bumpCacheVersion(db);
-    await purgeSiteCache(options.siteUrl || '');
+    await invalidateSiteCache(db);
     return new Response(null, { status: 302, headers: { Location: redirectTo } });
   }
 
@@ -132,13 +130,14 @@ async function handler({ request, url }: { request: Request; locals: App.Locals;
       }
     }
 
-    for (const id of deleteIds) {
-      await db.delete(schema.relationships).where(eq(schema.relationships.mid, id));
-      await db.delete(schema.metas).where(eq(schema.metas.mid, id));
-    }
+    // One batched round trip for the whole selection instead of 2N deletes.
+    const deleteMidList = sql.join(deleteIds.map((id) => sql`${id}`), sql`, `);
+    await db.batch([
+      db.delete(schema.relationships).where(sql`${schema.relationships.mid} IN (${deleteMidList})`),
+      db.delete(schema.metas).where(sql`${schema.metas.mid} IN (${deleteMidList})`),
+    ] as [any, ...any[]]);
 
-    await bumpCacheVersion(db);
-    await purgeSiteCache(options.siteUrl || '');
+    await invalidateSiteCache(db);
     return new Response(null, { status: 302, headers: { Location: redirectTo } });
   }
 
@@ -151,7 +150,6 @@ async function handler({ request, url }: { request: Request; locals: App.Locals;
     }
     const { setOption } = await import('@/lib/options');
     await setOption(db, 'defaultCategory', String(mid));
-    await bumpCacheVersion(db);
     return new Response(null, { status: 302, headers: { Location: redirectTo } });
   }
 
@@ -176,16 +174,18 @@ async function handler({ request, url }: { request: Request; locals: App.Locals;
       const countMap = new Map<number, number>();
       for (const row of counts) countMap.set(row.mid, row.count);
 
-      for (const meta of metas) {
-        const realCount = countMap.get(meta.mid) || 0;
-        await db.update(schema.metas)
-          .set({ count: realCount })
-          .where(eq(schema.metas.mid, meta.mid));
+      // Recounting used to issue one UPDATE per meta; batch them instead.
+      const recountStatements = metas.map((meta) =>
+        db.update(schema.metas)
+          .set({ count: countMap.get(meta.mid) || 0 })
+          .where(eq(schema.metas.mid, meta.mid))
+      );
+      if (recountStatements.length > 0) {
+        await db.batch(recountStatements as [any, ...any[]]);
       }
     }
 
-    await bumpCacheVersion(db);
-    await purgeSiteCache(options.siteUrl || '');
+    await invalidateSiteCache(db);
     return new Response(null, { status: 302, headers: { Location: redirectTo } });
   }
 

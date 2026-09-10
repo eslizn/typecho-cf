@@ -37,7 +37,8 @@ export function hasPermission(userGroup: string, requiredGroup: string, strict =
  * Ownership check with automatic admin override.
  *
  * `canManageResource(user, resource)` returns true when either:
- *   - the user is in the administrator group, or
+ *   - the user is an administrator or an editor (Typecho's editor role manages
+ *     every post and page, not just their own), or
  *   - the resource's owner id equals the user's uid.
  *
  * Prefer this over open-coding the pattern at API boundaries — it
@@ -48,7 +49,8 @@ export function canManageResource(
   user: { uid: number; group?: string | null },
   resource: { authorId?: number | null; ownerId?: number | null },
 ): boolean {
-  if (hasPermission(user.group || 'visitor', 'administrator')) return true;
+  const group = user.group || 'visitor';
+  if (hasPermission(group, 'editor')) return true;
   const owner = resource.authorId ?? resource.ownerId ?? -1;
   return owner === user.uid;
 }

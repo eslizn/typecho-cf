@@ -1,6 +1,6 @@
 import { getDb, schema, type Database } from '@/db';
 import { loadOptions, type SiteOptions } from '@/lib/options';
-import { getAuthCookies, hasPermission, requireAdminCSRF, validateAuthToken } from '@/lib/auth';
+import { canManageResource, getAuthCookies, hasPermission, requireAdminCSRF, validateAuthToken } from '@/lib/auth';
 import { parseActivatedPlugins, setActivatedPlugins, type HookContext } from '@/lib/plugin';
 import { env } from 'cloudflare:workers';
 import { getRequestCoreContext } from '@/lib/context';
@@ -160,6 +160,26 @@ function readResponseI18nMessage(response: Response): I18nMessage | null {
     try { variables = JSON.parse(rawVariables); } catch { variables = undefined; }
   }
   return normalizeI18nMessage({ key, variables });
+}
+
+/**
+ * Membership + ownership rule for the admin content editors.
+ *
+ * Both editor pages render a full contents row — body, password, custom
+ * fields, attachments — for whatever `cid` the query string names, so access
+ * has to be decided before anything is loaded. The role gate keeps subscribers
+ * and visitors out, and the row check keeps a contributor inside their own
+ * content (only an administrator may open someone else's).
+ *
+ * Pass `target: null` for the role-only check performed before the row loads.
+ */
+export function canUseContentEditor(
+  user: { uid: number; group?: string | null },
+  target: { authorId?: number | null; ownerId?: number | null } | null | undefined,
+  minGroup: 'contributor' | 'editor' = 'contributor',
+): boolean {
+  if (!hasPermission(user.group || 'visitor', minGroup)) return false;
+  return !target || canManageResource(user, target);
 }
 
 export function safeAdminRedirectUrl(referer: string | null, siteUrl: string, fallback: string): string {

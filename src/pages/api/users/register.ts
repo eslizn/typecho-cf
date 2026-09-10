@@ -11,29 +11,9 @@ import { getRequestCoreContextFromLocals, getRequestI18n } from '@/lib/context';
 import { applyFilter, doHook, parseActivatedPlugins, setActivatedPlugins, type HookContext } from '@/lib/plugin';
 import { i18nMessage } from '@/lib/i18n';
 import { textError } from '@/lib/http';
-
-/**
- * Reject cross-origin POSTs. Tightening this beyond the global CSRF
- * extraction (which only covers admin endpoints) ensures an attacker can
- * never silently provision an account in a victim's browser session via
- * a third-party page.
- */
-function isSameOriginRequest(request: Request, siteUrl: string): boolean {
-  if (!siteUrl) return false;
-  const expected = (() => {
-    try { return new URL(siteUrl).origin; } catch { return ''; }
-  })();
-  if (!expected) return false;
-  const headerCheck = (raw: string | null) => {
-    if (!raw) return null;
-    try { return new URL(raw).origin === expected; } catch { return false; }
-  };
-  const origin = headerCheck(request.headers.get('origin'));
-  if (origin !== null) return origin;
-  const referer = headerCheck(request.headers.get('referer'));
-  if (referer !== null) return referer;
-  return false;
-}
+// Same-origin enforcement lives in one place (src/lib/admin-auth.ts) so a
+// future tightening of the check cannot miss this public endpoint.
+import { isSameOriginRequest } from '@/lib/admin-auth';
 
 export const POST: APIRoute = async ({ request, locals }) => {
   const core = getRequestCoreContextFromLocals(locals);

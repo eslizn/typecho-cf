@@ -6,10 +6,10 @@ import { isAdminActionResponse, requireAdminAction } from '@/lib/admin-auth';
 import { normalizeSlug, readAdminFormOrError } from '@/lib/input';
 import { resolveUniqueContentSlug, resolveUniqueMetaSlug } from '@/lib/slug';
 import { applyFilter, doHook } from '@/lib/plugin';
-import { bumpCacheVersion } from '@/lib/cache';
+import { invalidateSiteCache } from '@/lib/cache';
 import { jsonError, jsonOk } from '@/lib/http';
 import { i18nMessage } from '@/lib/i18n';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, sql, inArray } from 'drizzle-orm';
 import { validateFilteredContent, WriteFilterError } from '@/lib/write-filter';
 
 // Typecho convention: visibility dropdown maps to db status column.
@@ -152,7 +152,7 @@ async function purgeContentAndRelatedCache(
   // Every public cache key embeds cacheVersion. A single version bump replaces
   // URL-by-URL purges and avoids loading relationships solely to build keys
   // that the Cache API no longer stores.
-  await bumpCacheVersion(db);
+  await invalidateSiteCache(db);
 }
 
 export const POST: APIRoute = async ({ request, locals }) => {
@@ -189,7 +189,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const allowPing = formData.get('allowPing') ? '1' : '0';
   const allowFeed = formData.get('allowFeed') ? '1' : '0';
   const tags = formData.get('tags')?.toString()?.trim() || '';
-  const categoryIds = [...new Set(formData.getAll('category[]').map((v) => parseInt(v.toString(), 10)).filter(Boolean))];
+  let categoryIds = [...new Set(formData.getAll('category[]').map((v) => parseInt(v.toString(), 10)).filter(Boolean))];
   const template = formData.get('template')?.toString()?.trim() || null;
   const order = parseInt(formData.get('order')?.toString() || '0', 10) || 0;
 
@@ -236,6 +236,18 @@ export const POST: APIRoute = async ({ request, locals }) => {
     if (!inserted.length) return error(500, 'admin.content.createFailed', {}, 'Content could not be created.');
     const newCid = inserted[0].cid;
     return jsonOk({ cid: newCid, autosaved: true });
+  }
+
+  // Only real category rows may be attached. `category[]` is a user-supplied
+  // form field (contributors can write content) and the statements below also
+  // increment metas.count, so an unvalidated mid both fabricates relationships
+  // and inflates unrelated counters.
+  if (categoryIds.length > 0) {
+    const writableCategories = await db
+      .select({ mid: schema.metas.mid })
+      .from(schema.metas)
+      .where(and(eq(schema.metas.type, 'category'), inArray(schema.metas.mid, categoryIds)));
+    categoryIds = writableCategories.map((row) => row.mid);
   }
 
   if (action === 'create') {

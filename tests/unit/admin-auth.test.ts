@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { jsonAdminActionError, safeAdminRedirectUrl } from '@/lib/admin-auth';
+import { canUseContentEditor, jsonAdminActionError, safeAdminRedirectUrl } from '@/lib/admin-auth';
 import { setRequestCoreContext } from '@/lib/context';
 import { createI18n } from '@/lib/i18n';
 import { coreCatalogs } from '@/i18n/catalogs';
@@ -138,5 +138,40 @@ describe('jsonAdminActionError', () => {
     const request = new Request('https://example.com/api/admin/action');
     const response = new Response('service unavailable', { status: 503 });
     expect(jsonAdminActionError(request, response)).toBe(response);
+  });
+});
+
+describe('canUseContentEditor', () => {
+  const contributor = { uid: 7, group: 'contributor' };
+
+  it('rejects subscribers, visitors, and unknown groups outright', () => {
+    // Regression: /admin/write-post used to check only requireAuth, so any
+    // signed-in account (registration creates subscribers) could read any
+    // post's body and password via ?cid=N.
+    expect(canUseContentEditor({ uid: 9, group: 'subscriber' }, null)).toBe(false);
+    expect(canUseContentEditor({ uid: 9, group: 'visitor' }, null)).toBe(false);
+    expect(canUseContentEditor({ uid: 9, group: null }, null)).toBe(false);
+  });
+
+  it('lets a contributor open their own content', () => {
+    expect(canUseContentEditor(contributor, { authorId: 7 })).toBe(true);
+    expect(canUseContentEditor(contributor, { ownerId: 7 })).toBe(true);
+  });
+
+  it("rejects a contributor opening another author's content", () => {
+    expect(canUseContentEditor(contributor, { authorId: 8 })).toBe(false);
+  });
+
+  it("allows an administrator to open another author's content", () => {
+    expect(canUseContentEditor({ uid: 1, group: 'administrator' }, { authorId: 8 })).toBe(true);
+  });
+
+  it("allows an editor to open another author's content (Typecho parity)", () => {
+    expect(canUseContentEditor({ uid: 3, group: 'editor' }, { authorId: 8 })).toBe(true);
+  });
+
+  it('honours a stricter minimum group', () => {
+    expect(canUseContentEditor(contributor, null, 'editor')).toBe(false);
+    expect(canUseContentEditor({ uid: 3, group: 'editor' }, null, 'editor')).toBe(true);
   });
 });

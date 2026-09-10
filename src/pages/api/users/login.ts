@@ -17,7 +17,7 @@ import {
   readLoginRateLimitConfig,
   recordLoginFailure,
 } from '@/lib/login-rate-limit';
-import { safeAdminRedirectUrl } from '@/lib/admin-auth';
+import { isSameOriginRequest, safeAdminRedirectUrl } from '@/lib/admin-auth';
 import { getClientIp, getRequestCoreContextFromLocals, getRequestI18n } from '@/lib/context';
 import { eq } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
@@ -65,28 +65,6 @@ async function notifyLoginFailure(
   reason: 'missing_input' | 'locked' | 'rejected' | 'invalid',
 ): Promise<void> {
   await doHook(pluginCtx, 'user:login:failure', { request, reason });
-}
-
-/**
- * Reject cross-origin POSTs even before we touch the database. The login
- * page is same-origin only; missing Origin/Referer headers are treated
- * as untrusted to avoid `<form enctype=text/plain>` cross-site logins.
- */
-function isSameOriginRequest(request: Request, siteUrl: string): boolean {
-    if (!siteUrl) return false;
-  const expected = (() => {
-    try { return new URL(siteUrl).origin; } catch { return ''; }
-  })();
-  if (!expected) return false;
-  const headerCheck = (raw: string | null) => {
-    if (!raw) return null;
-    try { return new URL(raw).origin === expected; } catch { return false; }
-  };
-  const origin = headerCheck(request.headers.get('origin'));
-  if (origin !== null) return origin;
-  const referer = headerCheck(request.headers.get('referer'));
-  if (referer !== null) return referer;
-  return false;
 }
 
 export const POST: APIRoute = async ({ request, locals }) => {

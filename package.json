@@ -34,6 +34,7 @@
     "types:workers": "node scripts/generate-worker-types.mjs",
     "typecheck": "pnpm run types:workers && astro sync && tsc --noEmit",
     "test": "vitest run",
+    "test:astro": "vitest run --config vitest.astro.config.ts",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "db:generate": "drizzle-kit generate",

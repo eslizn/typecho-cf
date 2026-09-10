@@ -11,67 +11,6 @@ function loadWebdavManifest() {
 }
 
 describe('admin plugin config page', () => {
-  it('filters R2 binding choices to bucket-like bindings when possible', () => {
-    const source = readFileSync(
-      join(process.cwd(), 'src/components/admin/ConfigForm.astro'),
-      'utf-8',
-    );
-
-    expect(source).toContain("typeof (value as any).get === 'function'");
-    expect(source).toContain("typeof (value as any).put === 'function'");
-    expect(source).toContain("typeof (value as any).delete === 'function'");
-    expect(source).toContain("typeof (value as any).head === 'function'");
-    expect(source).toContain("typeof (value as any).list === 'function'");
-  });
-
-  it('renumbers repeatable legends after add or remove actions', () => {
-    const source = readFileSync(
-      join(process.cwd(), 'src/components/admin/ConfigForm.astro'),
-      'utf-8',
-    );
-
-    expect(source).toContain('data-label={field.label}');
-    expect(source).toContain('function renumberRepeatableItems(root)');
-    expect(source).toContain("legend.textContent = label + ' #' + String(index + 1)");
-    expect(source.match(/renumberRepeatableItems\(root\)/g)).toHaveLength(3);
-  });
-
-  it('submits stable row metadata with existing repeatable rows', () => {
-    const source = readFileSync(
-      join(process.cwd(), 'src/components/admin/ConfigForm.astro'),
-      'utf-8',
-    );
-
-    expect(source).toContain('CONFIG_ROW_ID');
-    expect(source).toContain('row[CONFIG_ROW_ID]');
-  });
-
-  it('renders normalized root repeatable paths as slash values', () => {
-    const source = readFileSync(
-      join(process.cwd(), 'src/components/admin/ConfigForm.astro'),
-      'utf-8',
-    );
-
-    expect(source).toContain('function displayRepeatableValue');
-    expect(source).toContain("field.type === 'text' && field.default === '/' && value === ''");
-    expect(source).toContain("value && !value.startsWith('/')");
-  });
-
-  it('renders boolean select values as manifest option strings', () => {
-    const source = readFileSync(
-      join(process.cwd(), 'src/components/admin/ConfigForm.astro'),
-      'utf-8',
-    );
-
-    expect(source).toContain('function fieldValueForOption');
-    expect(source).toContain('function selectedAttr');
-    expect(source).toContain("typeof value === 'boolean'");
-    expect(source).toContain('data-current-value={fieldValueForOption(value)}');
-    expect(source).toContain('selected={selectedAttr(value, optVal)}');
-    expect(source).toContain("document.querySelectorAll('select[data-current-value]')");
-    expect(source).toContain("select.value = select.getAttribute('data-current-value') || ''");
-  });
-
   it('registers WebDAV request:route via lazy init, not hardcoded import', () => {
     const middlewareSource = readFileSync(
       join(process.cwd(), 'src/middleware.ts'),

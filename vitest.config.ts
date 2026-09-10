@@ -8,6 +8,9 @@ export default defineConfig({
     environment: 'node',
     setupFiles: ['./tests/setup.ts'],
     include: ['src/**/*.test.ts', 'tests/**/*.test.ts'],
+    // Template render tests need the Astro pipeline; they run in the separate
+    // project defined by vitest.astro.config.ts (`pnpm run test:astro`).
+    exclude: ['**/node_modules/**', '**/dist/**', 'tests/astro/**'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'lcov'],

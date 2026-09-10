@@ -5,16 +5,14 @@ import { describe, expect, it } from 'vitest';
 const read = (path: string) => readFileSync(join(process.cwd(), path), 'utf8');
 
 describe('admin Queue page wiring', () => {
-  it('exposes the Queue page only to administrators and adds it to Manage', () => {
+  it('exposes the Queue page only to administrators', () => {
     const page = read('src/pages/admin/manage-queues.astro');
-    const layout = read('src/layouts/Admin.astro');
 
     expect(page).toContain("hasPermission(ctx.user!.group || 'visitor', 'administrator')");
     expect(page).toContain('getQueueDashboardSnapshot');
     expect(page).toContain('activeMenu="manage-queues"');
-    expect(layout).toContain("t('admin.menu.queues'");
-    expect(layout).toContain("href: '/admin/manage-queues'");
-    expect(layout).toContain('show: isAdmin');
+    // The nav entry and its administrator-only visibility are asserted against
+    // the rendered layout in tests/astro/admin-layout.test.ts.
   });
 
   it('keeps the first version read-only and does not expose message mutation controls', () => {

@@ -37,5 +37,8 @@ jobs:
       - name: Test
         run: pnpm run test
 
+      - name: Template render tests
+        run: pnpm run test:astro
+
       - name: Build
         run: pnpm run build

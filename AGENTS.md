@@ -459,6 +459,7 @@ Cloudflare Workers 是单线程单 isolate，以下模块级变量是安全的�
 - 单元测试 → `tests/unit/<name>.test.ts`
 - API 集成测试 → `tests/integration/<name>.test.ts`
 - 插件测试 → `src/plugins/<name>/index.test.ts`（与入口同目录）；核心库单测一律放 `tests/unit/`（`src/lib/plugin.test.ts` 是历史遗留位置）
+- 模板渲染测试 → `tests/astro/<name>.test.ts`，用 Astro Container API（`experimental_AstroContainer`）真正渲染 `.astro` 组件并断言产出的 HTML；由独立工程 `vitest.astro.config.ts` 运行（`pnpm run test:astro`，CI 与 `pnpm run test` 一起跑）。不要在 `tests/unit/` 里用 `readFileSync` 断言模板源码——模板断言属于这一类渲染测试
 
 ### 10.3 集成测试 mock 模式
 

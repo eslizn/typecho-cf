@@ -19,13 +19,4 @@ describe('admin button sizing styles', () => {
     expect(ruleFor(css, '.btn-s')).toContain('height: 28px; line-height: 28px;');
     expect(ruleFor(css, '.btn-l')).toContain('height: 40px; line-height: 40px;');
   });
-
-  it('uses the shared small button style for repeatable remove buttons', () => {
-    const source = readFileSync(
-      join(process.cwd(), 'src/components/admin/ConfigForm.astro'),
-      'utf-8',
-    );
-
-    expect(source.match(/class="btn btn-xs typecho-repeatable-remove"/g)).toHaveLength(2);
-  });
 });

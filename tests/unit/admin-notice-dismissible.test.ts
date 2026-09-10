@@ -15,13 +15,6 @@ describe('admin dismissible notices', () => {
     expect(css).toContain('transform: translateY(-50%)');
   });
 
-  it('binds a shared admin notice close handler', () => {
-    const source = readProjectFile('src/layouts/Admin.astro');
-
-    expect(source).toContain("'.typecho-notice-close'");
-    expect(source).toContain("closest('.typecho-dismissible').remove()");
-  });
-
   it('renders close buttons for server-rendered admin notices', () => {
     for (const page of [
       'src/pages/admin/plugins.astro',
@@ -33,12 +26,6 @@ describe('admin dismissible notices', () => {
       expect(source, page).toContain('class="typecho-notice-close"');
       expect(source, page).toContain("admin.action.closeNotice");
     }
-
-    // Both config pages (plugin + theme) render the banner through the shared form.
-    const form = readProjectFile('src/components/admin/ConfigForm.astro');
-    expect(form).toContain('notice typecho-dismissible');
-    expect(form).toContain('class="typecho-notice-close"');
-    expect(form).toContain("admin.action.closeNotice");
   });
 
   it('keeps login flash errors dismissible outside the admin layout', () => {

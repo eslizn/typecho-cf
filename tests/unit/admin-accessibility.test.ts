@@ -15,16 +15,6 @@ describe('admin accessibility contracts', () => {
     expect(source).not.toContain('user-scalable=no');
   });
 
-  it('exposes and synchronizes mobile navigation state', () => {
-    const source = read('src/layouts/Admin.astro');
-    expect(source).toContain('aria-controls="typecho-nav-list"');
-    expect(source).toContain('aria-expanded="false"');
-    expect(source).toContain("attr('aria-expanded', open ? 'true' : 'false')");
-    expect(source).toContain("e.key === 'Escape'");
-    expect(source).toContain("e.key === ' '");
-    expect(source).toContain("trigger('focus')");
-  });
-
   it('gives rendered batch dropdowns explicit menu relationships', () => {
     for (const path of [
       'src/pages/admin/manage-posts.astro',

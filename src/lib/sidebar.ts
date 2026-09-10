@@ -3,7 +3,7 @@
  * Aggregates recent posts, comments, categories, and archives
  * Uses db.batch() to execute all queries in a single D1 round-trip.
  */
-import { eq, desc, and, gt, sql } from 'drizzle-orm';
+import { eq, desc, and, gt, lte, or, sql } from 'drizzle-orm';
 import type { Database } from '@/db';
 import { schema } from '@/db';
 import { buildPermalink, buildCategoryLink, buildDateLink } from '@/lib/content';
@@ -74,6 +74,7 @@ export async function loadSidebarData(
   }
 
   // Execute all 4 queries in a single D1 round-trip
+  const now = nowSeconds();
   const [recentPostRows, recentCommentRows, categoryRows, archiveRows] = await db.batch([
     // Recent posts
     db
@@ -102,8 +103,22 @@ export async function loadSidebarData(
         contentCreated: schema.contents.created,
       })
       .from(schema.comments)
-      .leftJoin(schema.contents, eq(schema.comments.cid, schema.contents.cid))
-      .where(eq(schema.comments.status, 'approved'))
+      .innerJoin(schema.contents, eq(schema.comments.cid, schema.contents.cid))
+      // An approved comment must still belong to publicly visible content:
+      // a post that was unpublished, made private, or rescheduled would
+      // otherwise keep leaking its comment author/excerpt/permalinks into
+      // every page's sidebar.
+      .where(and(
+        eq(schema.comments.status, 'approved'),
+        or(
+          publishedPostCondition(now),
+          and(
+            eq(schema.contents.type, 'page'),
+            eq(schema.contents.status, 'publish'),
+            lte(schema.contents.created, now),
+          ),
+        ),
+      ))
       .orderBy(desc(schema.comments.created))
       .limit(10),
 
@@ -213,7 +228,8 @@ export async function loadNavPages(
     .where(
       and(
         eq(schema.contents.type, 'page'),
-        eq(schema.contents.status, 'publish')
+        eq(schema.contents.status, 'publish'),
+        lte(schema.contents.created, nowSeconds())
       )
     )
     .orderBy(schema.contents.order);

@@ -18,7 +18,7 @@ import {
 } from '@/lib/content';
 import { renderContentExcerpt, renderCommentTextFiltered, renderMarkdownFiltered } from '@/lib/markdown';
 import { paginate } from '@/lib/pagination';
-import { generateCommentToken } from '@/lib/auth';
+import { generateCommentToken, timeSafeEqual } from '@/lib/auth';
 import { buildGravatarUrl } from '@/lib/gravatar';
 import { loadCommentPage } from '@/lib/comment-page';
 import type { RequestContext } from '@/lib/context';
@@ -172,20 +172,27 @@ async function buildCommentTree(ctx: RequestContext, allComments: CommentRow[], 
   const map = new Map<number, CommentNode>();
   const roots: CommentNode[] = [];
 
-  for (const c of displayComments) {
+  // Render every body in parallel: the markdown pass plus the
+  // comment:markdown / comment:rendered plugin filters used to run serially
+  // inside this loop, so a 100-comment page paid the whole chain end to end.
+  const renderedTexts = await Promise.all(displayComments.map((c) =>
+    renderCommentTextFiltered(ctx, c.text || '', {
+      markdown: !!options.commentsMarkdown,
+      htmlTagAllowed: options.commentsHTMLTagAllowed,
+    })
+  ));
+
+  displayComments.forEach((c, index) => {
     map.set(c.coid, {
       coid: c.coid,
       author: c.author || getRequestI18n(ctx).t('core.comment.anonymous', {}, 'Anonymous'),
       mail: c.mail || '',
       url: c.url || '',
-      text: await renderCommentTextFiltered(ctx, c.text || '', {
-        markdown: !!options.commentsMarkdown,
-        htmlTagAllowed: options.commentsHTMLTagAllowed,
-      }),
+      text: renderedTexts[index],
       created: c.created || 0,
       children: [],
     });
-  }
+  });
 
   if (!options.commentsThreaded) {
     return displayComments.map(comment => map.get(comment.coid)!);
@@ -297,15 +304,20 @@ async function toPostListItem(
     displayPost.title || getRequestI18n(ctx).t('core.content.untitled', {}, 'Untitled'),
     displayPost,
   );
-  const excerpt = await filterContentExcerpt(
-    ctx,
-    renderContentExcerpt(
-      displayPost.text || '',
-      getRequestI18n(ctx).t('core.content.readMore', {}, '- Read more -'),
-      permalink,
-    ),
-    displayPost,
-  );
+  // A password-protected body must never reach a list view: the excerpt is
+  // embedded in public archive HTML and written to the public edge cache, so
+  // render the same "password required" placeholder the detail page uses.
+  const excerpt = displayPost.password
+    ? `<p>${escapeHtml(getRequestI18n(ctx).t('core.content.passwordProtected', {}, 'This content is password protected. Enter the password to view it.'))}</p>`
+    : await filterContentExcerpt(
+        ctx,
+        renderContentExcerpt(
+          displayPost.text || '',
+          getRequestI18n(ctx).t('core.content.readMore', {}, '- Read more -'),
+          permalink,
+        ),
+        displayPost,
+      );
   return {
     cid: displayPost.cid,
     title,
@@ -409,11 +421,17 @@ function readCachedArchiveCount(key: string): number | undefined {
 
 function writeCachedArchiveCount(key: string, count: number): void {
   archiveCountCache.set(key, { count, expiresAt: Date.now() + ARCHIVE_COUNT_CACHE_TTL_MS });
-  if (archiveCountCache.size > ARCHIVE_COUNT_CACHE_MAX) {
-    const now = Date.now();
-    for (const [cacheKey, entry] of archiveCountCache) {
-      if (entry.expiresAt <= now) archiveCountCache.delete(cacheKey);
-    }
+  if (archiveCountCache.size <= ARCHIVE_COUNT_CACHE_MAX) return;
+  const now = Date.now();
+  for (const [cacheKey, entry] of archiveCountCache) {
+    if (entry.expiresAt <= now) archiveCountCache.delete(cacheKey);
+  }
+  // Sweeping expired entries is not enough while a burst keeps every key
+  // fresh: evict oldest-first until the map is back under the cap.
+  while (archiveCountCache.size > ARCHIVE_COUNT_CACHE_MAX) {
+    const oldest = archiveCountCache.keys().next().value;
+    if (oldest === undefined) break;
+    archiveCountCache.delete(oldest);
   }
 }
 
@@ -698,7 +716,9 @@ export async function preparePostData(
 
   // Password
   const hasPassword = !!contentRow.password;
-  const passwordVerified = hasPassword && suppliedPassword === contentRow.password;
+  const passwordVerified = hasPassword
+    && !!suppliedPassword
+    && timeSafeEqual(suppliedPassword, contentRow.password as string);
 
   // Keep all content-specific reads in one D1 round trip while the common
   // chrome data loads independently.
@@ -862,7 +882,9 @@ export async function preparePageData(
   );
 
   const hasPassword = !!pageRow.password;
-  const passwordVerified = hasPassword && suppliedPassword === pageRow.password;
+  const passwordVerified = hasPassword
+    && !!suppliedPassword
+    && timeSafeEqual(suppliedPassword, pageRow.password as string);
 
   const [commentPage, common] = await Promise.all([
     loadCommentPage(db, pageRow.cid, options, requestUrl, pageRow.commentsNum ?? null, options.cacheVersion),

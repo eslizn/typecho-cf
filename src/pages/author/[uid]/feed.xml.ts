@@ -42,7 +42,8 @@ export const GET: APIRoute = async ({ request, locals, params }) => {
     title: i18n.t('feed.author.title', { siteTitle: options.title, author: displayName }, `${options.title} - Author: ${displayName}`),
     link: `${urls.siteUrl}/author/${uid}/`,
     description: '',
-    feedUrl: urls.siteUrl,
+    // Self-referencing <atom:link rel="self"> must point at this feed, not the site root.
+    feedUrl: `${urls.siteUrl}/author/${uid}/feed.xml`,
     i18n,
     lastBuildDate: items[0]?.date || new Date(),
   };

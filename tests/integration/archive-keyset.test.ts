@@ -91,8 +91,12 @@ describe('archive keyset pagination', () => {
 
   it('reports exact pagination totals past the old count cap', async () => {
     testDb = await createTestDb();
-    for (let created = 1; created <= 1005; created++) {
-      await testDb.insert(schema.contents).values({
+    // Seed in chunks. 1005 sequential single-row awaits blew this case's 30s
+    // budget on a loaded runner (the only flaky case in the suite), which made
+    // CI red at random. Chunks of 100 stay well under SQLite's parameter cap.
+    const rows = Array.from({ length: 1005 }, (_, index) => {
+      const created = index + 1;
+      return {
         title: `bulk-${created}`,
         slug: `b${created}`,
         type: 'post',
@@ -100,7 +104,10 @@ describe('archive keyset pagination', () => {
         created,
         modified: created,
         text: `body-${created}`,
-      });
+      };
+    });
+    for (let start = 0; start < rows.length; start += 100) {
+      await testDb.insert(schema.contents).values(rows.slice(start, start + 100));
     }
 
     const ctx = await buildCtx();

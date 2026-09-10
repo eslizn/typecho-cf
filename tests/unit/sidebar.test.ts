@@ -201,3 +201,40 @@ describe('loadNavPages', () => {
     expect(pages[0].permalink).toBe('https://example.com/pages/about/');
   });
 });
+
+describe('sidebar content visibility', () => {
+  it('hides recent comments whose content is no longer publicly visible', async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const contents = await testDb.insert(schema.contents).values([
+      { title: 'Public', slug: 'public', type: 'post', status: 'publish', created: now - 60, modified: now, text: 'x' },
+      { title: 'Private', slug: 'private', type: 'post', status: 'private', created: now - 60, modified: now, text: 'x' },
+      { title: 'Draft', slug: 'draft', type: 'post_draft', status: 'draft', created: now - 60, modified: now, text: 'x' },
+      { title: 'Scheduled', slug: 'scheduled', type: 'post', status: 'publish', created: now + 3600, modified: now, text: 'x' },
+    ]).returning({ cid: schema.contents.cid });
+
+    await testDb.insert(schema.comments).values(contents.map((row, index) => ({
+      cid: row.cid,
+      created: now,
+      author: `author-${index}`,
+      text: `comment-${index}`,
+      status: 'approved',
+    })));
+
+    const data = await loadSidebarData(mockPluginCtx, testDb, siteUrl);
+
+    // Only the comment on the published post may surface in the sidebar: the
+    // private/draft/scheduled rows used to leak author, excerpt and permalink.
+    expect(data.recentComments.map((comment) => comment.author)).toEqual(['author-0']);
+  });
+
+  it('does not list future-scheduled pages in the navigation', async () => {
+    const now = Math.floor(Date.now() / 1000);
+    await testDb.insert(schema.contents).values([
+      { title: 'Live', slug: 'live', type: 'page', status: 'publish', created: now - 60 },
+      { title: 'Future', slug: 'future', type: 'page', status: 'publish', created: now + 3600 },
+    ]);
+
+    const pages = await loadNavPages(testDb, siteUrl);
+    expect(pages.map((page) => page.slug)).toEqual(['live']);
+  });
+});

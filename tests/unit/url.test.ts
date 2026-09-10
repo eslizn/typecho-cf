@@ -19,9 +19,10 @@ describe('normalizeHttpUrl', () => {
     expect(normalizeHttpUrl('data:text/html,<script>alert(1)</script>')).toBeNull();
   });
 
-  it('returns empty string for empty input', () => {
-    expect(normalizeHttpUrl('')).toBe('');
-    expect(normalizeHttpUrl('  ')).toBe('');
+  it('returns null for empty input', () => {
+    // Empty and invalid input share one contract: there is no usable URL.
+    expect(normalizeHttpUrl('')).toBeNull();
+    expect(normalizeHttpUrl('  ')).toBeNull();
   });
 
   it('trims whitespace', () => {

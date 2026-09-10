@@ -4,7 +4,11 @@ import { createContext } from '@/lib/context';
 import { prepareSearchData } from '@/lib/page-data';
 
 const { keywords } = Astro.params;
-const searchKeywords = decodeURIComponent(keywords || '');
+// Astro already percent-decodes route params (repeatedly, until the value
+// stops changing), so a second decodeURIComponent both double-decodes and
+// throws URIError for inputs like "/search/50%25/" — surfacing as a 500 on a
+// public route.
+const searchKeywords = (keywords || '').trim();
 if (!searchKeywords) return Astro.redirect('/');
 
 const ctx = await createContext(Astro.locals, Astro.request);

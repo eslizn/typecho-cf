@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro';
 import { schema } from '@/db';
-import { generateRss2, generateAtom } from '@/lib/feed';
+import { generateRss2 } from '@/lib/feed';
 import { clampFeedItems, buildFeedItem, getFeedRuntime, renderFeedResponse } from '@/lib/feed-helpers';
 import { eq, and, desc } from 'drizzle-orm';
 import { publishedPostCondition } from '@/lib/content-visibility';
@@ -36,20 +36,19 @@ export const GET: APIRoute = async ({ request, locals, params }) => {
     );
   }
 
-  const isAtom = params.slug?.startsWith('atom-');
   const config = {
     title: i18n.t('feed.category.title', { siteTitle: options.title, category: cat.name || '' }, `${options.title} - Category: ${cat.name || ''}`),
     link: `${urls.siteUrl}/category/${slug}/`,
     description: '',
-    feedUrl: urls.siteUrl,
+    // Self-referencing <atom:link rel="self"> must point at this feed, not the site root.
+    feedUrl: `${urls.siteUrl}/category/${slug}/feed.xml`,
     i18n,
     lastBuildDate: items[0]?.date || new Date(),
   };
-  const xml = isAtom ? generateAtom(config, items) : generateRss2(config, items);
   return renderFeedResponse(
     pluginCtx,
-    xml,
-    isAtom ? 'application/atom+xml; charset=utf-8' : 'application/rss+xml; charset=utf-8',
+    generateRss2(config, items),
+    'application/rss+xml; charset=utf-8',
     { requestUrl: new URL(request.url), type: params.slug || '', options, urls, i18n, autoLocale },
   );
 };

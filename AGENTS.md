@@ -126,12 +126,14 @@ src/lib/constants.ts   — 跨模块常量（密码最小长度、slug 后缀上
 - FTS5 搜索索引（`typecho_contents_fts` 虚拟表 + 同步触发器）由运行时引导创建/回填（`src/lib/fulltext.ts`、`isolate-boot.ts`），属于派生索引，**不纳入 Drizzle schema 与迁移**；新库安装时由 `generateCreateSQL()` 一并创建
 - D1 不支持真实事务；批量改写应使用 `db.batch([...])` 单次往返
 - 评论的「能否审核」必须查 `contents.authorId`，禁止以 `comments.ownerId` 作为权限判定来源（ownerId 仅是内容作者变更前的历史快照）
+- trackback / pingback 是 `typecho_comments` 中 `type='trackback'|'pingback'` 的行，与普通评论**共用** `status` 列与后台「评论」审核队列（`/admin/manage-comments`，按 status 分标签页，不按 type 过滤）；它们同样计入 `commentsNum`。这是与 PHP Typecho 对齐的有意设计，不要在审核页里按 type 拆分队列
+- 入站反馈（trackback / pingback）必须先校验来源页面确实链回目标：**校验不通过一律 4xx 拒收且不写库**；校验通过后是否待审只由 `commentsRequireModeration` 决定（开启落 `waiting`，关闭落 `approved`），与普通评论共用同一个开关，不另设开关
 
 ### 4.2 关键枚举
 
 ```typescript
 // contents.type
-'post' | 'page' | 'post_draft' | 'page_draft' | 'attachment'
+'post' | 'page' | 'post_draft' | 'page_draft' | 'attachment' | 'revision'
 
 // contents.status
 'publish' | 'draft' | 'hidden' | 'private' | 'waiting'
@@ -141,6 +143,7 @@ src/lib/constants.ts   — 跨模块常量（密码最小长度、slug 后缀上
 
 // users.group（数字越小权限越高）
 'administrator'(0) | 'editor'(1) | 'contributor'(2) | 'subscriber'(3) | 'visitor'(4)
+// 内容管理范围：administrator / editor 可管理全部内容，contributor 仅限自己创建的内容（`canManageResource`）
 ```
 
 ### 4.3 插件配置存储
@@ -347,7 +350,7 @@ WebDAV 插件的文件管理器是完整参考实现：`admin:page` 返回包含
 ### 8.3 CSRF 保护
 
 - `generateSecurityToken(secret, authCode, uid)` 生成 token，使用 1 小时滑动桶轮换；`validateSecurityToken` 同时接受当前与上一桶 token
-- 评论 token 绑定 `cid`：`generateCommentToken(secret, cid)` / `validateCommentToken(token, secret, cid, refererFallback?)`（仍接受历史 referer 绑定 token，便于已缓存页面）
+- 评论 token 绑定 `cid`：`generateCommentToken(secret, cid)` / `validateCommentToken(token, secret, cid)`；不再回退校验历史 referer 绑定 token，缓存页面使用 cid 绑定 token 即可通过校验
 - 管理后台所有表单必须包含 CSRF token（`<input name="_">`）
 - 管理 API 端点必须校验 CSRF token；优先级：
   1. `X-CSRF-Token` 请求头（AJAX/JSON 客户端推荐）
@@ -402,7 +405,7 @@ WebDAV 插件的文件管理器是完整参考实现：`admin:page` 返回包含
 - 文件格式：`.ts`，直接 `export const POST/PUT/DELETE = ...`，返回 `Response`
 - 路由由 Astro 文件系统路由自动生成
 - `src/pages/api/admin/meta.ts` 只能写入 `category` / `tag` 两类元数据，禁止接受任意 `type`；删除分类前必须拒绝默认分类与有文章关联的分类
-- `src/pages/api/admin/content.ts` 保存文章/页面时必须确保 `contents.slug` 唯一；更新为冲突 slug 时追加当前 `cid` 后缀，不允许把唯一索引错误暴露成 500
+- `src/pages/api/admin/content.ts` 保存文章/页面时必须确保 `contents.slug` 唯一；唯一性是**应用层约束**（`slug.ts` 的 `resolveUniqueContentSlug`），DB 侧 `typecho_contents_slug` 只是普通索引（revision 行需要复用父级 slug），因此更新为冲突 slug 时追加当前 `cid` 后缀，不允许把唯一索引错误暴露成 500
 - `src/pages/api/install.ts` 的 install handler 必须用 `.returning()` 拿真实自增主键，不准硬编码 `cid:1` / `mid:1`；slug 冲突要走 `resolveSlug` 后缀策略
 - 副作用类管理操作禁止响应 GET（`delete-spam` 等），统一走 POST + CSRF
 - 公共归档（首页/分类/标签/作者/搜索）必须过滤 `created > now()` 的将来贴
@@ -420,8 +423,8 @@ WebDAV 插件的文件管理器是完整参考实现：`admin:page` 返回包含
 Cloudflare Workers 是单线程单 isolate，以下模块级变量是安全的：
 - `src/lib/plugin.ts`：`pluginRegistry` 与 loader 在启动时登记；`hookRegistry` 在插件首次激活时幂等写入，初始化完成后只读；`initialisingPlugins` 合并并发初始化
 - `src/lib/cache.ts`：`cacheVersion` memo（60s）+ options 版本戳缓存（Cache API）
-- `src/lib/options.ts`：`optionSnapshots` / `pendingOptionLoads`（WeakMap，5 分钟快照 + 并发合并）
-- `src/lib/sidebar.ts`：`navSnapshots` 等版本化快照（WeakMap）
+- `src/lib/options.ts`：`optionSnapshot` / `pendingOptionLoad`（isolate 级单槽快照，5 分钟 TTL + cacheVersion 校验 + 并发合并；`getDb()` 每次请求新建 handle，WeakMap 按 Database 键控无法跨请求命中）
+- `src/lib/sidebar.ts`：`sidebarSnapshot` / `navSnapshot`（同样是 isolate 级单槽 + cacheVersion 版本化键）
 - `src/lib/comment-page.ts`：`commentRootCounts`（按 cacheVersion 键控的根评论计数缓存，TTL + 条数上限）
 - `src/lib/fulltext.ts`：`ftsAvailability`（FTS5 就绪状态）
 - `src/lib/isolate-boot.ts`：`state`（表检查 / 索引回填 / FTS 引导的一次性标志）
@@ -455,7 +458,7 @@ Cloudflare Workers 是单线程单 isolate，以下模块级变量是安全的�
 
 - 单元测试 → `tests/unit/<name>.test.ts`
 - API 集成测试 → `tests/integration/<name>.test.ts`
-- 插件测试 → `src/plugins/<name>/index.test.ts`（与入口同目录）
+- 插件测试 → `src/plugins/<name>/index.test.ts`（与入口同目录）；核心库单测一律放 `tests/unit/`（`src/lib/plugin.test.ts` 是历史遗留位置）
 
 ### 10.3 集成测试 mock 模式
 

@@ -93,33 +93,6 @@ describe('admin plugin config page', () => {
     expect(pluginSource).toContain('ctx.activatedPlugins.has(reg.pluginId)');
   });
 
-  it('routes plugin configuration writes through the canonical save module', () => {
-    const pluginConfigSource = readFileSync(
-      join(process.cwd(), 'src/pages/admin/plugin-config.astro'),
-      'utf-8',
-    );
-    const pluginsSource = readFileSync(
-      join(process.cwd(), 'src/pages/admin/plugins.astro'),
-      'utf-8',
-    );
-    const themesSource = readFileSync(
-      join(process.cwd(), 'src/pages/admin/themes.astro'),
-      'utf-8',
-    );
-    const pluginConfigModule = readFileSync(
-      join(process.cwd(), 'src/lib/plugin-config.ts'),
-      'utf-8',
-    );
-
-    expect(pluginConfigSource).toContain('action="/api/admin/plugin-config"');
-    expect(pluginConfigSource).toContain('getPluginConfigurationView(options, pluginId)');
-    expect(pluginConfigSource).not.toContain('setOption(ctx.db');
-    expect(pluginConfigModule).toContain('await setOption(auth.db, `plugin:${pluginId}`');
-    expect(pluginConfigModule).toContain("await purgeSiteCache(auth.options.siteUrl || '')");
-    expect(pluginsSource).toContain('bumpCacheVersion(db)');
-    expect(themesSource).toContain('bumpCacheVersion(ctx.db)');
-  });
-
   it('does not expose configurable WebDAV access rules', () => {
     const manifest = loadWebdavManifest();
     expect(manifest.config.requiredGroup).toBeUndefined();

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { HookPoints, parsePluginConfigFormData, type PluginConfigField } from './plugin';
+import { HookPoints, parsePluginConfigFormData, type PluginConfigField } from '@/lib/plugin';
 
 describe('HookPoints', () => {
   it('includes the plugin admin page hook used by the generic admin route', () => {

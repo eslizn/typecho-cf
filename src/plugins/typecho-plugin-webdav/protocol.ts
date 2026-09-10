@@ -6,6 +6,8 @@ import {
   clearWebDavAuthFailures, authenticate,
 } from './config';
 import { getStorageOps } from './adapters';
+import { escapeXml } from '@/lib/escape';
+import { REQUEST_BODY_LIMITS } from '@/lib/constants';
 
 // --- Constants ---
 
@@ -13,15 +15,6 @@ const ALLOWED_METHODS = 'OPTIONS, PROPFIND, GET, HEAD, PUT, DELETE, MKCOL, COPY,
 const XML_HEADERS = { 'Content-Type': 'application/xml; charset=utf-8' };
 
 // --- XML / HTML Helpers ---
-
-function escapeXml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
-}
 
 function responseXml(
   itemHref: string, displayName: string, collection: boolean,
@@ -261,8 +254,48 @@ async function handlePut(
   workerEnv?: Record<string, unknown>,
 ): Promise<Response> {
   if (!key || key.endsWith('/')) return new Response('Invalid target', { status: 409 });
+
+  // WebDAV is not an unbounded write channel: uploads share the admin upload
+  // ceiling, so a single PUT cannot fill the bucket (or buffer the isolate)
+  // without limit. Content-Length is checked up front, and chunked uploads are
+  // aborted by the counting stream below.
+  const declaredLength = Number(request.headers.get('content-length'));
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_PUT_BYTES) {
+    return new Response('Payload Too Large', { status: 413 });
+  }
+
   const contentType = request.headers.get('content-type') || undefined;
-  return getStorageOps(mount).write(key, request.body, contentType, workerEnv);
+  const body = request.body ? limitRequestBody(request.body, MAX_PUT_BYTES) : request.body;
+  try {
+    return await getStorageOps(mount).write(key, body, contentType, workerEnv);
+  } catch (error) {
+    if (error instanceof Error && error.message === PUT_TOO_LARGE) {
+      return new Response('Payload Too Large', { status: 413 });
+    }
+    throw error;
+  }
+}
+
+/** Upload ceiling for a single WebDAV PUT — same value as the admin uploader. */
+const MAX_PUT_BYTES = REQUEST_BODY_LIMITS.uploadFile;
+const PUT_TOO_LARGE = 'webdav-payload-too-large';
+
+/** Abort a streamed upload as soon as it passes the ceiling. */
+function limitRequestBody(
+  body: ReadableStream<Uint8Array>,
+  maxBytes: number,
+): ReadableStream<Uint8Array> {
+  let total = 0;
+  return body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
+    transform(chunk, controller) {
+      total += chunk.byteLength;
+      if (total > maxBytes) {
+        controller.error(new Error(PUT_TOO_LARGE));
+        return;
+      }
+      controller.enqueue(chunk);
+    },
+  }));
 }
 
 async function handleMkcol(mount: StorageMount, key: string, workerEnv?: Record<string, unknown>): Promise<Response> {

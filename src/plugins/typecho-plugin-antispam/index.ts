@@ -1,4 +1,4 @@
-import { escapeAttr, parsePluginOption } from 'typecho/plugin-sdk';
+import { escapeAttr, parsePluginOption, timeSafeEqual } from 'typecho/plugin-sdk';
 import type { I18n, PluginInitContext } from 'typecho/plugin-sdk';
 import en from './locales/en.json';
 import zhCN from './locales/zh-CN.json';
@@ -50,7 +50,7 @@ const HONEYPOT_FIELD = 'address_confirm';
 const TOKEN_FIELD = 'antispam_token';
 
 function intOrDefault(raw: unknown, fallback: number, min: number): number {
-  const n = parseInt(String(raw ?? ''));
+  const n = parseInt(String(raw ?? ''), 10);
   return Number.isFinite(n) ? Math.max(min, n) : fallback;
 }
 
@@ -136,7 +136,8 @@ async function validateToken(
   if (!decoded) return t('plugin.typecho-plugin-antispam.reason.tokenInvalid', '安全令牌无效');
 
   const expectedSig = await hmacSha256(String(decoded.timestamp), secret);
-  if (decoded.signature !== expectedSig) return t('plugin.typecho-plugin-antispam.reason.tokenVerificationFailed', '安全令牌验证失败');
+  // Constant-time comparison, matching every other secret check in the project.
+  if (!timeSafeEqual(decoded.signature, expectedSig)) return t('plugin.typecho-plugin-antispam.reason.tokenVerificationFailed', '安全令牌验证失败');
 
   const now = Math.floor(Date.now() / 1000);
   const age = now - decoded.timestamp;
@@ -194,7 +195,8 @@ async function buildSnippet(options?: Record<string, unknown>, i18n?: I18n): Pro
 }
 
 function rejectComment(commentData: MutableCommentData, mode: SpamMode, reason: string): MutableCommentData {
-  console.log(`[antispam] Spam detected (action=${mode}, reason=${reason})`);
+  // Structured log line: greppable by event name, and free of comment content.
+  console.log({ event: 'antispam_spam_detected', action: mode, reason });
   if (mode === 'discard') {
     commentData._rejected = reason;
   } else if (mode === 'waiting') {

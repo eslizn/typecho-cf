@@ -39,7 +39,7 @@ export { getClientIp } from './client-ip';
 export { safeJsonForScript } from './escape';
 
 // ── Auth ──
-export { hasPermission, verifyPassword } from './auth';
+export { hasPermission, timeSafeEqual, verifyPassword } from './auth';
 
 // ── Content ──
 export { buildPermalink, formatDate, buildAuthorLink, buildCategoryLink } from './content';

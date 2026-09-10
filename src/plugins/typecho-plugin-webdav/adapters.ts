@@ -219,7 +219,7 @@ async function tianyiLogin(username: string, password: string): Promise<string> 
     'Cookie': cookies.join('; '),
   };
 
-  const appConfResp = await fetch('https://open.e.189.cn/api/logbox/oauth2/appConf.do', {
+  const appConfResp = await fetchWithTimeout('https://open.e.189.cn/api/logbox/oauth2/appConf.do', {
     method: 'POST',
     headers: stepHeaders,
     body: new URLSearchParams({ version: '2.0', appKey: appId }).toString(),
@@ -233,7 +233,7 @@ async function tianyiLogin(username: string, password: string): Promise<string> 
   }
   const appData = (appConf.data || {}) as Record<string, unknown>;
 
-  const encResp = await fetch('https://open.e.189.cn/api/logbox/config/encryptConf.do', {
+  const encResp = await fetchWithTimeout('https://open.e.189.cn/api/logbox/config/encryptConf.do', {
     method: 'POST',
     headers: stepHeaders,
     body: new URLSearchParams({ appId }).toString(),
@@ -273,7 +273,7 @@ async function tianyiLogin(username: string, password: string): Promise<string> 
     paramId: String(appData.paramId || ''),
   };
 
-  const loginResp = await fetch('https://open.e.189.cn/api/logbox/oauth2/loginSubmit.do', {
+  const loginResp = await fetchWithTimeout('https://open.e.189.cn/api/logbox/oauth2/loginSubmit.do', {
     method: 'POST',
     headers: stepHeaders,
     body: new URLSearchParams(loginData).toString(),
@@ -707,7 +707,7 @@ export async function s3Fetch(
   body?: BodyInit | null,
 ): Promise<Response> {
   const signed = await signS3Headers(mount, method, key, query, headers);
-  return fetch(signed.url, { method, headers: signed.headers, body });
+  return fetchWithTimeout(signed.url, { method, headers: signed.headers, body });
 }
 
 // --- R2 Helpers ---
@@ -1059,7 +1059,7 @@ function createTianyiOps(mount: StorageMount): StorageOps {
       if (method === 'HEAD') return new Response(null, { status: 200 });
       const downloadUrl = await tianyiGetDownloadUrl(mount, resolved.id);
       if (!downloadUrl) return new Response('Not Found', { status: 404 });
-      const downloadResp = await fetch(downloadUrl);
+      const downloadResp = await fetchWithTimeout(downloadUrl);
       if (!downloadResp.ok) return new Response(`Download failed (${downloadResp.status})`, { status: 502 });
       return downloadResp;
     },
@@ -1079,7 +1079,7 @@ function createTianyiOps(mount: StorageMount): StorageOps {
         form.append('file', new Blob([buf]), fileName);
       }
       const uploadUrl = `${TIANYI_API_BASE}/api/open/file/uploadFile.action`;
-      const uploadResp = await fetch(uploadUrl, { method: 'POST', headers: { 'Cookie': cookie, 'Referer': 'https://cloud.189.cn/', 'User-Agent': TIANYI_UA }, body: form });
+      const uploadResp = await fetchWithTimeout(uploadUrl, { method: 'POST', headers: { 'Cookie': cookie, 'Referer': 'https://cloud.189.cn/', 'User-Agent': TIANYI_UA }, body: form });
       if (!uploadResp.ok) return new Response(`Upload failed (${uploadResp.status})`, { status: 502 });
       return new Response(null, { status: 201 });
     },

@@ -12,7 +12,7 @@
 
 **前台**：文章列表 / 分类 / 标签 / 作者 / 搜索归档（FTS5 全文检索，短词自动回退 LIKE）、嵌套评论（Gravatar 头像）、RSS 2.0 / Atom 1.0 / RSS 1.0、文章密码保护、响应式默认主题
 
-**管理后台**：文章 & 页面编辑管理、评论审核、媒体管理（R2 拖放上传）、用户管理（5 种角色）、主题切换、插件管理（启用/禁用/配置）、全站设置、安装向导
+**管理后台**：文章 & 页面编辑管理、评论审核、媒体管理（R2 拖放上传）、用户管理（5 种角色）、主题切换、插件管理（启用/禁用/配置）、任务队列观测、全站设置、安装向导
 
 **系统**：主题系统（npm 包分发）、插件系统（30+ 已接入 Hook，支持懒加载）、PHP 版 Typecho 数据迁移工具、PBKDF2-SHA256 认证、CSRF 防护、安全响应头、请求体限额、R2 上传类型校验
 
@@ -22,7 +22,9 @@
 
 ### 一键部署到 Cloudflare
 
-点击上方 **Deploy to Cloudflare** 按钮。Cloudflare 会把本仓库复制到你的 GitHub / GitLab 帐号，自动创建 D1 数据库（`typecho-cf-db`）和 R2 存储桶（`typecho-cf-uploads`）并绑定到 Worker，同时配置 [Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/)：之后每次推送到生产分支都会自动构建部署。
+点击上方 **Deploy to Cloudflare** 按钮。Cloudflare 会把本仓库复制到你的 GitHub / GitLab 帐号，按 `wrangler.toml` 自动创建并绑定 D1、R2、任务 Queue，同时配置 [Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/)：之后每次推送到生产分支都会自动构建部署。
+
+Button/Workers Builds 中保持以下命令即可：Build command 为 `pnpm run build`，Production deploy command 为 `pnpm run deploy`；`pnpm run deploy` 会识别 Cloudflare 提供的 `WORKERS_CI=1`，自动跳过本地 Queue 检查和重复构建，仅执行部署。非生产分支使用 Cloudflare 默认的 `pnpm exec wrangler versions upload`（或等价的 `npx wrangler versions upload`），不要使用生产部署命令。
 
 部署向导会提示填写 `INSTALL_TOKEN`（推荐，可用 `openssl rand -hex 32` 生成）。设置后，打开 Worker URL 的 `/install` 完成站点与管理员初始化时必须填写同一令牌。未设置时仍可安装，但任意先访问 `/install` 的人都能成为首位管理员。
 
@@ -54,7 +56,7 @@ pnpm run dev
 2. 填写安装表单：站点名称 / 描述、管理员用户名、密码（至少 12 位）、邮箱；若配置了 `INSTALL_TOKEN`，还需填写安装令牌
 3. 提交后完成建表与管理员创建，随后可访问 `/admin` 登录
 
-仓库中的 `wrangler.toml` 只声明绑定名（D1 `DB` / R2 `BUCKET`），不含账号专属 ID。本地 `pnpm run dev` 使用 Miniflare 模拟存储，不必改这个文件。密钥写在 `.dev.vars`（已 gitignore）。
+仓库中的 `wrangler.toml` 只声明绑定名（D1 `DB` / R2 `BUCKET` / Queue `QUEUE`），不含账号专属 ID。本地 `pnpm run dev` 使用 Miniflare 模拟存储，不必改这个文件。密钥写在 `.dev.vars`（已 gitignore）。
 
 ### 命令行部署到 Cloudflare
 
@@ -65,6 +67,40 @@ pnpm exec wrangler login
 pnpm exec wrangler secret put INSTALL_TOKEN   # 推荐；未设置时任意先访问 /install 的人都能成为首位管理员
 pnpm run deploy
 ```
+
+本地执行 `pnpm run deploy` 会在构建和部署前读取当前 Wrangler 配置，幂等确认任务
+Queue `typecho-cf-tasks`；缺失时通过项目锁定版本的 Wrangler 自动创建，已存在的资源
+不会删除或重建。Button/Workers Builds 路径由
+Cloudflare 负责创建配置中声明的资源，`pnpm run deploy` 在该环境只执行部署。若只想
+检查构建和部署配置，可执行 `pnpm run deploy -- --dry-run`，该模式不会创建 Queue。
+
+如需在同一 Cloudflare 账户部署多个实例，请手动修改 `wrangler.toml` 中 producer 的
+`queue`、consumer 的 `queue` 以及 `[vars]` 中的 `QUEUE_NAME`，为当前实例设置唯一名称，
+并保持 producer 与 consumer 使用同一个任务 Queue。`pnpm run deploy` 和 Button/Workers
+Builds 都会按修改后的 Wrangler 配置工作。
+
+登录后台后，管理员可在「管理 → 队列」查看任务 Queue 的近实时积压指标。默认通过 Worker
+`QUEUE` binding 读取，不需要 API 凭据。若要查看账户级 Queue 配置和 consumer 配置，可在
+Cloudflare 中创建仅含 Queues Read 权限的 API Token，并以 secret 配置账户 ID 和令牌：
+
+```bash
+pnpm exec wrangler secret put CF_ACCOUNT_ID
+pnpm exec wrangler secret put CF_API_TOKEN
+```
+
+这两个 secret 均为可选；未配置时页面仍可显示 `QUEUE` binding 的实时指标。当前部署未配置
+死信队列，消息达到最大重试次数后会被 Cloudflare 丢弃。页面不拉取、租约、删除或重放消息，
+也不记录单条任务的运行中/已完成历史。
+
+从旧版双 Queue 部署升级时，普通 `pnpm run deploy` 不会自动删除旧的
+`typecho-cf-tasks-dlq`，以免误删仍在等待的消息。确认不再需要旧 Queue 后，在项目根目录执行：
+
+```bash
+pnpm run queues:cleanup-legacy -- --confirm typecho-cf-tasks-dlq
+```
+
+该命令只允许删除这个固定的旧 Queue，并会先检查当前 Wrangler 配置没有继续引用它；
+命令仍会由 Wrangler 显示最终确认提示。Button/Workers Builds 不会自动执行此清理。
 
 访问 Worker URL → `/install` → 填写站点与管理员信息（及 `INSTALL_TOKEN`）→ 登录 `/admin`。
 
@@ -78,7 +114,9 @@ pnpm run deploy
 |------|------|
 | `pnpm run dev` | 本地开发服务器 |
 | `pnpm run build` | 生产构建 |
-| `pnpm run deploy` | 构建 + 部署到 Cloudflare Workers |
+| `pnpm run deploy` | 本地：幂等创建任务 Queue + 构建 + 部署；Workers Builds：仅部署 |
+| `pnpm run queues:ensure` | 按当前 Wrangler 配置幂等创建任务 Queue |
+| `pnpm run queues:cleanup-legacy` | 在显式确认后删除旧版遗留的 `typecho-cf-tasks-dlq` |
 | `pnpm run reinstall:extensions` | 刷新所有已声明插件和主题的本地依赖快照 |
 | `pnpm run lint` | 类型感知静态检查（含浮空 Promise） |
 | `pnpm run types:workers` | 按 Wrangler 配置生成 Worker 绑定与运行时类型 |

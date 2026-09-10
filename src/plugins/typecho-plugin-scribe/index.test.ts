@@ -12,6 +12,13 @@ function collectHooks() {
       hooks.set(point, list);
     },
     registerTranslations: () => {},
+    registerScheduledTask: () => {},
+    registerAsyncTask: () => {},
+    enqueueAsyncTask: async () => ({
+      jobId: 'test-job',
+      taskKey: 'test-task',
+      idempotencyKey: 'test-key',
+    }),
   });
   return hooks;
 }

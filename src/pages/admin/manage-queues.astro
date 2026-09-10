@@ -1,0 +1,572 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '@/layouts/Admin.astro';
+import { createContext, requireAuth } from '@/lib/context';
+import { hasPermission } from '@/lib/auth';
+import {
+  getQueueDashboardSnapshot,
+  type QueueConsumerSnapshot,
+  type QueueObservabilityEnv,
+  type QueueResourceSnapshot,
+} from '@/lib/queue-observability';
+
+const ctx = await createContext(Astro.locals, Astro.request);
+const authCheck = requireAuth(ctx);
+if (authCheck) return authCheck;
+
+if (!hasPermission(ctx.user!.group || 'visitor', 'administrator')) {
+  return new Response(ctx.i18n.t('core.error.forbidden', {}, 'Forbidden'), { status: 403 });
+}
+
+const { options, urls, user } = ctx;
+const snapshot = await getQueueDashboardSnapshot(env as unknown as QueueObservabilityEnv);
+const t = (key: string, variables: Record<string, string | number> = {}, fallback = key): string =>
+  ctx.i18n.t(key, variables, fallback);
+
+function formatNumber(value: number | null): string {
+  if (value === null) return '-';
+  try {
+    return new Intl.NumberFormat(ctx.i18n.locale).format(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function formatBytes(value: number | null): string {
+  if (value === null) return '-';
+  if (value < 1024) return `${formatNumber(value)} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let scaled = value;
+  let unitIndex = -1;
+  while (scaled >= 1024 && unitIndex < units.length - 1) {
+    scaled /= 1024;
+    unitIndex += 1;
+  }
+  const decimals = scaled >= 100 ? 0 : scaled >= 10 ? 1 : 2;
+  return `${scaled.toFixed(decimals)} ${units[unitIndex]}`;
+}
+
+function formatTimestamp(timestampMs: number | null): string {
+  if (timestampMs === null) return '-';
+  try {
+    return new Intl.DateTimeFormat(ctx.i18n.locale, {
+      dateStyle: 'medium',
+      timeStyle: 'medium',
+      timeZone: options.timezone || 'UTC',
+    }).format(new Date(timestampMs));
+  } catch {
+    return new Date(timestampMs).toISOString();
+  }
+}
+
+function formatSeconds(value: number | null): string {
+  return value === null ? '-' : `${formatNumber(value)} s`;
+}
+
+function formatMilliseconds(value: number | null): string {
+  return value === null ? '-' : `${formatNumber(value)} ms`;
+}
+
+function formatMetric(value: number | null, formatter: (value: number) => string): string {
+  return value === null
+    ? t('admin.queue.noMetrics', {}, 'No realtime metrics available')
+    : formatter(value);
+}
+
+function consumerTypeLabel(consumer: QueueConsumerSnapshot): string {
+  if (consumer.type === 'worker') return t('admin.queue.worker', {}, 'Worker');
+  if (consumer.type === 'http_pull') return t('admin.queue.httpPull', {}, 'HTTP Pull');
+  return t('admin.status.unknown', {}, 'Unknown');
+}
+
+function metricsSourceLabel(queue: QueueResourceSnapshot): string {
+  if (queue.metricsSource === 'binding') return t('admin.queue.workerBinding', {}, 'Worker binding');
+  if (queue.metricsSource === 'api') return t('admin.queue.cloudflareApi', {}, 'Cloudflare API');
+  return t('admin.status.unavailable', {}, 'Unavailable');
+}
+
+function queueTitle(): string {
+  return t('admin.queue.main', {}, 'Task Queue');
+}
+
+function queueResourceStatus(queue: QueueResourceSnapshot): string {
+  if (!snapshot.api.configured) {
+    return t('admin.queue.bindingOnly', {}, 'Worker binding only');
+  }
+  if (!snapshot.api.available) {
+    return t('admin.queue.apiUnavailable', {}, 'Cloudflare Queue API unavailable');
+  }
+  return queue.apiResourceFound
+    ? t('admin.queue.accountResource', {}, 'Account resource')
+    : t('admin.queue.notFound', {}, 'Account-level resource not found');
+}
+
+function metricValueClass(value: number | null, text = false): string {
+  const classes = ['queue-metric-value'];
+  if (text) classes.push('queue-metric-value--text');
+  if (value === null) classes.push('queue-metric-value--muted');
+  return classes.join(' ');
+}
+---
+<Admin title={t('admin.page.manageQueues', {}, 'Manage queues')} options={options} urls={urls} user={user} activeMenu="manage-queues" pluginCtx={ctx}>
+  <div class="col-mb-12 queue-page" role="main">
+    <div class="queue-intro">
+      <div>
+        <h3 class="queue-page-heading">{t('admin.queue.overview', {}, 'Queue overview')}</h3>
+        <p class="description">{t('admin.queue.statusScopeDescription', {}, 'This page shows near-realtime Queue backlog metrics and account-level configuration. It does not record per-message running or completed history. This deployment has no dead-letter Queue; messages that still fail after the retry limit are discarded.')}</p>
+      </div>
+      <span class="queue-readonly-badge">{t('admin.queue.readOnly', {}, 'Read-only')}</span>
+    </div>
+
+    {!snapshot.api.configured && (
+      <div class="typecho-option-tabs notice queue-notice queue-notice--warning" role="status">
+        <p>{t('admin.queue.apiNotConfigured', {}, 'Cloudflare Queue API read-only credentials are not configured. Only realtime metrics available from the Worker binding are shown.')}</p>
+      </div>
+    )}
+    {snapshot.api.configured && !snapshot.api.available && (
+      <div class="typecho-option-tabs notice notice-error queue-notice queue-notice--error" role="alert">
+        <p>{t('admin.queue.apiUnavailable', {}, 'The Cloudflare Queue API is temporarily unavailable. Configuration and some metrics may be missing.')}</p>
+      </div>
+    )}
+
+    {snapshot.queues.map(queue => (
+      <section id={`queue-${queue.key}`} class="queue-card" aria-labelledby={`queue-${queue.key}-title`}>
+        <header class="queue-card-header">
+          <div class="queue-card-heading">
+            <p class="queue-eyebrow">{queueTitle()}</p>
+            <h3 id={`queue-${queue.key}-title`}><code>{queue.name}</code></h3>
+          </div>
+          <div class="queue-card-meta">
+            <span class="queue-source-badge">{metricsSourceLabel(queue)}</span>
+            <span class="queue-resource-note">{queueResourceStatus(queue)}</span>
+            <span class="queue-updated">{t('admin.queue.lastUpdated', {}, 'Last refreshed')}: {formatTimestamp(snapshot.refreshedAt)}</span>
+          </div>
+        </header>
+
+        <div class="queue-metrics" role="group" aria-label={t('admin.queue.statusScope', {}, 'Queue status')}>
+          <div class="queue-metric">
+            <span class="queue-metric-label">{t('admin.queue.backlog', {}, 'Backlog messages')}</span>
+            <strong class={metricValueClass(queue.metrics?.backlogCount ?? null)}>{formatMetric(queue.metrics?.backlogCount ?? null, formatNumber)}</strong>
+          </div>
+          <div class="queue-metric">
+            <span class="queue-metric-label">{t('admin.queue.backlogBytes', {}, 'Backlog bytes')}</span>
+            <strong class={metricValueClass(queue.metrics?.backlogBytes ?? null)}>{formatMetric(queue.metrics?.backlogBytes ?? null, formatBytes)}</strong>
+          </div>
+          <div class="queue-metric">
+            <span class="queue-metric-label">{t('admin.queue.oldestMessage', {}, 'Oldest message')}</span>
+            <strong class={metricValueClass(queue.metrics?.oldestMessageTimestampMs ?? null, true)}>{formatMetric(queue.metrics?.oldestMessageTimestampMs ?? null, formatTimestamp)}</strong>
+          </div>
+        </div>
+
+        <div class="queue-card-section">
+          <div class="queue-section-header">
+            <h4>{t('admin.queue.configuration', {}, 'Queue configuration')}</h4>
+            <span class="queue-section-caption">{queueResourceStatus(queue)}</span>
+          </div>
+          <dl class="queue-details">
+            <div class="queue-detail">
+              <dt>{t('admin.queue.queueId', {}, 'Queue ID')}</dt>
+              <dd>{queue.queueId ? <code>{queue.queueId}</code> : <span class="queue-value-muted">{queueResourceStatus(queue)}</span>}</dd>
+            </div>
+            <div class="queue-detail">
+              <dt>{t('admin.queue.deliveryDelay', {}, 'Delivery delay')}</dt>
+              <dd>{formatSeconds(queue.settings?.deliveryDelaySeconds ?? null)}</dd>
+            </div>
+            <div class="queue-detail">
+              <dt>{t('admin.queue.deliveryPaused', {}, 'Delivery paused')}</dt>
+              <dd>
+                {queue.settings === null || queue.settings.deliveryPaused === null ? (
+                  <span class="queue-value-muted">-</span>
+                ) : queue.settings.deliveryPaused ? (
+                  <span class="queue-status queue-status--paused">{t('admin.status.enabled', {}, 'Enabled')}</span>
+                ) : (
+                  <span class="queue-status queue-status--active">{t('admin.status.disabled', {}, 'Disabled')}</span>
+                )}
+              </dd>
+            </div>
+            <div class="queue-detail">
+              <dt>{t('admin.queue.retention', {}, 'Message retention')}</dt>
+              <dd>{formatSeconds(queue.settings?.retentionPeriodSeconds ?? null)}</dd>
+            </div>
+            <div class="queue-detail">
+              <dt>{t('admin.queue.consumer', {}, 'Consumer')}</dt>
+              <dd>{queue.consumers.length === 0 ? <span class="queue-value-muted">{t('admin.queue.noConsumers', {}, 'No consumer configuration')}</span> : t('admin.queue.consumerCount', { count: queue.consumers.length }, `${queue.consumers.length} consumer(s)`)}</dd>
+            </div>
+          </dl>
+        </div>
+
+        <div class="queue-card-section queue-card-section--consumers">
+          <div class="queue-section-header">
+            <h4>{t('admin.queue.consumerConfiguration', {}, 'Consumer configuration')}</h4>
+            <span class="queue-section-caption">{t('admin.queue.consumerCount', { count: queue.consumers.length }, `${queue.consumers.length} consumer(s)`)}</span>
+          </div>
+          {queue.consumers.length === 0 ? (
+            <div class="queue-empty" role="status">
+              <strong>{t('admin.queue.noConsumers', {}, 'No consumer configuration')}</strong>
+              <p>{t('admin.queue.noConsumerDescription', {}, 'Account-level consumer details are unavailable for this Queue.')}</p>
+            </div>
+          ) : (
+            <div class="queue-table-wrap">
+              <table class="typecho-list-table queue-consumer-table">
+                <thead>
+                  <tr>
+                    <th>{t('admin.queue.consumerType', {}, 'Consumer type')}</th>
+                    <th>{t('admin.queue.script', {}, 'Worker script')}</th>
+                    <th>{t('admin.queue.batchSize', {}, 'Batch size')}</th>
+                    <th>{t('admin.queue.maxConcurrency', {}, 'Max concurrency')}</th>
+                    <th>{t('admin.queue.maxRetries', {}, 'Max retries')}</th>
+                    <th>{t('admin.queue.maxWaitTime', {}, 'Max wait time')}</th>
+                    <th>{t('admin.queue.retryDelay', {}, 'Retry delay')}</th>
+                    <th>{t('admin.queue.visibilityTimeout', {}, 'Visibility timeout')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {queue.consumers.map(consumer => (
+                    <tr>
+                      <td>{consumerTypeLabel(consumer)}</td>
+                      <td>{consumer.scriptName ? <code>{consumer.scriptName}</code> : '-'}</td>
+                      <td>{formatNumber(consumer.batchSize)}</td>
+                      <td>{consumer.maxConcurrency === 'automatic' ? t('admin.status.default', {}, 'Default') : formatNumber(consumer.maxConcurrency)}</td>
+                      <td>{formatNumber(consumer.maxRetries)}</td>
+                      <td>{formatMilliseconds(consumer.maxWaitTimeMs)}</td>
+                      <td>{formatSeconds(consumer.retryDelaySeconds)}</td>
+                      <td>{formatMilliseconds(consumer.visibilityTimeoutMs)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </section>
+    ))}
+  </div>
+</Admin>
+
+<style>
+  .queue-page {
+    min-width: 0;
+  }
+
+  .queue-intro {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 20px;
+    margin-bottom: 18px;
+  }
+
+  .queue-page-heading {
+    margin: 0 0 4px;
+    font-size: 1.15em;
+  }
+
+  .queue-intro .description {
+    max-width: 860px;
+    margin: 0;
+  }
+
+  .queue-readonly-badge,
+  .queue-source-badge,
+  .queue-status {
+    display: inline-block;
+    border-radius: 3px;
+    padding: 2px 9px;
+    font-size: .857em;
+    line-height: 1.5;
+    white-space: nowrap;
+  }
+
+  .queue-readonly-badge {
+    border: 1px solid #d9d9d6;
+    background: #e9e9e6;
+    color: #666;
+  }
+
+  .queue-notice {
+    margin: 0 0 18px;
+    padding: 10px 15px;
+    border-radius: 3px;
+    text-align: left;
+  }
+
+  .queue-notice p {
+    margin: 0;
+  }
+
+  .queue-notice--warning {
+    background: #fff8e5;
+    color: #765b00;
+  }
+
+  .queue-notice--error {
+    background: #ffeaea;
+    color: #c33;
+  }
+
+  .queue-card {
+    overflow: hidden;
+    border: 1px solid #e0e0dc;
+    border-radius: 3px;
+    background: #fff;
+  }
+
+  .queue-card-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 20px 24px;
+    border-bottom: 1px solid #f0f0ec;
+  }
+
+  .queue-eyebrow {
+    margin: 0 0 4px;
+    color: #999;
+    font-size: .928em;
+  }
+
+  .queue-card-heading h3 {
+    margin: 0;
+    font-size: 1.2em;
+  }
+
+  .queue-card-heading code {
+    color: #444;
+    overflow-wrap: anywhere;
+  }
+
+  .queue-card-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px 12px;
+    text-align: right;
+  }
+
+  .queue-source-badge {
+    border: 1px solid #c8dce5;
+    background: #e7f1f5;
+    color: #467b96;
+  }
+
+  .queue-resource-note,
+  .queue-updated,
+  .queue-section-caption {
+    color: #999;
+    font-size: .928em;
+  }
+
+  .queue-updated {
+    flex-basis: 100%;
+  }
+
+  .queue-metrics {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    border-bottom: 1px solid #f0f0ec;
+  }
+
+  .queue-metric {
+    min-width: 0;
+    padding: 20px 24px;
+    border-right: 1px solid #f0f0ec;
+  }
+
+  .queue-metric:last-child {
+    border-right: 0;
+  }
+
+  .queue-metric-label {
+    display: block;
+    color: #999;
+    font-size: .928em;
+  }
+
+  .queue-metric-value {
+    display: block;
+    margin-top: 6px;
+    color: #444;
+    font-size: 1.65em;
+    font-weight: 600;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+
+  .queue-metric-value--text {
+    font-size: 1.05em;
+  }
+
+  .queue-metric-value--muted,
+  .queue-value-muted {
+    color: #999;
+    font-weight: normal;
+  }
+
+  .queue-card-section {
+    padding: 20px 24px;
+    border-bottom: 1px solid #f0f0ec;
+  }
+
+  .queue-card-section:last-child {
+    border-bottom: 0;
+  }
+
+  .queue-section-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 12px;
+  }
+
+  .queue-section-header h4 {
+    margin: 0;
+  }
+
+  .queue-details {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin: 0;
+    border-top: 1px solid #f0f0ec;
+  }
+
+  .queue-detail {
+    min-width: 0;
+    padding: 12px 16px 12px 0;
+    border-bottom: 1px solid #f0f0ec;
+  }
+
+  .queue-detail:nth-child(even) {
+    padding-right: 0;
+    padding-left: 16px;
+    border-left: 1px solid #f0f0ec;
+  }
+
+  .queue-detail:last-child,
+  .queue-detail:nth-last-child(2):nth-child(odd) {
+    border-bottom: 0;
+  }
+
+  .queue-detail dt {
+    color: #999;
+    font-size: .928em;
+  }
+
+  .queue-detail dd {
+    margin: 4px 0 0;
+    overflow-wrap: anywhere;
+  }
+
+  .queue-status--active {
+    border: 1px solid #d3dbb3;
+    background: #e6efc2;
+    color: #264409;
+  }
+
+  .queue-status--paused {
+    border: 1px solid #e4c6a0;
+    background: #fff6bf;
+    color: #8a6d3b;
+  }
+
+  .queue-table-wrap {
+    overflow-x: auto;
+  }
+
+  .queue-consumer-table {
+    min-width: 860px;
+    table-layout: auto;
+  }
+
+  .queue-consumer-table th,
+  .queue-consumer-table td {
+    white-space: nowrap;
+  }
+
+  .queue-consumer-table td code {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .queue-empty {
+    padding: 14px 16px;
+    border: 1px dashed #d9d9d6;
+    background: #fafaf8;
+    color: #666;
+  }
+
+  .queue-empty p {
+    margin: 4px 0 0;
+    color: #999;
+    font-size: .928em;
+  }
+
+  @media (max-width: 575px) {
+    .queue-intro,
+    .queue-card-header {
+      display: block;
+    }
+
+    .queue-readonly-badge {
+      margin-top: 10px;
+    }
+
+    .queue-card-header {
+      padding: 16px;
+    }
+
+    .queue-card-meta {
+      justify-content: flex-start;
+      margin-top: 12px;
+      text-align: left;
+    }
+
+    .queue-metrics {
+      grid-template-columns: 1fr;
+    }
+
+    .queue-metric {
+      padding: 14px 16px;
+      border-right: 0;
+      border-bottom: 1px solid #f0f0ec;
+    }
+
+    .queue-metric:last-child {
+      border-bottom: 0;
+    }
+
+    .queue-card-section {
+      padding: 16px;
+    }
+
+    .queue-section-header {
+      align-items: flex-start;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .queue-details {
+      grid-template-columns: 1fr;
+    }
+
+    .queue-detail,
+    .queue-detail:nth-child(even),
+    .queue-detail:nth-last-child(-n + 2) {
+      padding: 12px 0;
+      border-right: 0;
+      border-bottom: 1px solid #f0f0ec;
+      border-left: 0;
+    }
+
+    .queue-detail:last-child {
+      border-bottom: 0;
+    }
+
+    .queue-table-wrap {
+      margin: 0 -16px;
+      padding: 0 16px;
+    }
+  }
+</style>

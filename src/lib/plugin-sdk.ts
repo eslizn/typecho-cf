@@ -4,6 +4,22 @@
 
 // ── Types ──
 export type { PluginInitContext, PluginRouteResult, PluginManifest, PluginConfigField } from './plugin';
+export type {
+  AsyncTaskDefinition,
+  RegisteredAsyncTask,
+  RegisteredScheduledTask,
+  ScheduledTaskDefinition,
+  ScheduledTaskKeyContext,
+  ScheduledTaskPayload,
+  TaskEnvelope,
+  TaskExecutionContext,
+  TaskHandler,
+  TaskKind,
+  TaskLocalSlot,
+  TaskResult,
+  TaskSource,
+} from './tasks/types';
+export type { EnqueueAsyncTaskOptions } from './tasks/enqueue';
 export type { I18n, I18nMessage, MessageVariables } from './i18n';
 export type { IanaTimezone, TimezoneSetting } from './timezone';
 export type { AttachmentMeta } from './attachment';

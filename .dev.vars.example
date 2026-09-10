@@ -1,3 +1,9 @@
 # Recommended. Protects /install so only holders of this token can create the first admin.
 # Generate with: openssl rand -hex 32
 INSTALL_TOKEN=change-me
+
+# Optional. Enables account-level Queue configuration and metrics on
+# /admin/manage-queues. Use a Cloudflare API token with Queues Read only for
+# account-level Queue and consumer configuration.
+# CF_ACCOUNT_ID=
+# CF_API_TOKEN=

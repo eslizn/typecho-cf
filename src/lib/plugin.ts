@@ -31,6 +31,21 @@ import {
   stagePluginTranslation,
 } from '@/lib/i18n-registry';
 import type { I18n, ResolvedLocale } from '@/lib/i18n';
+import { env as runtimeEnv } from 'cloudflare:workers';
+import {
+  enqueueAsyncTaskMessage,
+  type EnqueueAsyncTaskOptions,
+} from '@/lib/tasks/enqueue';
+import {
+  registerAsyncTask,
+  registerScheduledTask,
+  resetTaskRegistrations,
+  resetTaskRegistry,
+} from '@/lib/tasks/registry';
+import type {
+  AsyncTaskDefinition,
+  ScheduledTaskDefinition,
+} from '@/lib/tasks/types';
 export {
   getAvailableTranslationLocales,
   getGlobalTranslationCatalogs,
@@ -114,6 +129,15 @@ export interface PluginInitContext {
     messages: Record<string, string>,
     displayName?: string,
   ) => void;
+  registerScheduledTask: (definition: ScheduledTaskDefinition) => void;
+  registerAsyncTask: <TPayload = unknown>(
+    definition: AsyncTaskDefinition<TPayload>,
+  ) => void;
+  enqueueAsyncTask: <TPayload = unknown>(
+    taskId: string,
+    payload: TPayload,
+    options: EnqueueAsyncTaskOptions,
+  ) => Promise<{ jobId: string; taskKey: string; idempotencyKey: string }>;
 }
 
 export interface PluginRouteResult {
@@ -349,6 +373,7 @@ export function resetPluginInitState(): void {
   initialisedPlugins.clear();
   initialisingPlugins.clear();
   failedPlugins.clear();
+  resetTaskRegistry();
   resetPluginTranslationRegistry();
 }
 
@@ -482,6 +507,17 @@ export async function setActivatedPlugins(ctx: HookContext, ids: string[]): Prom
           registerTranslations: (locale, messages, displayName) => {
             stagePluginTranslation(id, locale, messages, displayName);
           },
+          registerScheduledTask: (definition: ScheduledTaskDefinition) => {
+            registerScheduledTask(id, definition);
+          },
+          registerAsyncTask: <TPayload>(definition: AsyncTaskDefinition<TPayload>) => {
+            registerAsyncTask(id, definition);
+          },
+          enqueueAsyncTask: <TPayload>(
+            taskId: string,
+            payload: TPayload,
+            options: EnqueueAsyncTaskOptions,
+          ) => enqueueAsyncTaskMessage(runtimeEnv, id, taskId, payload, options),
         }))
       .then(() => {
         commitPluginTranslationStage(id);
@@ -490,6 +526,7 @@ export async function setActivatedPlugins(ctx: HookContext, ids: string[]): Prom
       })
       .catch(err => {
         discardPluginTranslationStage(id);
+        resetTaskRegistrations(id);
         const message = err instanceof Error ? err.message : String(err);
         const prior = failedPlugins.get(id);
         failedPlugins.set(id, {

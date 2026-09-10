@@ -13,6 +13,13 @@ function collectHooks() {
       hooks.set(point, handler);
     },
     registerTranslations: () => {},
+    registerScheduledTask: () => {},
+    registerAsyncTask: () => {},
+    enqueueAsyncTask: async () => ({
+      jobId: 'test-job',
+      taskKey: 'test-task',
+      idempotencyKey: 'test-key',
+    }),
   });
   const get = hooks.get.bind(hooks);
   hooks.get = ((point: string) => get(normalizeHookPoint(point))) as typeof hooks.get;

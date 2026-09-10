@@ -1,7 +1,10 @@
 name = "typecho-cf"
-main = "@astrojs/cloudflare/entrypoints/server"
+main = "./src/worker.ts"
 compatibility_date = "2026-08-02"
 compatibility_flags = [ "nodejs_compat" ]
+
+[triggers]
+crons = [ "* * * * *" ]
 
 [assets]
 directory = "dist"
@@ -15,6 +18,25 @@ migrations_dir = "drizzle"
 [[r2_buckets]]
 binding = "BUCKET"
 bucket_name = "typecho-cf-uploads"
+
+# Runtime name used by the administrator Queue page. Keep this in sync with
+# the producer/consumer name below when deploying multiple instances.
+[vars]
+QUEUE_NAME = "typecho-cf-tasks"
+
+# The Queue name may be changed per installation when one Cloudflare account
+# hosts multiple Typecho-CF instances. Keep the producer and consumer names
+# aligned for the current installation.
+[[queues.producers]]
+binding = "QUEUE"
+queue = "typecho-cf-tasks"
+
+[[queues.consumers]]
+queue = "typecho-cf-tasks"
+max_batch_size = 100
+max_batch_timeout = 5
+max_retries = 3
+max_concurrency = 1
 
 [observability]
 enabled = true

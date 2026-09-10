@@ -133,6 +133,110 @@ export default function init({ addHook, pluginId }: PluginInitContext): void {
 
 ---
 
+## Scheduled and Asynchronous Tasks
+
+Tasks are integrated through the methods on `PluginInitContext`. A task must be registered during the plugin's `init()` before it can be dispatched by the scheduler or enqueued by a request. Every task handler has the `(context, payload)` signature. Registration does not run at build time; it takes effect when the plugin is initialized as an active plugin.
+
+### `registerScheduledTask()`: Register a scheduled task
+
+Use `registerScheduledTask(definition)` only for tasks driven by the global Cron scheduler:
+
+```typescript
+registerScheduledTask({
+  id: 'daily-sync',
+  schedule: '0 2 * * *',
+  concurrency: 1,
+  timeoutSeconds: 60,
+  handler: async (context, payload) => {
+    // The scheduled payload contains only core-generated localSlot and scheduledAt;
+    // the same time data is also available on context.
+    context.log('daily sync started', {
+      task: context.taskId,
+      hasPayload: payload !== undefined,
+    });
+    if (!context.localSlot) {
+      return { status: 'discard', reason: 'missing local slot' };
+    }
+    // ...perform short, re-entrant synchronization work
+    return { status: 'success' };
+  },
+});
+```
+
+- `id` must be unique within the plugin; the task identity is `{pluginId}:{taskId}`.
+- `schedule` must use exactly five Cron fields: `minute hour day-of-month month day-of-week`; seconds are not supported.
+- `concurrency` and `timeoutSeconds` are optional, with defaults of `1` and `30`; `concurrency` limits this task identity.
+- The scheduled handler's `payload` type is fixed as `ScheduledTaskPayload` and contains only the core-generated `localSlot` and `scheduledAt`; read business parameters from the plugin's own configuration or data source.
+- `getTaskKey(context)` is optional and can split scheduled work by business dimension. The default `taskKey` is `{pluginId}:{taskId}:{localSlot}:{scheduledAt}`, where `scheduledAt` is the real UTC instant; the default idempotency key is `schedule:{taskKey}`. Repeated delivery of the same Cron instant still receives the same default key.
+- The Cloudflare Cron Trigger runs once per minute (`* * * * *`) and invokes the Worker's `scheduled` entry; it is not an HTTP request. The scheduler converts the current UTC instant with the site's `options.timezone` IANA timezone to produce `localSlot`, applying the timezone's DST rules rather than a fixed offset. During a fall-back transition, the two real instants are enqueued separately even when their local-minute slots match; the core does not merge slots across isolates, so plugins should use a business idempotency mechanism when they want to merge them.
+
+### `registerAsyncTask()`: Register a request-originated async task
+
+Use `registerAsyncTask(definition)` for an asynchronous task explicitly enqueued by a request; it has no Cron expression:
+
+```typescript
+registerAsyncTask<{ postId: number; revision: number }>({
+  id: 'reindex-post',
+  concurrency: 4,
+  timeoutSeconds: 30,
+  handler: async (context, payload) => {
+    context.log('reindexing post', { postId: payload.postId });
+    if (context.signal.aborted) {
+      return { status: 'retry', reason: 'execution was cancelled' };
+    }
+    // ...work with payload.postId / payload.revision
+    return { status: 'success' };
+  },
+});
+```
+
+It must be paired with `enqueueAsyncTask()`. If the task is not registered, the plugin is disabled, or the task kind does not match, the message is not executed.
+
+### `enqueueAsyncTask()`: Enqueue from a request
+
+`enqueueAsyncTask(taskId, payload, options)` is the request-originated enqueue method on `PluginInitContext`. It can enqueue only a task already registered with `registerAsyncTask()`. The method always marks the message source as `request`; a plugin cannot forge a `scheduled` source or bypass activation through its arguments.
+
+`options.idempotencyKey` is required and must be a stable business-unique key. `taskKey`, `jobId`, and `delaySeconds` are optional. The method returns `{ jobId, taskKey, idempotencyKey }`. A normal request must provide an explicit stable idempotency key; do not replace it with a newly generated random value on every request:
+
+```typescript
+addHook('post:afterSave', pluginId, async (post: { id?: number; modified?: number }) => {
+  if (post.id == null || post.modified == null) return;
+
+  await enqueueAsyncTask(
+    'reindex-post',
+    { postId: post.id, revision: post.modified },
+    {
+      idempotencyKey: 'post-reindex:' + post.id + ':' + post.modified,
+    },
+  );
+});
+```
+
+Request-originated async tasks and scheduled tasks are separate interfaces. Do not map arbitrary request parameters directly to task names, and do not use `enqueueAsyncTask()` as a replacement for scheduled registration. The core validates the versioned `TaskEnvelope` both when sending and when consuming.
+
+### Results, retries, and concurrency
+
+A handler must return `TaskResult`:
+
+| Return value | Behavior |
+|--------------|----------|
+| `{ status: 'success' }` | Acknowledge the Queue message; do not retry |
+| `{ status: 'retry', reason?, delaySeconds? }` | Request a Queue retry, optionally with a delay |
+| `{ status: 'discard', reason? }` | Intentionally acknowledge and drop the message; do not retry |
+
+If a handler throws, returns an invalid result, or exceeds `timeoutSeconds`, the core treats the execution as failed and requests a Queue retry. A timeout also aborts `context.signal`; the core keeps that task identity's concurrency slot occupied for at most one second after the underlying handler promise times out, giving the plugin a short chance to stop while releasing global dispatcher capacity so other task identities can continue. If the handler is still running after that grace period, the core releases the task slot so a non-cooperative handler cannot block the whole Queue batch indefinitely; its late work may overlap the retry, so plugins must promptly honor `context.signal` and make tasks idempotent. Queue provides at-least-once delivery, batching, and retries; this deployment does not configure a DLQ, so a message that still fails after `max_retries` is discarded by Cloudflare. Do not assume exactly-once execution, and do not treat Queue as a task-history or idempotency-record store. The scheduler limits each `sendBatch` call to 100 messages and 256,000 bytes total, splitting at whichever limit is reached first. `delaySeconds` must be an integer from 0 through 86,400 seconds.
+
+`concurrency` limits only the same `{pluginId}:{taskId}` identity within the current dispatcher. Different tasks may run in parallel, while the core applies a global limit of at most `16` in-flight tasks for the dispatcher. The Queue consumer's outer `max_concurrency = 1` does not make all tasks serial. This is not a distributed lock across PoPs or isolates; plugins that need global mutual exclusion must provide their own business mechanism.
+
+Malformed messages, unknown tasks, and messages for disabled plugins are acknowledged and dropped rather than retried forever. A task whose plugin initialization failed follows the Queue retry policy.
+
+### Payload, idempotency, and security
+
+- `payload` must be JSON-serializable JSON data, and its serialized UTF-8 size must not exceed `32 KiB`; do not pass functions, circular references, non-finite numbers, or other runtime objects.
+- Queue delivery is at least once, so a message may run again after an exception, timeout, or network retry. `idempotencyKey` is a stable business identifier, not automatic deduplication; the core does not create a D1 deduplication table. Plugins must use a business-unique key, a provider idempotency key, or naturally idempotent writes to make repeats safe.
+- Never put passwords, access tokens, cookies, CSRF tokens, complete request headers, or other secrets in a payload, and never write them to `context.log()` or other logs. Log only necessary task metadata and redact business data.
+- A single Queue message is for short, re-entrant work. Long-running, multi-step, waiting, or stateful-recovery flows should not be forced into Queue; Workflow is reserved for a future solution for those long flows, waits, and persisted state, and is not the default path in the first phase.
+
 ## Translations
 
 A plugin can register static catalogs from its `init()` function. Keep the catalogs in the plugin's own `locales/` directory and register them synchronously during initialization:
@@ -345,6 +449,7 @@ The host project supplies the `typecho` package at install time, and `typecho/pl
 | Category | Exports |
 |----------|---------|
 | Types | `PluginInitContext`, `PluginRouteResult`, `PluginManifest`, `PluginConfigField`, `AttachmentMeta`, `Database`, `IanaTimezone`, `TimezoneSetting` |
+| Task types | `AsyncTaskDefinition`, `RegisteredAsyncTask`, `RegisteredScheduledTask`, `ScheduledTaskDefinition`, `ScheduledTaskKeyContext`, `ScheduledTaskPayload`, `TaskEnvelope`, `TaskExecutionContext`, `TaskHandler`, `TaskKind`, `TaskLocalSlot`, `TaskResult`, `TaskSource`, `EnqueueAsyncTaskOptions` |
 | Plugin system | `HookPoints`, `parsePluginOption`, `parsePluginConfigFormData`, `loadPluginConfig`, `escapeAttr`, `registerPluginAdminPath`, `getClientIp` |
 | Auth | `hasPermission`, `verifyPassword` |
 | Content | `buildPermalink`, `formatDate`, `buildAuthorLink`, `buildCategoryLink` |
@@ -398,6 +503,14 @@ function collectHooks() {
     addHook: (point: string, _pluginId: string, handler: Function) => {
       hooks.set(point, handler);
     },
+    registerTranslations: () => {},
+    registerScheduledTask: () => {},
+    registerAsyncTask: () => {},
+    enqueueAsyncTask: async () => ({
+      jobId: 'test-job',
+      taskKey: 'test-task',
+      idempotencyKey: 'test-idempotency',
+    }),
   });
   return hooks;
 }

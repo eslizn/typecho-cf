@@ -1,12 +1,15 @@
 import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 
-const command = process.platform === 'win32' ? 'wrangler.cmd' : 'wrangler';
-const result = spawnSync(command, ['types', 'worker-configuration.d.ts'], {
+const require = createRequire(import.meta.url);
+const wranglerCli = require.resolve('wrangler');
+const args = ['types', 'worker-configuration.d.ts'];
+const result = spawnSync(process.execPath, [wranglerCli, ...args], {
   cwd: process.cwd(),
   stdio: 'inherit',
-  // Node >= 18.20 / 20.12 refuses to spawn .cmd/.bat directly on Windows
-  // (EINVAL); route through cmd.exe so `pnpm run typecheck` works.
-  shell: process.platform === 'win32',
+  // Invoke the pinned CLI entry directly so Windows does not need a shell
+  // trampoline for the generated type file path.
+  windowsHide: true,
 });
 if (result.error) throw result.error;
 if (result.status !== 0) process.exitCode = result.status ?? 1;

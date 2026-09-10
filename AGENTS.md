@@ -162,6 +162,7 @@ src/lib/constants.ts   — 跨模块常量（密码最小长度、slug 后缀上
 |---------|------|------|
 | `DB` | D1 | 数据库 `typecho-cf-db` |
 | `BUCKET` | R2 | 文件存储 `typecho-cf-uploads` |
+| `QUEUE` | Queue | 定时与异步任务主队列 `typecho-cf-tasks` |
 | `ASSETS` | Fetcher | Astro 构建产物中的静态资源，由 Cloudflare adapter 管理 |
 
 ### 5.1 环境变量访问
@@ -527,6 +528,7 @@ src/
 │   ├── markdown.ts                  # Markdown 渲染 + HTML 净化
 │   ├── http.ts                      # 标准化 HTTP 响应（textError / jsonError / jsonOk）
 │   ├── constants.ts                 # 跨模块常量（密码、限速、缓存 TTL）
+│   ├── queue-observability.ts       # Queue 只读指标与账户级配置观测
 │   └── url.ts                       # URL 规范化与校验
 ├── integrations/
 │   ├── plugin-loader.ts             # 构建时插件发现
@@ -536,6 +538,7 @@ src/
 │   ├── admin/                       # 管理后台页面
 │   │   ├── themes.astro             # 外观（主题列表/切换/设置入口）
 │   │   ├── theme-config.astro       # 主题自定义配置表单页
+│   │   ├── manage-queues.astro      # 任务 Queue 只读观测
 │   │   └── plugin/
 │   │       └── [slug].astro         # 插件专属管理页面容器（admin:page hook 注入点）
 │   └── api/
@@ -571,10 +574,14 @@ scripts/
 
 - 使用自定义 `src/worker.ts` 导出 `fetch`、`scheduled`、`queue`；HTTP 交给 Astro Cloudflare handler。
 - Cloudflare Cron 固定每分钟触发一次（`* * * * *`），只负责按当前 UTC instant 和站点 IANA timezone 找出当前 local slot，并向 Queue 投递。
-- Cloudflare Queue 是异步传输、批处理、重试和 DLQ 边界；Queue consumer 的 `max_concurrency = 1` 只限制外层 consumer，不代表所有任务串行。
+- Cloudflare Queue 是异步传输、批处理和重试边界；当前部署不配置 DLQ，达到 `max_retries` 后仍失败的消息由 Cloudflare 丢弃。Queue consumer 的 `max_concurrency = 1` 只限制外层 consumer，不代表所有任务串行。
 - 核心 dispatcher 允许不同 `{pluginId}:{taskId}` 并发；同一 task 的并发由插件声明的 `concurrency` 控制，并受核心 `globalMaxInFlight` 安全上限约束。
 - 第一阶段不新增任务专用 D1 表，不用 D1 保存任务 cursor、历史、队列状态或通用幂等记录；已有 D1 仍用于站点配置、插件激活状态和插件配置。
 - Queue 是至少一次投递；不承诺精确一次、跨 PoP 强全局互斥或错过 Cron 槽位的可靠补偿。插件必须保证任务幂等。
+- `typecho-cf-tasks` 是当前唯一的账户级 Cloudflare Queue 资源；本地/手动执行 `pnpm run deploy` 必须先执行 `scripts/deploy.mjs` 的幂等资源检查，按所选 Wrangler 配置调用项目锁定版本的 `wrangler queues list/create`，缺失时创建、已存在时复用，禁止删除或重建。Deploy Button / Workers Builds 已在构建前按 Wrangler 配置自动准备资源，且已单独执行 Build command；当 `WORKERS_CI=1` 时，`pnpm run deploy` 必须跳过 Queue 检查与重复构建，仅执行 `wrangler deploy`。
+- 从旧版双 Queue 部署升级时，普通部署不得自动删除 `typecho-cf-tasks-dlq`；确认旧 Queue 不再需要后，必须显式执行 `pnpm run queues:cleanup-legacy -- --confirm typecho-cf-tasks-dlq`，该命令只允许删除固定的旧名称，并先检查当前 Wrangler 配置未引用它。Button / Workers Builds 不执行该清理。
+- Workers Builds 的非生产分支必须使用 `wrangler versions upload`（项目命令可写为 `pnpm exec wrangler versions upload`），不得复用会执行生产 `wrangler deploy` 的手动部署路径。
+- `pnpm run deploy -- --dry-run` 不得创建 Queue；Queue 资源创建失败必须终止部署，不能用 `|| true` 吞掉权限、认证或网络错误。
 
 ### 13.2 插件接口约束
 
@@ -582,19 +589,29 @@ scripts/
 - 任务必须先注册再执行；普通请求不能通过参数选择任意插件任务或绕过插件激活状态。
 - 每条消息使用版本化 `TaskEnvelope`，包含稳定 `jobId`、`taskKey`、`idempotencyKey`、来源和时间信息；投递侧、消费侧都要校验。
 - 插件 handler 必须处理重复投递，使用业务唯一键、provider 幂等键或天然幂等操作；核心不隐式引入 D1 去重表。
-- 插件可以返回 `success`、`retry` 或 `discard`；异常和超时默认可重试，但受 Queue `max_retries` 和 DLQ 约束。
+- 插件可以返回 `success`、`retry` 或 `discard`；异常和超时默认可重试，但受 Queue `max_retries` 约束；当前部署没有 DLQ，耗尽重试后消息会被丢弃。
 - payload 必须可 JSON 序列化并受大小、字段和 schema 校验；不得携带密码、Cookie、CSRF token、访问令牌或完整请求头。
+- Scheduler 使用 Queue `sendBatch` 时必须同时遵守最多 100 条与整批 256,000 bytes 上限，按先达到的条件切批；`delaySeconds` 必须在 0 到 86,400 秒之间。
 - 长耗时、多步骤、需要持久化恢复的流程不应塞入 Queue 单条消息；按设计规范升级为拆分任务、Durable Object 或 Workflow。
 
 ### 13.3 时间、生命周期与可靠性
 
 - Cron 的 `controller.scheduledTime` 是 UTC instant；本地时间必须从现有 `options.timezone` 的 IANA 标识运行时计算，不能使用固定 offset。
-- 默认定时 `taskKey` 按 `{pluginId}:{taskId}:{localSlot}` 生成；夏令时回拨默认合并重复本地槽位，需要区分真实 instant 时由任务提供自定义 key。
+- 默认定时 `taskKey` 按 `{pluginId}:{taskId}:{localSlot}:{scheduledAt}` 生成，其中 `scheduledAt` 是真实 UTC instant；夏令时回拨的两个真实 instant 会分别投递，不承诺跨 isolate 合并，插件仍必须自行保证幂等。
 - 插件 loader 在构建时登记，任务注册在激活插件 `init()` 中完成；HTTP、scheduled、queue 冷启动都必须先加载 registry，再以当前激活插件集合为准。
+- 插件 `init()` 失败时，已完成的任务注册必须回滚；后续初始化重试不得因上一次失败留下的任务定义而产生重复注册冲突。
 - 插件停用后，即使当前 isolate 仍保留旧注册表条目，queue dispatch 也必须跳过其副作用。
 - 任务专用模块放在 `src/lib/tasks/`，不要继续膨胀 `src/lib/plugin.ts`；公共类型通过 `src/lib/plugin-sdk.ts` 导出。
 
-### 13.4 协作与验证约定
+### 13.4 队列观测后台
+
+- 管理员通过 `/admin/manage-queues` 查看任务 Queue；该页面只读，不提供消息拉取、租约、删除、重放或暂停操作。
+- 页面不新增任务专用 D1 表，也不承诺提供单条任务的运行中/已完成历史；只展示 Queue 的近实时积压指标、账户级资源配置和 consumer 配置。
+- 主 Queue 使用 Worker `QUEUE.metrics()`，不需要 API 凭据；账户级配置仅在配置 `CF_ACCOUNT_ID` 与 `CF_API_TOKEN` 后通过 Cloudflare Queue API 读取。API Token 必须是只读权限，凭据只能通过 Worker secret / 本地 `.dev.vars` 提供，不得写入页面、日志或任务 payload。
+- `QUEUE_NAME` 必须和 Wrangler producer/consumer 的 Queue 名称保持一致；多实例部署修改 Queue 名称时必须同步修改该变量。
+- 观测请求必须设置超时、限制响应体和分页范围，并在 API 失败时降级为不可用状态，不得把上游错误详情或凭据返回给管理员页面。
+
+### 13.5 协作与验证约定
 
 - 任务系统属于架构级变更；实施前先更新设计规范和实施计划，文档评审通过后再写代码。
 - 可并行的工作必须按不重叠文件集合拆分；`plugin.ts`、`plugin-sdk.ts`、`wrangler.toml`、`src/worker.ts` 等共享边界由主协作者或单一子任务负责集成，避免并发冲突。

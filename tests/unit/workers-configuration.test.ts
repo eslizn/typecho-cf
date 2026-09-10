@@ -12,6 +12,9 @@ describe('Workers configuration and static checks', () => {
     const ci = read('.github/workflows/ci.yml');
     expect(config).toContain('binding = "BUCKET"');
     expect(config).toContain('binding = "DB"');
+    expect(config).toContain('queue = "typecho-cf-tasks"');
+    expect(config).not.toContain('dead_letter_queue');
+    expect(config).not.toContain('typecho-cf-tasks-dlq');
     expect(pkg.scripts['types:workers']).toContain('scripts/generate-worker-types.mjs');
     expect(pkg.scripts.typecheck).toContain('pnpm run types:workers');
     expect(pkg.scripts.typecheck).toContain('tsc --noEmit');

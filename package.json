@@ -26,7 +26,9 @@
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",
-    "deploy": "pnpm build && wrangler deploy",
+    "deploy": "node scripts/deploy.mjs",
+    "queues:ensure": "node scripts/ensure-queues.mjs",
+    "queues:cleanup-legacy": "node scripts/cleanup-legacy-queue.mjs",
     "reinstall:extensions": "node scripts/reinstall-extensions.mjs",
     "lint": "eslint \"src/**/*.ts\"",
     "types:workers": "node scripts/generate-worker-types.mjs",

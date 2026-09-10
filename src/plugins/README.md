@@ -133,6 +133,109 @@ export default function init({ addHook, pluginId }: PluginInitContext): void {
 
 ---
 
+## 定时与异步任务
+
+任务通过 `PluginInitContext` 提供的接口接入。任务必须在插件 `init()` 中先注册，再由调度器或请求态入队执行；任务处理函数统一使用 `(context, payload)` 参数。任务注册不会在构建时执行，只有激活插件初始化后才会生效。
+
+### `registerScheduledTask()`：注册定时任务
+
+`registerScheduledTask(definition)` 只用于声明由全局 Cron 调度的任务：
+
+```typescript
+registerScheduledTask({
+  id: 'daily-sync',
+  schedule: '0 2 * * *',
+  concurrency: 1,
+  timeoutSeconds: 60,
+  handler: async (context, payload) => {
+    // 定时 payload 只包含核心生成的 localSlot 和 scheduledAt；同样可从 context 读取
+    context.log('daily sync started', {
+      task: context.taskId,
+      hasPayload: payload !== undefined,
+    });
+    if (!context.localSlot) {
+      return { status: 'discard', reason: 'missing local slot' };
+    }
+    // ...执行短时、可重入的同步工作
+    return { status: 'success' };
+  },
+});
+```
+
+- `id` 在同一插件内必须唯一；任务身份是 `{pluginId}:{taskId}`。
+- `schedule` 必须是标准五字段 Cron：`分钟 小时 月内日期 月份 星期`，不支持秒字段。
+- `concurrency` 和 `timeoutSeconds` 可选，默认分别为 `1` 和 `30`；`concurrency` 是该任务身份的并发上限。
+- 定时 handler 的 `payload` 类型固定为 `ScheduledTaskPayload`，只包含核心生成的 `localSlot` 与 `scheduledAt`；业务参数应通过插件自己的配置或数据源读取。
+- `getTaskKey(context)` 可选，用于需要按业务维度拆分定时任务的场景。默认 `taskKey` 为 `{pluginId}:{taskId}:{localSlot}:{scheduledAt}`，其中 `scheduledAt` 是真实 UTC instant；默认幂等键为 `schedule:{taskKey}`。同一 Cron instant 的重复投递仍会得到同一默认 key。
+- Cloudflare Cron Trigger 固定每分钟触发（`* * * * *`），平台调用 Worker 的 `scheduled` 入口；它不是 HTTP 请求。调度器使用当前 UTC instant，结合站点 `options.timezone` 的 IANA 时区计算 `localSlot`，并按 IANA 规则处理夏令时，不能使用固定 offset。夏令时回拨时，两个真实 instant 会分别投递，即使它们的本地分钟相同；核心不提供跨 isolate 的槽位合并，插件应使用业务幂等机制决定是否合并。
+
+### `registerAsyncTask()`：注册请求态异步任务
+
+`registerAsyncTask(definition)` 用于声明由请求显式入队的异步任务，不设置 Cron：
+
+```typescript
+registerAsyncTask<{ postId: number; revision: number }>({
+  id: 'reindex-post',
+  concurrency: 4,
+  timeoutSeconds: 30,
+  handler: async (context, payload) => {
+    context.log('reindexing post', { postId: payload.postId });
+    if (context.signal.aborted) {
+      return { status: 'retry', reason: 'execution was cancelled' };
+    }
+    // ...使用 payload.postId / payload.revision 执行工作
+    return { status: 'success' };
+  },
+});
+```
+
+它必须与 `enqueueAsyncTask()` 配对使用。任务未注册、插件已停用或任务类型不匹配时，消息不会执行。
+
+### `enqueueAsyncTask()`：从请求态入队
+
+`enqueueAsyncTask(taskId, payload, options)` 是 `PluginInitContext` 上的请求态入队方法，只能入队已经通过 `registerAsyncTask()` 注册的任务。它固定将消息来源标记为 `request`，插件不能通过参数伪造 `scheduled` 来源或绕过激活状态。
+
+`options.idempotencyKey` 是必填项，必须使用稳定的业务唯一键；`taskKey`、`jobId` 和 `delaySeconds` 可选。方法返回 `{ jobId, taskKey, idempotencyKey }`。普通请求必须显式提供幂等键，不要用每次随机生成的值代替：
+
+```typescript
+addHook('post:afterSave', pluginId, async (post: { id?: number; modified?: number }) => {
+  if (post.id == null || post.modified == null) return;
+
+  await enqueueAsyncTask(
+    'reindex-post',
+    { postId: post.id, revision: post.modified },
+    {
+      idempotencyKey: 'post-reindex:' + post.id + ':' + post.modified,
+    },
+  );
+});
+```
+
+请求态异步任务和定时任务是两个不同的接口：不要让普通请求把任意参数直接映射成任务名，也不要用 `enqueueAsyncTask()` 代替定时注册。核心会在投递侧和消费侧校验版本化 `TaskEnvelope`。
+
+### 处理结果、重试与并发
+
+handler 必须返回 `TaskResult`：
+
+| 返回值 | 行为 |
+|--------|------|
+| `{ status: 'success' }` | 成功确认 Queue 消息，不再重试 |
+| `{ status: 'retry', reason?, delaySeconds? }` | 请求 Queue 重试，可指定延迟 |
+| `{ status: 'discard', reason? }` | 有意丢弃并确认消息，不再重试 |
+
+handler 抛出异常、返回非法结果或超过 `timeoutSeconds` 时，核心会把执行视为失败并请求 Queue 重试；超时同时会触发 `context.signal.abort()`，核心会在底层 handler Promise settle 前最多保留该任务的并发槽位 1 秒，以便插件及时停止工作，同时释放全局 dispatcher 槽位以继续执行其他任务。若底层 handler 超过这段宽限期仍未结束，核心会释放任务槽位，避免一个不响应取消的 handler 无限阻塞整个 Queue batch；此时迟到的 handler 可能与重试重叠，因此插件必须及时响应 `context.signal` 并保证任务幂等。Queue 负责至少一次投递、批处理和重试；当前部署未配置 DLQ，达到 `max_retries` 后仍失败的消息会被 Cloudflare 丢弃。不要假设精确一次执行，也不要把 Queue 当作任务历史或幂等记录库。Scheduler 的 `sendBatch` 每批最多 100 条且总大小不超过 256,000 bytes，按先达到的限制切批；`delaySeconds` 只能是 0 到 86,400 秒的整数。
+
+`concurrency` 只限制同一个 `{pluginId}:{taskId}` 在当前 dispatcher 中的并发数；不同任务可以并行执行，核心对整个 dispatcher 施加全局最多 `16` 个 in-flight 任务。Queue consumer 的外层 `max_concurrency = 1` 不代表所有任务串行。这个限制不是跨 PoP、跨 isolate 的分布式锁；需要全局互斥时必须由插件使用自己的业务机制。
+
+坏消息、未知任务和已停用插件的消息会被确认并丢弃，不会无限重试。插件初始化失败的任务会按 Queue 重试策略重试。
+
+### Payload、幂等与安全
+
+- `payload` 必须是可 JSON 序列化的 JSON 值，并且序列化后的 UTF-8 大小不超过 `32 KiB`；不要传递函数、循环引用、非有限数字或其他运行时对象。
+- Queue 是至少一次投递，重复消息可能在异常、超时或网络重试后再次执行。`idempotencyKey` 只是稳定的业务标识，核心不会自动用 D1 建去重表；插件必须用业务唯一键、第三方 provider 的幂等键或天然幂等写入保证重复执行安全。
+- 禁止把密码、访问令牌、Cookie、CSRF token、完整请求头或其他 secret 放进 payload，也不要写入 `context.log()` 或其他日志。日志只记录必要的任务元数据，业务数据应脱敏。
+- 单条 Queue 消息只适合短时、可重入的工作。长耗时、多步骤、需要等待或需要持久化恢复状态的流程不应硬塞进 Queue；Workflow 仅作为未来承载这类长流程、等待和状态持久化的方案，不是第一阶段的默认路径。
+
 ## 多语言翻译
 
 插件可以在 `init()` 中注册静态翻译件。翻译件应放在插件包自己的 `locales/` 目录，并在初始化时同步注册：
@@ -345,6 +448,7 @@ import { schema } from 'typecho/db';
 | 类别 | 导出 |
 |------|------|
 | 类型 | `PluginInitContext`, `PluginRouteResult`, `PluginManifest`, `PluginConfigField`, `AttachmentMeta`, `Database`, `IanaTimezone`, `TimezoneSetting` |
+| 任务类型 | `AsyncTaskDefinition`, `RegisteredAsyncTask`, `RegisteredScheduledTask`, `ScheduledTaskDefinition`, `ScheduledTaskKeyContext`, `ScheduledTaskPayload`, `TaskEnvelope`, `TaskExecutionContext`, `TaskHandler`, `TaskKind`, `TaskLocalSlot`, `TaskResult`, `TaskSource`, `EnqueueAsyncTaskOptions` |
 | 插件系统 | `HookPoints`, `parsePluginOption`, `parsePluginConfigFormData`, `loadPluginConfig`, `escapeAttr`, `registerPluginAdminPath`, `registerPluginRoute`, `getClientIp` |
 | 认证 | `hasPermission`, `verifyPassword` |
 | 内容 | `buildPermalink`, `formatDate`, `buildAuthorLink`, `buildCategoryLink` |
@@ -398,6 +502,14 @@ function collectHooks() {
     addHook: (point: string, _pluginId: string, handler: Function) => {
       hooks.set(point, handler);
     },
+    registerTranslations: () => {},
+    registerScheduledTask: () => {},
+    registerAsyncTask: () => {},
+    enqueueAsyncTask: async () => ({
+      jobId: 'test-job',
+      taskKey: 'test-task',
+      idempotencyKey: 'test-idempotency',
+    }),
   });
   return hooks;
 }

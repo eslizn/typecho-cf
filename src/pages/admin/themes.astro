@@ -53,15 +53,14 @@ const themes = getAvailableThemes(options.theme || 'typecho-theme-minimal');
 <Admin title={ctx.i18n.t('admin.page.themes', {}, 'Appearance')} options={options} urls={urls} user={user} activeMenu="themes" pluginCtx={ctx}>
   <div class="col-mb-12" role="main">
     {message && (
-      <div class={`typecho-option-tabs notice typecho-dismissible ${messageType === 'error' ? 'notice-error' : 'notice-success'}`}
-        style={`padding: 10px 15px; margin-bottom: 20px; border-radius: 3px; ${messageType === 'error' ? 'background: #ffeaea; color: #c33;' : 'background: #e7f5e7; color: #3a3;'}`}>
+      <div class={`typecho-option-tabs notice typecho-dismissible admin-notice ${messageType === 'error' ? 'notice-error admin-notice--error' : 'notice-success admin-notice--success'}`}>
         <p>{message}</p>
         <button type="button" class="typecho-notice-close" aria-label={ctx.i18n.t('admin.action.closeNotice', {}, 'Close notice')}>&times;</button>
       </div>
     )}
 
     {themes.length === 0 ? (
-      <div class="typecho-mini-panel" style="text-align: center; padding: 40px 20px;">
+      <div class="admin-panel admin-panel--empty">
         <h3>{ctx.i18n.t('admin.notice.noThemes', {}, 'No themes')}</h3>
       </div>
     ) : (
@@ -73,43 +72,43 @@ const themes = getAvailableThemes(options.theme || 'typecho-theme-minimal');
           </div>
         </div>
 
-        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 20px;">
+        <div class="admin-theme-grid">
         {themes.map((theme) => (
-          <div class="typecho-mini-panel" style={`border: 2px solid ${theme.isActive ? '#467B96' : '#e0e0e0'}; border-radius: 6px; overflow: hidden; position: relative;`}>
-            <div style="height: 180px; background: #f5f5f5; display: flex; align-items: center; justify-content: center; overflow: hidden;">
+          <div class:list={['admin-panel', 'admin-theme-card', { 'admin-theme-card--active': theme.isActive }]}>
+            <div class="admin-theme-card__preview">
               {theme.manifest.screenshot ? (
                 <img
                   src={theme.isDefault ? '/img/theme-default.png' : `/themes/${theme.id}/screenshot.${(theme.manifest.screenshot || 'png').split('.').pop()}`}
                   alt={theme.manifest.name}
-                  style="width: 100%; height: 100%; object-fit: cover;"
-                  onerror="this.style.display='none';this.parentElement.querySelector('.theme-fallback').style.display='block'"
+                  class="admin-theme-card__image"
+                  onerror="this.classList.add('hidden');this.parentElement.querySelector('.theme-fallback').classList.remove('hidden')"
                 />
               ) : null}
-              <div class="theme-fallback" style={`text-align: center; color: #999; ${theme.manifest.screenshot ? 'display:none;' : ''}`}>
-                <div style="font-size: 28px; margin-bottom: 8px; font-weight: bold; color: #467B96;">T</div>
-                <div style="font-size: 13px;">{theme.manifest.name}</div>
+              <div class:list={['theme-fallback', 'admin-theme-card__fallback', { hidden: !!theme.manifest.screenshot }]}>
+                <div class="admin-theme-card__fallback-mark">T</div>
+                <div>{theme.manifest.name}</div>
               </div>
             </div>
 
             {theme.isActive && (
-              <div style="position: absolute; top: 10px; right: 10px; background: #467B96; color: white; padding: 2px 10px; border-radius: 3px; font-size: 12px;">
+              <div class="admin-badge admin-badge--active admin-theme-card__current">
                 {ctx.i18n.t('admin.theme.current', {}, 'Current')}
               </div>
             )}
 
-            <div style="padding: 15px;">
-              <h3 style="margin: 0 0 5px 0; font-size: 16px;">{theme.manifest.name || theme.id}</h3>
+            <div class="admin-theme-card__body">
+              <h3 class="admin-theme-card__title">{theme.manifest.name || theme.id}</h3>
               {theme.manifest.version && (
-                <span style="font-size: 12px; color: #999;">v{theme.manifest.version}</span>
+                <span class="admin-theme-card__version">v{theme.manifest.version}</span>
               )}
 
               {theme.manifest.description && (
-                <p class="description" style="margin: 8px 0; font-size: 13px; color: #666; line-height: 1.5;">
+                <p class="description admin-theme-card__description">
                   {theme.manifest.description}
                 </p>
               )}
 
-              <div style="font-size: 12px; color: #999; margin-bottom: 12px;">
+              <div class="admin-theme-card__meta">
                 {theme.manifest.author && (
                   <span>
                     {ctx.i18n.t('admin.theme.author', {}, 'Author')}:
@@ -120,36 +119,36 @@ const themes = getAvailableThemes(options.theme || 'typecho-theme-minimal');
                     )}
                   </span>
                 )}
-                <span style="margin-left: 8px;">· {theme.isDefault ? ctx.i18n.t('admin.status.builtIn', {}, 'Built-in') : ctx.i18n.t('admin.theme.npm', { packageName: theme.packageName }, `npm: ${theme.packageName}`)}</span>
+                <span> · {theme.isDefault ? ctx.i18n.t('admin.status.builtIn', {}, 'Built-in') : ctx.i18n.t('admin.theme.npm', { packageName: theme.packageName }, `npm: ${theme.packageName}`)}</span>
               </div>
 
-              <div style="display: flex; gap: 8px; align-items: center;">
+              <div class="admin-actions">
                 {theme.isActive ? (
-                  <span class="btn" style="cursor: default; opacity: 0.6;">{ctx.i18n.t('admin.status.enabled', {}, 'Enabled')}</span>
+                  <span class="admin-badge admin-badge--muted">{ctx.i18n.t('admin.status.enabled', {}, 'Enabled')}</span>
                 ) : (
-                  <form method="post" action="/admin/themes" style="display: inline;">
+                  <form method="post" action="/admin/themes" class="admin-inline-form">
                     <input type="hidden" name="_" value={csrfToken} />
                     <input type="hidden" name="action" value="activate" />
                     <input type="hidden" name="theme" value={theme.id} />
-                    <button type="submit" class="btn primary">{ctx.i18n.t('admin.action.enable', {}, 'Enable')}</button>
+                    <button type="submit" class="btn btn-s primary">{ctx.i18n.t('admin.action.enable', {}, 'Enable')}</button>
                   </form>
                 )}
 
                 {themeHasConfig(theme.id) && (
-                  <a href={`/admin/theme-config?id=${theme.id}`} class="btn" style="text-decoration: none;">
+                  <a href={`/admin/theme-config?id=${theme.id}`} class="btn btn-s">
                     {ctx.i18n.t('admin.action.settings', {}, 'Settings')}
                   </a>
                 )}
 
                 {theme.manifest.homepage && (
                   <a href={theme.manifest.homepage} target="_blank" rel="noopener noreferrer"
-                    class="btn" style="text-decoration: none;">
+                    class="btn btn-s">
                     {ctx.i18n.t('admin.action.details', {}, 'Details')}
                   </a>
                 )}
 
                 <a href={`${urls.adminUrl}theme-preview?theme=${encodeURIComponent(theme.id)}`} target="_blank" rel="noopener noreferrer"
-                  class="btn" style="text-decoration: none;">
+                  class="btn btn-s">
                   {ctx.i18n.t('admin.theme.preview', {}, 'Preview')}
                 </a>
               </div>

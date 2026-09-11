@@ -89,7 +89,7 @@ const editTag: any = editRows[0] ?? null;
   </div>
 
   <div class="col-mb-12 col-tb-4" role="form">
-    <div class="typecho-mini-panel">
+    <div class="admin-panel">
       <form method="post" action="/api/admin/meta">
         <input type="hidden" name="_" value={csrfToken} />
         <input type="hidden" name="action" value={editTag ? 'update' : 'create'} />

@@ -77,8 +77,8 @@ const commentsPostIntervalMinutes = options.commentsPostInterval
               <input type="checkbox" id="commentsPageBreak" name="commentsPageBreak" value="1"
                 checked={!!options.commentsPageBreak && options.commentsPageBreak !== '0'} />
               <label for="commentsPageBreak">{ctx.i18n.t('admin.description.commentsPaginationLabel', {}, 'Enable comment pagination. Show')}</label>
-              <input type="text" id="commentsPageSize" name="commentsPageSize" class="text-s"
-                value={options.commentsPageSize || '20'} style="width: 40px;" />
+              <input type="text" id="commentsPageSize" name="commentsPageSize" class="text-s admin-width-40"
+                value={options.commentsPageSize || '20'} />
               {ctx.i18n.t('admin.unit.commentsPerPage', {}, 'comments per page; use the')}
               <select name="commentsPageDisplay" id="commentsPageDisplay">
                 <option value="last" selected={!options.commentsPageDisplay || options.commentsPageDisplay === 'last'}>{ctx.i18n.t('admin.option.last', {}, 'Last')}</option>
@@ -146,16 +146,16 @@ const commentsPostIntervalMinutes = options.commentsPostInterval
               <input type="checkbox" id="commentsAutoClose" name="commentsAutoClose" value="1"
                 checked={!!options.commentsAutoClose && options.commentsAutoClose !== '0'} />
               <label for="commentsAutoClose">{ctx.i18n.t('admin.description.commentsAutoCloseLabel', {}, 'Automatically close comments')}</label>
-              <input type="text" id="commentsPostTimeout" name="commentsPostTimeout" class="text-s"
-                value={String(commentsPostTimeoutDays)} style="width: 40px;" />
+              <input type="text" id="commentsPostTimeout" name="commentsPostTimeout" class="text-s admin-width-40"
+                value={String(commentsPostTimeoutDays)} />
               {ctx.i18n.t('admin.unit.daysAfter', {}, 'days after publication.')}
             </li>
             <li>
               <input type="checkbox" id="commentsPostIntervalEnable" name="commentsPostIntervalEnable" value="1"
                 checked={!!options.commentsPostIntervalEnable && options.commentsPostIntervalEnable !== '0'} />
               <label for="commentsPostIntervalEnable">{ctx.i18n.t('admin.description.commentsIntervalLabel', {}, 'Limit comments from the same IP to one every')}</label>
-              <input type="text" id="commentsPostInterval" name="commentsPostInterval" class="text-s"
-                value={String(commentsPostIntervalMinutes)} style="width: 40px;" />
+              <input type="text" id="commentsPostInterval" name="commentsPostInterval" class="text-s admin-width-40"
+                value={String(commentsPostIntervalMinutes)} />
               {ctx.i18n.t('admin.unit.minutes', {}, 'minutes.')}
             </li>
           </ul>

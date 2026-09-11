@@ -147,8 +147,7 @@ function selectedAttr(actual: unknown, expected: unknown): true | undefined {
 ---
 <div class="col-mb-12 col-tb-8 col-tb-offset-2" role="form">
   {message && (
-    <div class="typecho-option-tabs notice typecho-dismissible notice-success"
-      style="padding: 10px 15px; margin-bottom: 20px; border-radius: 3px; background: #e7f5e7; color: #3a3;">
+    <div class="typecho-option-tabs notice typecho-dismissible notice-success admin-notice admin-notice--success">
       <p>{message}</p>
       <button type="button" class="typecho-notice-close" aria-label={t('admin.action.closeNotice', {}, 'Close notice')}>&times;</button>
     </div>
@@ -202,7 +201,7 @@ function selectedAttr(actual: unknown, expected: unknown): true | undefined {
             {field.type === 'radio' && field.options && (
               <p>
                 {Object.entries(field.options).map(([optVal, optLabel]) => (
-                  <span style="margin-right: 15px;">
+                  <span class="admin-choice">
                     <input
                       type="radio"
                       id={`cfg-${key}-${optVal}`}
@@ -238,7 +237,7 @@ function selectedAttr(actual: unknown, expected: unknown): true | undefined {
                     ? value.includes(optVal)
                     : String(value) === optVal;
                   return (
-                    <span style="margin-right: 15px;">
+                    <span class="admin-choice">
                       <input
                         type="checkbox"
                         id={`cfg-${key}-${optVal}`}
@@ -393,7 +392,7 @@ function selectedAttr(actual: unknown, expected: unknown): true | undefined {
     <ul class="typecho-option typecho-option-submit">
       <li>
         <button type="submit" class="btn primary">{t('admin.action.save', {}, 'Save settings')}</button>
-        <a href={backHref} class="btn" style="margin-left: 10px;">{backLabel}</a>
+        <a href={backHref} class="btn">{backLabel}</a>
       </li>
     </ul>
   </form>

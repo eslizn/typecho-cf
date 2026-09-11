@@ -119,12 +119,12 @@ function metricValueClass(value: number | null, text = false): string {
     </div>
 
     {!snapshot.api.configured && (
-      <div class="typecho-option-tabs notice queue-notice queue-notice--warning" role="status">
+      <div class="admin-notice admin-notice--warning queue-notice" role="status">
         <p>{t('admin.queue.apiNotConfigured', {}, 'Cloudflare Queue API read-only credentials are not configured. Only realtime metrics available from the Worker binding are shown.')}</p>
       </div>
     )}
     {snapshot.api.configured && !snapshot.api.available && (
-      <div class="typecho-option-tabs notice notice-error queue-notice queue-notice--error" role="alert">
+      <div class="admin-notice admin-notice--error queue-notice" role="alert">
         <p>{t('admin.queue.apiUnavailable', {}, 'The Cloudflare Queue API is temporarily unavailable. Configuration and some metrics may be missing.')}</p>
       </div>
     )}
@@ -285,23 +285,10 @@ function metricValueClass(value: number | null, text = false): string {
 
   .queue-notice {
     margin: 0 0 18px;
-    padding: 10px 15px;
-    border-radius: 3px;
-    text-align: left;
   }
 
   .queue-notice p {
     margin: 0;
-  }
-
-  .queue-notice--warning {
-    background: #fff8e5;
-    color: #765b00;
-  }
-
-  .queue-notice--error {
-    background: #ffeaea;
-    color: #c33;
   }
 
   .queue-card {

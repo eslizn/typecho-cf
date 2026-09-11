@@ -103,15 +103,13 @@ const pluginDescription = (plugin: typeof plugins[number]): string => plugin.isA
 <Admin title={ctx.i18n.t('admin.page.plugins', {}, 'Plugin management')} options={options} urls={urls} user={user} activeMenu="plugins" pluginCtx={ctx}>
   <div class="col-mb-12" role="main">
     {message && (
-      <div class={`typecho-option-tabs notice typecho-dismissible ${messageType === 'error' ? 'notice-error' : 'notice-success'}`}
-        style={`padding: 10px 15px; margin-bottom: 20px; border-radius: 3px; ${messageType === 'error' ? 'background: #ffeaea; color: #c33;' : 'background: #e7f5e7; color: #3a3;'}`}>
+      <div class={`typecho-option-tabs notice typecho-dismissible admin-notice ${messageType === 'error' ? 'notice-error admin-notice--error' : 'notice-success admin-notice--success'}`}>
         <p>{message}</p>
         <button type="button" class="typecho-notice-close" aria-label={ctx.i18n.t('admin.action.closeNotice', {}, 'Close notice')}>&times;</button>
       </div>
     )}
     {Object.keys(initFailures).length > 0 && (
-      <div class="typecho-option-tabs notice notice-error typecho-dismissible"
-        style="padding: 10px 15px; margin-bottom: 20px; border-radius: 3px; background: #ffeaea; color: #c33;">
+      <div class="typecho-option-tabs notice notice-error typecho-dismissible admin-notice admin-notice--error">
         <p>{ctx.i18n.t('admin.plugin.initializationFailed', {}, 'The following active plugins failed to initialize (they will be retried):')}</p>
         <ul>
           {Object.entries(initFailures).map(([id, failure]) => (
@@ -123,7 +121,7 @@ const pluginDescription = (plugin: typeof plugins[number]): string => plugin.isA
     )}
 
     {pluginCount === 0 ? (
-      <div class="typecho-mini-panel" style="text-align: center; padding: 40px 20px;">
+      <div class="admin-panel admin-panel--empty">
         <h3>{ctx.i18n.t('admin.notice.noPlugins', {}, 'No plugins')}</h3>
       </div>
     ) : (
@@ -165,12 +163,12 @@ const pluginDescription = (plugin: typeof plugins[number]): string => plugin.isA
                       )}
                     </strong>
                     {plugin.isActive && (
-                      <span style="margin-left: 8px; background: #467B96; color: white; padding: 1px 8px; border-radius: 3px; font-size: 11px;">
+                      <span class="admin-badge admin-badge--active">
                         {ctx.i18n.t('admin.status.enabled', {}, 'Enabled')}
                       </span>
                     )}
                     <br />
-                    <small style="color: #999;">
+                    <small class="admin-meta">
                       {plugin.manifest.author && (
                         <span>
                           {ctx.i18n.t('admin.theme.author', {}, 'Author')}: {plugin.manifest.authorUrl ? (
@@ -192,16 +190,13 @@ const pluginDescription = (plugin: typeof plugins[number]): string => plugin.isA
                     {plugin.manifest.version || '-'}
                   </td>
                   <td>
-                    <form method="post" action="/admin/plugins" style="display: inline;">
+                    <form method="post" action="/admin/plugins" class="admin-actions">
                       <input type="hidden" name="_" value={csrfToken} />
                       <input type="hidden" name="plugin" value={plugin.id} />
                       {plugin.isActive ? (
                         <>
                           {pluginHasConfig(plugin.id) && (
-                            <>
-                              <a href={`/admin/plugin-config?id=${plugin.id}`}>{ctx.i18n.t('admin.action.settings', {}, 'Settings')}</a>
-                              {' · '}
-                            </>
+                            <a href={`/admin/plugin-config?id=${plugin.id}`} class="btn btn-s">{ctx.i18n.t('admin.action.settings', {}, 'Settings')}</a>
                           )}
                           <input type="hidden" name="action" value="deactivate" />
                           <button type="submit" class="btn btn-s">{ctx.i18n.t('admin.action.disable', {}, 'Disable')}</button>

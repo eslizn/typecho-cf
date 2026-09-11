@@ -598,13 +598,8 @@ function adminFooterHtml(i18n?: I18n): string {
     if (old && old.parentNode) old.parentNode.removeChild(old);
     var box = document.createElement('div');
     var isError = type === 'error';
-    box.className = 'typecho-wechat-notice typecho-option-tabs notice typecho-dismissible ' + (isError ? 'notice-error' : 'notice-success');
-    box.style.padding = '10px 15px';
-    box.style.marginBottom = '20px';
-    box.style.borderRadius = '3px';
-    box.style.background = isError ? '#ffeaea' : '#e7f5e7';
-    box.style.color = isError ? '#c33' : '#3a3';
-    box.innerHTML = '<p style="margin:0"></p><button type="button" class="typecho-notice-close" aria-label="' + messages.close + '">&times;</button>';
+    box.className = 'typecho-wechat-notice typecho-option-tabs notice typecho-dismissible admin-notice ' + (isError ? 'notice-error admin-notice--error' : 'notice-success admin-notice--success');
+    box.innerHTML = '<p></p><button type="button" class="typecho-notice-close" aria-label="' + messages.close + '">&times;</button>';
     box.querySelector('p').textContent = message;
     var main = document.querySelector('.typecho-page-main');
     if (main) main.insertBefore(box, main.firstChild);

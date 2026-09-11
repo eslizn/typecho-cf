@@ -973,17 +973,11 @@ function editorHtml(contentType: ContentType, i18n?: I18n): string {
 
     var notice = document.createElement('div');
     var isError = type === 'error';
-    notice.className = 'typecho-scribe-notice typecho-option-tabs notice typecho-dismissible ' + (isError ? 'notice-error' : 'notice-success');
-    notice.style.padding = '10px 15px';
-    notice.style.marginBottom = '20px';
-    notice.style.borderRadius = '3px';
-    notice.style.background = isError ? '#ffeaea' : '#e7f5e7';
-    notice.style.color = isError ? '#c33' : '#3a3';
+    notice.className = 'typecho-scribe-notice typecho-option-tabs notice typecho-dismissible admin-notice ' + (isError ? 'notice-error admin-notice--error' : 'notice-success admin-notice--success');
     notice.setAttribute('role', isError ? 'alert' : 'status');
 
     var paragraph = document.createElement('p');
     paragraph.textContent = localizedMessage(message);
-    paragraph.style.margin = '0';
     notice.appendChild(paragraph);
 
     var closeButton = document.createElement('button');

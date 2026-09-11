@@ -155,8 +155,8 @@ const editorMessagesJson = safeJsonForScript({
         <label for="slug" class="sr-only">{t('admin.field.slug', {}, 'Slug')}</label>
         <span id="preview-url">{isEdit ? previewUrl : ''}</span>
         <input type="text" id="slug" name="slug" autocomplete="off"
-          value={page?.slug || ''} class="mono" placeholder={isEdit ? String(page?.cid) : t('admin.description.autoGenerateSlug', {}, 'Leave blank to generate automatically')} style="display:none" />
-        <a href="#" id="edit-slug-btn" class="i-edit" title={t('admin.action.editSlug', {}, 'Edit slug')} style="margin-left:4px;"></a>
+          value={page?.slug || ''} class="mono hidden" placeholder={isEdit ? String(page?.cid) : t('admin.description.autoGenerateSlug', {}, 'Leave blank to generate automatically')} />
+        <a href="#" id="edit-slug-btn" class="i-edit" title={t('admin.action.editSlug', {}, 'Edit slug')}></a>
       </p>
 
       <p>
@@ -283,7 +283,7 @@ const editorMessagesJson = safeJsonForScript({
         <div id="upload-panel" class="p" data-cid={isEdit ? String(page.cid) : '0'}>
           <div class="upload-area" draggable="true">
             <p>{t('editor.uploadDrop', {}, 'Drop files here')}<br />{t('editor.chooseFileUpload', {}, 'or choose a file to upload')}</p>
-            <input type="file" id="file-input" multiple style="display:none" />
+            <input type="file" id="file-input" multiple class="hidden" />
           </div>
           <ul id="file-list">
             {attachments.map(att => (

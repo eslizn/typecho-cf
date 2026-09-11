@@ -219,8 +219,7 @@ const adminClientMessageJson = safeJsonForScript({
         <h2>{title}</h2>
       </div>
       {flashError && (
-        <div class="typecho-option-tabs notice notice-error typecho-dismissible" role="alert"
-          style="padding: 10px 15px; margin-bottom: 20px; border-radius: 3px; background: #ffeaea; color: #c33;">
+        <div class="admin-notice admin-notice--error typecho-dismissible" role="alert">
           <p>{flashError}</p>
           <button type="button" class="typecho-notice-close" aria-label={t('admin.action.closeNotice', {}, 'Close notice')}>&times;</button>
         </div>

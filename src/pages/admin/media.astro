@@ -74,18 +74,18 @@ function formatBytes(bytes: number): string {
 }
 ---
 <Admin title={ctx.i18n.t('admin.form.editMedia', {}, 'Edit media')} options={options} urls={urls} user={user} activeMenu="manage-medias" pluginCtx={ctx}>
-  <div class="col-mb-12 col-tb-4" role="complementary">
+  <div class="col-mb-12 col-tb-4 admin-panel" role="complementary">
     {isImage && fileUrl ? (
       <p><a href={fileUrl} target="_blank" rel="noopener noreferrer">
-        <img src={fileUrl} alt={attachment.title || ''} style="max-width: 100%; border: 1px solid #D9D9D6; border-radius: 2px;" />
+        <img src={fileUrl} alt={attachment.title || ''} class="typecho-attachment-photo admin-media-preview" />
       </a></p>
     ) : (
-      <div style="padding: 40px; text-align: center; background: #F6F6F3; border: 1px solid #D9D9D6; border-radius: 2px;">
-        <strong style="font-size: 24px;">{(meta.type || 'file').split('/').pop()?.toUpperCase() || 'FILE'}</strong>
+      <div class="admin-media-fallback">
+        <strong>{(meta.type || 'file').split('/').pop()?.toUpperCase() || 'FILE'}</strong>
       </div>
     )}
 
-    <ul class="typecho-option" style="margin-top: 15px;">
+    <ul class="typecho-option">
       <li>
         <span class="typecho-label">{ctx.i18n.t('admin.field.name', {}, 'Name')}</span>
         <p>{meta.name || attachment.title || ctx.i18n.t('admin.status.unknown', {}, 'Unknown')}</p>
@@ -115,7 +115,7 @@ function formatBytes(bytes: number): string {
     </ul>
   </div>
 
-  <div class="col-mb-12 col-tb-6 col-tb-offset-1" role="form">
+  <div class="col-mb-12 col-tb-6 col-tb-offset-1 admin-panel" role="form">
     <form method="post" action="/api/admin/media">
       <input type="hidden" name="_" value={csrfToken} />
       <input type="hidden" name="cid" value={String(cid)} />
@@ -147,7 +147,7 @@ function formatBytes(bytes: number): string {
 
     <br />
 
-    <form method="post" action="/api/admin/media" style="margin-top: 20px;">
+    <form method="post" action="/api/admin/media" class="admin-media-delete-form">
       <input type="hidden" name="_" value={csrfToken} />
       <input type="hidden" name="cid" value={String(cid)} />
       <input type="hidden" name="do" value="delete" />

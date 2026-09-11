@@ -37,8 +37,8 @@ const { options, urls, user, csrfToken } = ctx;
           <label class="typecho-label">{ctx.i18n.t('admin.field.articleList', {}, 'Post list')}</label>
           <p>
             {ctx.i18n.t('admin.description.pageSize', {}, 'Number of posts shown on each page.')}
-            <input type="text" id="pageSize" name="pageSize" class="text-s mono"
-              value={options.pageSize || '5'} style="width: 40px;" />
+            <input type="text" id="pageSize" name="pageSize" class="text-s mono admin-width-40"
+              value={options.pageSize || '5'} />
             {ctx.i18n.t('admin.unit.articles', {}, 'posts')}
           </p>
         </li>
@@ -56,8 +56,8 @@ const { options, urls, user, csrfToken } = ctx;
           </ul>
           <p>
             {ctx.i18n.t('admin.field.feedItems', {}, 'Feed items')}
-            <input type="text" id="postsListSize" name="postsListSize" class="text-s mono"
-              value={options.postsListSize || '10'} style="width: 40px;" />
+            <input type="text" id="postsListSize" name="postsListSize" class="text-s mono admin-width-40"
+              value={options.postsListSize || '10'} />
             {ctx.i18n.t('admin.unit.articles', {}, 'posts')}
           </p>
         </li>
@@ -80,8 +80,8 @@ const { options, urls, user, csrfToken } = ctx;
         <li>
           <label for="editorSize" class="typecho-label">{ctx.i18n.t('admin.field.editorSize', {}, 'Editor height')}</label>
           <p>
-            <input type="text" id="editorSize" name="editorSize" class="text-s mono"
-              value={String(options.editorSize || 350)} style="width: 60px;" /> {ctx.i18n.t('admin.unit.pixels', {}, 'pixels')}
+            <input type="text" id="editorSize" name="editorSize" class="text-s mono admin-width-60"
+              value={String(options.editorSize || 350)} /> {ctx.i18n.t('admin.unit.pixels', {}, 'pixels')}
           </p>
           <p class="description">{ctx.i18n.t('admin.description.editorSize', {}, 'Default editor height. Recommended range: 200–800.')}</p>
         </li>

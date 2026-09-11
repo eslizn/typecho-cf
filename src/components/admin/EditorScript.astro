@@ -211,7 +211,7 @@ const { messagesJson } = Astro.props;
               current = (lastComma >= 0 ? val.substring(lastComma + 1) : val).trim().toLowerCase();
 
           if (!suggestBox) {
-            suggestBox = $('<ul class="tag-suggest" style="position:absolute;z-index:100;background:#fff;border:1px solid #ddd;max-height:150px;overflow:auto;list-style:none;padding:4px 0;margin:0;min-width:160px;"></ul>')
+            suggestBox = $('<ul class="tag-suggest"></ul>')
               .insertAfter(tagsInput);
           }
 
@@ -225,8 +225,7 @@ const { messagesJson } = Astro.props;
 
           suggestBox.empty();
           matches.forEach(function (m) {
-            $('<li style="padding:4px 10px;cursor:pointer;"></li>').text(m)
-              .hover(function () { $(this).css('background', '#EDF6FF'); }, function () { $(this).css('background', ''); })
+            $('<li class="tag-suggest-item"></li>').text(m)
               .click(function () {
                 var prefix = lastComma >= 0 ? val.substring(0, lastComma + 1) + ' ' : '';
                 tagsInput.val(prefix + m + ',');

@@ -68,13 +68,13 @@ const refererValue = safeAdminRedirectUrl(refererAbsolute, urls.siteUrl || Astro
     <div class="typecho-login">
       <h1>{options.title}</h1>
       {error && (
-        <p class="message error typecho-dismissible">
+        <p class="message error typecho-dismissible admin-notice admin-notice--error">
           {error}
           <button type="button" class="typecho-notice-close" aria-label={i18n.t('admin.action.closeNotice', {}, 'Close notice')}>&times;</button>
         </p>
       )}
       {notice && (
-        <p class="message success typecho-dismissible">
+        <p class="message success typecho-dismissible admin-notice admin-notice--success">
           {notice}
           <button type="button" class="typecho-notice-close" aria-label={i18n.t('admin.action.closeNotice', {}, 'Close notice')}>&times;</button>
         </p>

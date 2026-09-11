@@ -195,8 +195,8 @@ const editorMessagesJson = safeJsonForScript({
         <label for="slug" class="sr-only">{t('admin.field.slug', {}, 'Slug')}</label>
         <span id="preview-url">{isEdit ? previewUrl : ''}</span>
         <input type="text" id="slug" name="slug" autocomplete="off"
-          value={post?.slug || ''} class="mono" placeholder={isEdit ? String(post?.cid) : t('admin.description.autoGenerateSlug', {}, 'Leave blank to generate automatically')} style="display:none" />
-        <a href="#" id="edit-slug-btn" class="i-edit" title={t('admin.action.editSlug', {}, 'Edit slug')} style="margin-left:4px;"></a>
+          value={post?.slug || ''} class="mono hidden" placeholder={isEdit ? String(post?.cid) : t('admin.description.autoGenerateSlug', {}, 'Leave blank to generate automatically')} />
+        <a href="#" id="edit-slug-btn" class="i-edit" title={t('admin.action.editSlug', {}, 'Edit slug')}></a>
       </p>
 
       <p>
@@ -255,12 +255,12 @@ const editorMessagesJson = safeJsonForScript({
 
         <section class="typecho-post-option">
            <label for="schedule-date" class="typecho-label">{t('admin.field.date', {}, 'Publication date')}</label>
-          <p style="display:flex;gap:6px">
-            <input type="datetime-local" id="schedule-date" name="date" value={post?.created ? new Date(post.created * 1000).toISOString().slice(0, 16) : ''} class="text" style="flex:1" />
+          <p class="admin-date-actions">
+            <input type="datetime-local" id="schedule-date" name="date" value={post?.created ? new Date(post.created * 1000).toISOString().slice(0, 16) : ''} class="text" />
              <button type="button" class="btn btn-xs" onclick="var d=new Date();this.form.date.value=d.toISOString().slice(0,16)">{t('admin.action.now', {}, 'Now')}</button>
              <button type="button" class="btn btn-xs" onclick="this.form.date.value=''">{t('admin.action.clear', {}, 'Clear')}</button>
           </p>
-           <small class="typecho-option-hint">{t('admin.description.scheduleDate', {}, 'Leave blank to publish immediately; a future time schedules publication.')}</small>
+           <small class="description">{t('admin.description.scheduleDate', {}, 'Leave blank to publish immediately; a future time schedules publication.')}</small>
         </section>
 
          <button type="button" id="advance-panel-btn" class="btn btn-xs">{t('admin.action.details', {}, 'Advanced options')} <i class="i-caret-down"></i></button>
@@ -349,7 +349,7 @@ const editorMessagesJson = safeJsonForScript({
         <div id="upload-panel" class="p" data-cid={isEdit ? String(post.cid) : '0'}>
           <div class="upload-area" draggable="true">
             <p>{t('editor.uploadDrop', {}, 'Drop files here')}<br />{t('editor.chooseFileUpload', {}, 'or choose a file to upload')}</p>
-            <input type="file" id="file-input" multiple style="display:none" />
+            <input type="file" id="file-input" multiple class="hidden" />
           </div>
           <ul id="file-list">
             {attachments.map(att => (

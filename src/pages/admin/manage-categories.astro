@@ -32,7 +32,7 @@ const editCat: any = editRows[0] ?? null;
 const isDefault = (mid: number) => options.defaultCategory === mid;
 ---
 <Admin title={ctx.i18n.t('admin.page.manageCategories', {}, 'Manage categories')} options={options} urls={urls} user={user} activeMenu="manage-categories" pluginCtx={ctx}>
-  <div class="col-mb-12 typecho-list" role="main">
+  <div class="col-mb-12 col-tb-8 typecho-list" role="main">
     <form method="post" name="manage_categories" class="operate-form">
       <input type="hidden" name="_" value={csrfToken} />
       <div class="typecho-list-operate clearfix">
@@ -101,8 +101,10 @@ const isDefault = (mid: number) => options.defaultCategory === mid;
         </table>
       </div>
     </form>
+  </div>
 
-    <div class="typecho-mini-panel" style="margin-top: 20px;">
+  <div class="col-mb-12 col-tb-4" role="form">
+    <div class="admin-panel">
       <form method="post" action="/api/admin/meta">
         <input type="hidden" name="_" value={csrfToken} />
         <input type="hidden" name="action" value={editCat ? 'update' : 'create'} />

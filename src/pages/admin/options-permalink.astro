@@ -50,8 +50,8 @@ const currentCategoryPattern = (options.categoryPattern as string) || '/category
                 id="post-pattern-custom"
                 checked={isCustomPost} />
               <label for="post-pattern-custom">{ctx.i18n.t('admin.permalink.custom', {}, 'Custom')}:</label>
-              <input type="text" name="customPattern" class="text mono"
-                value={isCustomPost ? currentPostPattern : ''} style="width: 300px;" />
+              <input type="text" name="customPattern" class="text mono admin-width-300"
+                value={isCustomPost ? currentPostPattern : ''} />
             </p>
           </div>
           <p class="description">
@@ -65,8 +65,8 @@ const currentCategoryPattern = (options.categoryPattern as string) || '/category
       <ul class="typecho-option">
         <li>
           <label class="typecho-label" for="pagePattern">{ctx.i18n.t('admin.field.pagePath', {}, 'Page path')}</label>
-          <input type="text" name="pagePattern" id="pagePattern" class="text mono"
-            value={currentPagePattern} style="width: 300px;" />
+          <input type="text" name="pagePattern" id="pagePattern" class="text mono admin-width-300"
+            value={currentPagePattern} />
           <p class="description">
             {ctx.i18n.t('admin.permalink.variables', {}, 'Available variables:')} <code>{'{slug}'}</code> {ctx.i18n.t('admin.field.slug', {}, 'slug')}, <code>{'{cid}'}</code> {ctx.i18n.t('admin.permalink.pageId', {}, 'page ID')}
           </p>
@@ -76,8 +76,8 @@ const currentCategoryPattern = (options.categoryPattern as string) || '/category
       <ul class="typecho-option">
         <li>
           <label class="typecho-label" for="categoryPattern">{ctx.i18n.t('admin.field.categoryPath', {}, 'Category path')}</label>
-          <input type="text" name="categoryPattern" id="categoryPattern" class="text mono"
-            value={currentCategoryPattern} style="width: 300px;" />
+          <input type="text" name="categoryPattern" id="categoryPattern" class="text mono admin-width-300"
+            value={currentCategoryPattern} />
           <p class="description">
             {ctx.i18n.t('admin.permalink.variables', {}, 'Available variables:')} <code>{'{slug}'}</code> {ctx.i18n.t('admin.field.slug', {}, 'slug')}, <code>{'{mid}'}</code> {ctx.i18n.t('admin.permalink.categoryId', {}, 'category ID')}
           </p>

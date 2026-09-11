@@ -70,7 +70,8 @@ Typecho-CF WebDAV 协议插件，通过 WebDAV 协议挂载和访问多种存储
 
 ```
 请求到达
-  → request:route hook 先处理已注册的 `/api/admin/webdav` 管理 API
+  → init() 注册 owner-scoped route resolver；核心在缓存判断和 request:route 前同步当前 WebDAV 路径 claim
+  → request:route hook 先处理 `/api/admin/webdav` 管理 API
   → 对协议入口检查 protocolEnabled（关闭则跳过，继续正常路由）
   → 匹配 routePath 前缀的请求进入 WebDAV 协议处理
   → 非 WebDAV 请求跳过，继续正常路由
@@ -105,6 +106,12 @@ Typecho-CF WebDAV 协议插件，通过 WebDAV 协议挂载和访问多种存储
 | `request:route` | filter | 分发 WebDAV 协议和 `/api/admin/webdav`；协议关闭时仅跳过 WebDAV 入口 |
 | `admin:page` | filter | 注入 WebDAV 文件管理器 HTML 及内联 JS（面包屑导航、CRUD、拖拽上传） |
 | `admin:footer` | filter | 向管理后台导航栏「管理」菜单注入 WebDav 入口 |
+
+## 路由声明
+
+WebDAV 在插件 `init()` 中通过 owner-scoped `registerRouteResolver` 声明协议入口。resolver 根据 `protocolEnabled` 和 `routePath` 返回当前有效的路径 claim；停用协议或修改路径后，核心会释放旧 claim 并同步新 claim。实际请求仍由 `request:route` hook 处理。
+
+系统路由优先级保持不变：系统固定路由和系统路由表优先于插件路由。历史配置使用 `/dav` 时继续匹配 `/dav` 及其子路径，保证现有 WebDAV 客户端无需修改；配置改为其他路径后，旧路径不再作为 WebDAV 路由保留。
 
 ## 协议支持
 

@@ -12,6 +12,7 @@ function collectHooks() {
     addHook: (point: string, _pluginId: string, handler: Function) => {
       hooks.set(point, handler);
     },
+    registerRouteResolver: () => {},
     registerTranslations: () => {},
     registerScheduledTask: () => {},
     registerAsyncTask: () => {},

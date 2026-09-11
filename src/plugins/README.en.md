@@ -106,7 +106,7 @@ Fields may use `showWhen` for conditional display. Select fields may use `option
 
 ```ts
 /**
- * Plugin entry function. Build registers only a lazy loader; init runs on first activation.
+ * Plugin entry function. Build registers a loader; init runs on first activation.
  * Register all hooks via addHook. Do NOT perform I/O here.
  */
 import type { PluginInitContext } from 'typecho/plugin-sdk';
@@ -123,6 +123,19 @@ export default function init({ addHook, pluginId }: PluginInitContext): void {
   });
 }
 ```
+
+### Dynamic frontend routes
+
+Frontend plugin routes must be declared during `init()` with the owner-scoped
+`PluginInitContext.registerRouteResolver(resolver)` API. The resolver returns the
+plugin's current route claims from its configuration. The core replaces or
+releases that owner's claims when configuration changes, initialization fails,
+or the plugin is disabled. Route claims are synchronized before cache
+eligibility and `request:route` dispatch, while the `request:route` hook remains
+responsible for handling the request.
+
+System routes retain priority over plugin routes. WebDAV's historical `/dav`
+matching behavior must remain compatible when its configured route is changed.
 
 ### Parameters
 
@@ -448,7 +461,7 @@ The host project supplies the `typecho` package at install time, and `typecho/pl
 
 | Category | Exports |
 |----------|---------|
-| Types | `PluginInitContext`, `PluginRouteResult`, `PluginManifest`, `PluginConfigField`, `AttachmentMeta`, `Database`, `IanaTimezone`, `TimezoneSetting` |
+| Types | `PluginInitContext`, `PluginRouteClaim`, `PluginRouteResolver`, `PluginRouteResolverContext`, `PluginRouteResult`, `PluginManifest`, `PluginConfigField`, `AttachmentMeta`, `Database`, `IanaTimezone`, `TimezoneSetting` |
 | Task types | `AsyncTaskDefinition`, `RegisteredAsyncTask`, `RegisteredScheduledTask`, `ScheduledTaskDefinition`, `ScheduledTaskKeyContext`, `ScheduledTaskPayload`, `TaskEnvelope`, `TaskExecutionContext`, `TaskHandler`, `TaskKind`, `TaskLocalSlot`, `TaskResult`, `TaskSource`, `EnqueueAsyncTaskOptions` |
 | Plugin system | `HookPoints`, `parsePluginOption`, `parsePluginConfigFormData`, `loadPluginConfig`, `escapeAttr`, `registerPluginAdminPath`, `getClientIp` |
 | Auth | `hasPermission`, `verifyPassword` |

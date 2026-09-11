@@ -57,8 +57,10 @@ export function clearPluginRouteClaims(pluginId: string): void {
 export function refreshPluginRoutes(
   activePluginIds: ReadonlySet<string>,
   getConfig: (pluginId: string) => Readonly<Record<string, unknown>>,
-): void {
+): ReadonlySet<string> {
   ownerClaims.clear();
+  const failedOwners = new Set<string>();
+  const candidates = new Map<string, PluginRouteClaim[]>();
 
   for (const pluginId of activePluginIds) {
     if (!readyOwners.has(pluginId)) continue;
@@ -90,25 +92,72 @@ export function refreshPluginRoutes(
       }
 
       if (normalizedClaims.length > 0) {
-        ownerClaims.set(pluginId, normalizedClaims);
+        candidates.set(pluginId, normalizedClaims);
       }
     } catch (error) {
+      failedOwners.add(pluginId);
       console.error(`[plugin-routes] Failed to resolve routes for ${pluginId}:`, error);
     }
   }
+
+  const conflictedOwners = new Set<string>();
+  const candidateEntries = [...candidates.entries()];
+  for (let leftIndex = 0; leftIndex < candidateEntries.length; leftIndex += 1) {
+    const [leftOwner, leftClaims] = candidateEntries[leftIndex];
+    for (let rightIndex = leftIndex + 1; rightIndex < candidateEntries.length; rightIndex += 1) {
+      const [rightOwner, rightClaims] = candidateEntries[rightIndex];
+      const conflict = leftClaims.some(leftClaim =>
+        rightClaims.some(rightClaim => claimsOverlap(leftClaim, rightClaim)),
+      );
+      if (!conflict) continue;
+
+      conflictedOwners.add(leftOwner);
+      conflictedOwners.add(rightOwner);
+      console.error(
+        `[plugin-routes] Conflicting route claims between ${leftOwner} and ${rightOwner}`,
+      );
+    }
+  }
+
+  for (const [pluginId, claims] of candidates) {
+    if (conflictedOwners.has(pluginId)) {
+      failedOwners.add(pluginId);
+      continue;
+    }
+    ownerClaims.set(pluginId, claims);
+  }
+
+  return failedOwners;
+}
+
+/**
+ * Copy the current claims for use by one request.
+ *
+ * The module-level registry is refreshed when a request is bootstrapped, but
+ * request handlers can yield between routing decisions. A snapshot prevents
+ * a later request (for example, one observing a newly saved route) from
+ * changing the result for an earlier request that is still in flight.
+ */
+export function getPluginRouteClaimsSnapshot(): ReadonlyArray<PluginRouteClaim> {
+  return Object.freeze(
+    [...ownerClaims.values()]
+      .flatMap(claims => claims.map(claim => Object.freeze({ ...claim }))),
+  );
 }
 
 /** Return whether a request path is claimed by any active plugin route. */
-export function isPluginRoute(path: string): boolean {
+export function isPluginRoute(
+  path: string,
+  routeClaims?: ReadonlyArray<PluginRouteClaim>,
+): boolean {
   if (typeof path !== 'string') return false;
 
-  for (const claims of ownerClaims.values()) {
-    for (const claim of claims) {
-      if (claim.match === 'exact') {
-        if (path === claim.path) return true;
-      } else if (path === claim.path || path.startsWith(`${claim.path}/`)) {
-        return true;
-      }
+  const claims = routeClaims ?? [...ownerClaims.values()].flat();
+  for (const claim of claims) {
+    if (claim.match === 'exact') {
+      if (path === claim.path) return true;
+    } else if (path === claim.path || path.startsWith(`${claim.path}/`)) {
+      return true;
     }
   }
   return false;
@@ -132,4 +181,22 @@ function normalizeRoutePath(path: unknown): string | null {
 
   const normalized = path.replace(/\/+$/, '');
   return normalized === '/' ? null : normalized;
+}
+
+function claimsOverlap(left: PluginRouteClaim, right: PluginRouteClaim): boolean {
+  if (left.match === 'exact' && right.match === 'exact') {
+    return left.path === right.path;
+  }
+
+  if (left.match === 'exact') return prefixClaimMatchesPath(right.path, left.path);
+  if (right.match === 'exact') return prefixClaimMatchesPath(left.path, right.path);
+
+  return (
+    prefixClaimMatchesPath(left.path, right.path) ||
+    prefixClaimMatchesPath(right.path, left.path)
+  );
+}
+
+function prefixClaimMatchesPath(prefix: string, path: string): boolean {
+  return path === prefix || path.startsWith(`${prefix}/`);
 }

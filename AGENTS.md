@@ -241,8 +241,9 @@ export default function init({ addHook, pluginId }: PluginInitContext): void {
 
 - 路径应在插件 `init()` 中注册，在任何 hook handler 之前
 - `isPluginAdminPath(path)` 在中间件 `isReservedCorePath` 中调用，白名单通过后放行
-- 前台自定义路由（如 WebDAV 入口 `/webdav`）通过 `registerPluginRoute(path)` 注册：中间件据此（1）豁免内容路径废弃检查（路由优先级：系统固定 > 系统路由表 > 插件路由表）；（2）禁止插件路径进入边缘缓存（插件自带鉴权，缓存会绕过）
-- `pluginAdminPaths` / `pluginRoutes` Set 是模块级状态，插件停用后同一 isolate 内不自动清退
+- 前台自定义路由（如 WebDAV 入口）必须在插件 `init()` 中通过 `PluginInitContext.registerRouteResolver(resolver)` 声明 owner-scoped 路由：resolver 根据当前配置返回该插件当前有效的路径 claim；插件停用、初始化失败或配置变化时，核心替换或注销该 owner 的旧 claim。中间件据此（1）豁免内容路径废弃检查；（2）禁止插件路径进入边缘缓存（插件自带鉴权，缓存会绕过）。路由优先级保持为：系统固定 > 系统路由表 > 插件路由表
+- route resolver 只负责声明和生命周期管理，不负责处理请求；实际请求仍由 `request:route` hook 分发。核心必须在缓存决策和 `request:route` 分发前同步当前 claim；不同插件的冲突 claim 必须 fail-closed（相关 owner 均不可用），WebDAV 保留历史兼容路径 `/dav` 的匹配行为
+- 插件路由声明按 owner 管理，插件只能替换或注销自己的 claim；插件停用后不得残留旧路径。管理/API 路径仍使用 `registerPluginAdminPath()`，除非后续纳入同一套 owner-scoped 管理
 
 ### 6.4 插件专属管理页面
 
@@ -428,6 +429,7 @@ Cloudflare Workers 是单线程单 isolate，以下模块级变量是安全的�
 - `src/lib/comment-page.ts`：`commentRootCounts`（按 cacheVersion 键控的根评论计数缓存，TTL + 条数上限）
 - `src/lib/fulltext.ts`：`ftsAvailability`（FTS5 就绪状态）
 - `src/lib/isolate-boot.ts`：`state`（表检查 / 索引回填 / FTS 引导的一次性标志）
+- `src/lib/plugin-routes.ts`：resolver 注册表与当前 claim 表；请求引导必须复制为 request-local route snapshot，不能在后续路由判断中依赖可能被其他请求刷新过的模块级 claim
 - `src/lib/login-rate-limit.ts`：登录限流（D1 持久化） + 上传限流（`trackSlidingWindow`，内存级滑动窗口）
 
 ### 9.4 配置表单类型（插件 / 主题共用）

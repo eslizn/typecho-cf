@@ -3,7 +3,15 @@
 // via package.json exports (self-referencing).
 
 // ── Types ──
-export type { PluginInitContext, PluginRouteResult, PluginManifest, PluginConfigField } from './plugin';
+export type {
+  PluginInitContext,
+  PluginRouteClaim,
+  PluginRouteResolver,
+  PluginRouteResolverContext,
+  PluginRouteResult,
+  PluginManifest,
+  PluginConfigField,
+} from './plugin';
 export type {
   AsyncTaskDefinition,
   RegisteredAsyncTask,
@@ -33,7 +41,6 @@ export {
   loadPluginConfig,
   escapeAttr,
   registerPluginAdminPath,
-  registerPluginRoute,
 } from './plugin';
 export { getClientIp } from './client-ip';
 export { safeJsonForScript } from './escape';

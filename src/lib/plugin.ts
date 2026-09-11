@@ -46,6 +46,23 @@ import type {
   AsyncTaskDefinition,
   ScheduledTaskDefinition,
 } from '@/lib/tasks/types';
+import {
+  clearPluginRouteClaims,
+  markPluginRouteResolverReady,
+  registerPluginRouteResolver,
+  resetPluginRouteRegistry,
+} from '@/lib/plugin-routes';
+import type { PluginRouteClaim, PluginRouteResolver } from '@/lib/plugin-routes';
+export {
+  getPluginRouteClaimsSnapshot,
+  isPluginRoute,
+  refreshPluginRoutes,
+} from '@/lib/plugin-routes';
+export type {
+  PluginRouteClaim,
+  PluginRouteResolver,
+  PluginRouteResolverContext,
+} from '@/lib/plugin-routes';
 export {
   getAvailableTranslationLocales,
   getGlobalTranslationCatalogs,
@@ -115,6 +132,10 @@ export type FilterHandler = (value: any, ...args: any[]) => any | Promise<any>;
 
 export interface HookContext {
   activatedPlugins: Set<string>;
+  /** Request-local copy of the route claims used by middleware. */
+  routeClaims?: ReadonlyArray<PluginRouteClaim>;
+  /** Request-local plugin IDs whose route resolver init failed. */
+  routeResolverFailures?: ReadonlySet<string>;
   /** Request-local translator. Minimal test/plugin contexts may omit it. */
   i18n?: I18n;
   resolvedLocale?: ResolvedLocale;
@@ -124,6 +145,7 @@ export interface PluginInitContext {
   addHook: typeof addHook;
   HookPoints: typeof HookPoints;
   pluginId: string;
+  registerRouteResolver: (resolver: PluginRouteResolver) => void;
   registerTranslations: (
     locale: string,
     messages: Record<string, string>,
@@ -373,6 +395,7 @@ export function resetPluginInitState(): void {
   initialisedPlugins.clear();
   initialisingPlugins.clear();
   failedPlugins.clear();
+  resetPluginRouteRegistry();
   resetTaskRegistry();
   resetPluginTranslationRegistry();
 }
@@ -390,33 +413,6 @@ export function registerPluginAdminPath(path: string): void {
 
 export function isPluginAdminPath(path: string): boolean {
   return pluginAdminPaths.has(path);
-}
-
-/**
- * Front-end routes served by plugins via request:route. Registered during
- * plugin init() (and lazily refreshed by plugins whose route path is
- * configurable). Middleware uses this table to:
- *   1. exempt plugin routes from the content-path deprecation check, and
- *   2. never edge-cache plugin responses (they carry their own auth, e.g.
- *      WebDAV Basic auth) — plugin routes must stay out of the shared cache.
- *
- * Routing priority is: system fixed > system routes (admin permalink
- * patterns) > plugin routes. Middleware resolves the permalink rewrite
- * target before request:route and skips request:route entirely once a
- * path is claimed by a configured system pattern, so plugin registrations
- * never shadow a system route.
- */
-const pluginRoutes = new Set<string>();
-
-export function registerPluginRoute(path: string): void {
-  pluginRoutes.add(path);
-}
-
-export function isPluginRoute(path: string): boolean {
-  for (const route of pluginRoutes) {
-    if (path === route || path.startsWith(route + '/')) return true;
-  }
-  return false;
 }
 
 /**
@@ -486,11 +482,20 @@ export async function setActivatedPlugins(ctx: HookContext, ids: string[]): Prom
     const failure = failedPlugins.get(id);
     if (failure) {
       const backoff = PLUGIN_INIT_FAIL_BACKOFF_MS * Math.min(failure.attempts, 5);
-      if (Date.now() - failure.failedAt < backoff) continue;
+      if (Date.now() - failure.failedAt < backoff) {
+        // A failed plugin is not active for this request, including while its
+        // retry backoff is in effect. The activation set is rebuilt on every
+        // request, so this guard must be applied here as well as in catch().
+        ctx.activatedPlugins.delete(id);
+        continue;
+      }
     }
     const existingInit = initialisingPlugins.get(id);
     if (existingInit) {
       await existingInit;
+      // Another request may have owned the init attempt. Its catch() only
+      // has access to that request's context, so mirror the outcome here.
+      if (!initialisedPlugins.has(id)) ctx.activatedPlugins.delete(id);
       continue;
     }
     const loader = pluginInitLoaders.get(id);
@@ -504,6 +509,9 @@ export async function setActivatedPlugins(ctx: HookContext, ids: string[]): Prom
           addHook: pluginInitContext!.addHook,
           HookPoints: pluginInitContext!.HookPoints,
           pluginId: id,
+          registerRouteResolver: (resolver: PluginRouteResolver) => {
+            registerPluginRouteResolver(id, resolver);
+          },
           registerTranslations: (locale, messages, displayName) => {
             stagePluginTranslation(id, locale, messages, displayName);
           },
@@ -522,10 +530,14 @@ export async function setActivatedPlugins(ctx: HookContext, ids: string[]): Prom
       .then(() => {
         commitPluginTranslationStage(id);
         initialisedPlugins.add(id);
+        markPluginRouteResolverReady(id);
         failedPlugins.delete(id);
       })
       .catch(err => {
+        removePluginHooks(id);
+        ctx.activatedPlugins.delete(id);
         discardPluginTranslationStage(id);
+        clearPluginRouteClaims(id);
         resetTaskRegistrations(id);
         const message = err instanceof Error ? err.message : String(err);
         const prior = failedPlugins.get(id);
@@ -672,6 +684,9 @@ export async function applyFilter(ctx: HookContext, hookPoint: string, value: an
   let result = value;
   for (const reg of hookRegistry.get(normalizedPoint)!) {
     if (!ctx.activatedPlugins.has(reg.pluginId)) continue;
+    if (normalizedPoint === 'request:route' && ctx.routeResolverFailures?.has(reg.pluginId)) {
+      continue;
+    }
     try {
       result = await (reg.handler as FilterHandler)(result, ...args);
     } catch (err) {
@@ -694,6 +709,9 @@ export async function applyFilterSafely(ctx: HookContext, hookPoint: string, val
   let result = value;
   for (const reg of hookRegistry.get(normalizedPoint)!) {
     if (!ctx.activatedPlugins.has(reg.pluginId)) continue;
+    if (normalizedPoint === 'request:route' && ctx.routeResolverFailures?.has(reg.pluginId)) {
+      continue;
+    }
     try {
       result = await (reg.handler as FilterHandler)(result, ...args);
     } catch (err) {

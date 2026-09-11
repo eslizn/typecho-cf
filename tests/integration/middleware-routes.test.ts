@@ -65,9 +65,11 @@ vi.mock('cloudflare:workers', () => ({
 }));
 
 import { schema } from '@/db';
+import { resetCacheVersionMemo } from '@/lib/cache';
 import { advanceOptionsSnapshotGeneration } from '@/lib/options-snapshot-generation';
+import { resetOptionsSnapshot } from '@/lib/options';
 import { onRequest } from '@/middleware';
-import { addHook, registerPluginRoute } from '@/lib/plugin';
+import { addHook, getPlugin, isPluginRoute, registerPlugin } from '@/lib/plugin';
 
 const SITE = 'http://localhost:4321';
 
@@ -426,6 +428,21 @@ describe('Middleware: content path whitelist (default URLs rejected once custom 
   beforeAll(async () => {
     d1Stub = createD1Stub(testDb);
     resetIsolateBoot();
+    if (!getPlugin('typecho-plugin-webdav')?.manifest.config?.routePath) {
+      registerPlugin('typecho-plugin-webdav', {
+        id: 'typecho-plugin-webdav',
+        name: 'WebDAV',
+        config: {
+          routePath: { type: 'text', label: 'Route path', default: '/webdav' },
+          protocolEnabled: {
+            type: 'select',
+            label: 'Protocol',
+            default: 'true',
+            options: { true: 'Enabled', false: 'Disabled' },
+          },
+        },
+      });
+    }
     // Invalidate the 60s options snapshot so loadOptions re-reads the rows below.
     advanceOptionsSnapshotGeneration();
     await testDb.insert(schema.options).values([
@@ -471,29 +488,102 @@ describe('Middleware: content path whitelist (default URLs rejected once custom 
     } as any;
   }
 
-  it('exempts registered plugin routes from the deprecation check', async () => {
-    // Plugin front-end routes are dynamic (route table), not fixed surfaces:
-    // once registered, a bare-slug plugin path survives a custom page pattern
-    // and reaches request:route instead of a middleware 404. The plugin does
-    // not claim this path, so the route falls through to Astro's 404.
-    registerPluginRoute('/unit-plugin-route');
-    const next = vi.fn(async () => new Response('not found', { status: 404 }));
-    const response = await onRequest(makeCtx('/unit-plugin-route'), next) as Response;
-    expect(response.status).toBe(404);
-    expect(next).toHaveBeenCalled();
+  let webDavConfigRevision = 0;
+
+  async function saveWebDavConfig(routePath: string, protocolEnabled: boolean): Promise<void> {
+    const value = JSON.stringify({
+      routePath,
+      protocolEnabled: protocolEnabled ? 'true' : 'false',
+      mounts: [{ mount: '', provider: 'r2', bindingName: 'BUCKET', prefix: '' }],
+    });
+    await testDb.insert(schema.options).values({
+      name: 'plugin:typecho-plugin-webdav',
+      user: 0,
+      value,
+    }).onConflictDoUpdate({
+      target: [schema.options.user, schema.options.name],
+      set: { value },
+    });
+    await testDb.insert(schema.options).values({
+      name: 'cacheVersion',
+      user: 0,
+      value: String(++webDavConfigRevision),
+    }).onConflictDoUpdate({
+      target: [schema.options.user, schema.options.name],
+      set: { value: String(webDavConfigRevision) },
+    });
+    resetCacheVersionMemo();
+    advanceOptionsSnapshotGeneration();
+    resetOptionsSnapshot();
+  }
+
+  async function requestWebDavRoute(path: string, nextStatus = 200) {
+    const next = vi.fn(async () => new Response('fallback', { status: nextStatus }));
+    const response = await onRequest(makeCtx(path), next) as Response;
+    return { response, next, claim: isPluginRoute(path) };
+  }
+
+  it('refreshes WebDAV default, custom, legacy, and disabled route claims', async () => {
+    await saveWebDavConfig('/webdav', true);
+    const defaultRoute = await requestWebDavRoute('/webdav');
+    expect(defaultRoute.response.status).toBe(401);
+    expect(defaultRoute.next).not.toHaveBeenCalled();
+    expect(defaultRoute.claim).toBe(true);
+
+    await saveWebDavConfig('/custom-webdav', true);
+    const customRoute = await requestWebDavRoute('/custom-webdav');
+    expect(customRoute.claim).toBe(true);
+
+    const releasedDefault = await requestWebDavRoute('/webdav');
+    expect(releasedDefault.claim).toBe(false);
+
+    await saveWebDavConfig('/dav', true);
+    const legacyRoute = await requestWebDavRoute('/dav');
+    expect(legacyRoute.response.status).toBe(401);
+    expect(legacyRoute.next).not.toHaveBeenCalled();
+    expect(legacyRoute.claim).toBe(true);
+
+    const legacyDefaultRoute = await requestWebDavRoute('/webdav');
+    expect(legacyDefaultRoute.response.status).toBe(401);
+    expect(legacyDefaultRoute.next).not.toHaveBeenCalled();
+    expect(legacyDefaultRoute.claim).toBe(true);
+
+    await saveWebDavConfig('/disabled-webdav', false);
+    const disabledRoute = await requestWebDavRoute('/disabled-webdav');
+    expect(disabledRoute.claim).toBe(false);
+
+    // Keep the following route-priority assertions independent of this
+    // lifecycle test's final disabled configuration.
+    await saveWebDavConfig('/webdav', true);
   });
 
   it('serves an activated plugin route under a custom page pattern', async () => {
-    // WebDAV is activated earlier in this file; its dynamic route (/webdav,
-    // registered by the plugin init) must still be claimed by request:route
-    // even though the bare-slug form no longer matches the custom page
-    // pattern — priority: system fixed > system routes > plugin routes.
+    // WebDAV is activated earlier in this file; its dynamic route (/webdav)
+    // must still be claimed by request:route even though the bare-slug form no
+    // longer matches the custom page pattern — priority: system fixed > system
+    // routes > plugin routes.
+    await saveWebDavConfig('/webdav', true);
     const next = vi.fn(async () => new Response('not found', { status: 404 }));
     const response = await onRequest(makeCtx('/webdav'), next) as Response;
     expect(response.status).toBe(401);
     expect(response.headers.get('WWW-Authenticate')).toContain('Basic');
     expect(next).not.toHaveBeenCalled();
   });
+
+  it('does not let a plugin claim /feed over the built-in system feed', async () => {
+    await saveWebDavConfig('/feed', true);
+
+    const next = vi.fn(async () => new Response('system feed', { status: 200 }));
+    const response = await onRequest(makeCtx('/feed/'), next) as Response;
+
+    expect(isPluginRoute('/feed/')).toBe(true);
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe('system feed');
+    expect(next).toHaveBeenCalled();
+
+    await saveWebDavConfig('/webdav', true);
+  });
+
   it('rejects direct hits on the unified content entry', async () => {
     // /contents/{cid}/ is the internal rewrite target, never a public URL.
     const next = vi.fn(async () => new Response('rendered', { status: 200 }));
@@ -571,11 +661,10 @@ describe('Middleware: content path whitelist (default URLs rejected once custom 
     expect(next).toHaveBeenCalled();
   });
 
-  it('lazily serves a custom WebDAV routePath under a custom page pattern (whitelist runs after request:route)', async () => {
-    // Cold-isolate scenario: only the default /webdav is in the plugin route
-    // table; a configured /dav entry is registered lazily by request:route.
-    // The whitelist must run after request:route, otherwise /dav is
-    // mistaken for a deprecated bare-slug page form and 404s forever.
+  it('serves a custom WebDAV routePath after bootstrap route refresh', async () => {
+    // The configured route is refreshed after plugin activation, before the
+    // cache and content-path decisions. It must therefore survive the custom
+    // page-pattern whitelist and reach request:route on the first request.
     await testDb.insert(schema.options).values({
       name: 'plugin:typecho-plugin-webdav',
       user: 0,

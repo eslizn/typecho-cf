@@ -1,5 +1,11 @@
-import { hasPermission, registerPluginAdminPath, registerPluginRoute, safeJsonForScript } from 'typecho/plugin-sdk';
-import type { I18n, PluginInitContext, PluginRouteResult } from 'typecho/plugin-sdk';
+import { hasPermission, registerPluginAdminPath, safeJsonForScript } from 'typecho/plugin-sdk';
+import type {
+  I18n,
+  PluginInitContext,
+  PluginRouteClaim,
+  PluginRouteResolverContext,
+  PluginRouteResult,
+} from 'typecho/plugin-sdk';
 import type { Database } from 'typecho/db';
 import { validateAuthToken, getAuthCookies, requireAdminCSRF } from '@/lib/auth';
 import { isSameOriginRequest } from '@/lib/admin-auth';
@@ -10,7 +16,7 @@ import { resolveI18nMessage } from '@/lib/i18n';
 import { PLUGIN_ID } from './types';
 import type { WebDavConfig, WebDavStorageAdapter } from './types';
 import {
-  readPluginSettings, normalizeConfig, normalizeInteger, parseBoolean,
+  readPluginSettings, normalizeConfig, normalizeInteger, parseBoolean, normalizeRoutePath,
   matchConfiguredWebDavRoute,
 } from './config';
 import { handleWebDavRequest, createStorageAdapter } from './protocol';
@@ -33,6 +39,19 @@ export { clearTianyiSessionCache, tianyiEnsureSession, tianyiListFiles } from '.
 // ── Admin Panel (in-plugin) ──
 
 const ADMIN_API_ROUTE = '/api/admin/webdav';
+
+function resolveWebDavRouteClaims(
+  config: Readonly<Record<string, unknown>>,
+): ReadonlyArray<PluginRouteClaim> {
+  if (!parseBoolean(config.protocolEnabled, true)) return [];
+
+  const routePath = normalizeRoutePath(config.routePath);
+  const claims: PluginRouteClaim[] = [{ path: routePath, match: 'prefix' }];
+  if (routePath === '/dav') {
+    claims.push({ path: '/webdav', match: 'prefix' });
+  }
+  return claims;
+}
 
 function translate(i18n: I18n | undefined, key: string, fallback: string, variables?: Record<string, string | number>): string {
   return i18n?.t(key, variables, fallback) ?? fallback;
@@ -379,15 +398,12 @@ LD("");
 
 // --- Default Export (Plugin Entry) ---
 
-export default function init({ addHook, pluginId, registerTranslations }: PluginInitContext): void {
+export default function init({ addHook, pluginId, registerTranslations, registerRouteResolver }: PluginInitContext): void {
   registerTranslations?.('en', en);
   registerTranslations?.('zh-CN', zhCN);
 
   registerPluginAdminPath(ADMIN_API_ROUTE);
-  // Default front-end route; the request:route handler below re-registers
-  // the configured routePath lazily (configurable via admin settings), so a
-  // cold isolate with a non-default routePath still gets cache exemptions.
-  registerPluginRoute('/webdav');
+  registerRouteResolver(({ config }: PluginRouteResolverContext) => resolveWebDavRouteClaims(config));
 
   addHook(
     'plugin:config:beforeSave',
@@ -486,10 +502,6 @@ export default function init({ addHook, pluginId, registerTranslations }: Plugin
 
       const routeMatch = matchConfiguredWebDavRoute(settings, extra.path);
       if (!routeMatch) return result;
-
-      // Keep the plugin-route table in sync with the configured entry path
-      // (idempotent) so middleware never caches or deprecation-checks it.
-      registerPluginRoute(routeMatch.routePath);
 
       let config: WebDavConfig;
       try {

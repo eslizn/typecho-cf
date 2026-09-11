@@ -288,6 +288,26 @@ addHook('comment:beforeSave', pluginId, async (commentData: { _rejected?: string
 
 配置存储：`typecho_options` 表，`name = "plugin:<pluginId>"`，值为 JSON 字符串。
 
+### 前台动态路由
+
+需要处理前台自定义路径的插件，必须在 `init()` 中调用
+`PluginInitContext.registerRouteResolver(resolver)` 声明 owner-scoped 路由：
+
+```ts
+export default function init({ addHook, pluginId, registerRouteResolver }: PluginInitContext): void {
+  registerRouteResolver(({ config }) => (
+    config.enabled ? [{ path: String(config.path || '/example'), match: 'prefix' }] : []
+  ));
+
+  addHook('request:route', pluginId, (result, extra) => {
+    // resolver 只声明当前配置下的有效路径；实际响应仍由 request:route 处理
+    return result;
+  });
+}
+```
+
+resolver 必须同步返回当前插件配置对应的 claim，不能访问网络或 D1。核心会在每次请求的缓存判断、内容路径检查和 `request:route` 分发前刷新 claim；插件停用、初始化失败、配置变更或跨插件 claim 冲突时，相关路径不会继续生效。系统固定路由和系统固定链接优先于插件路由。旧的 `registerPluginRoute(path)` 已移除。
+
 ---
 
 ## 当前已接入的 Hook 参考
@@ -322,7 +342,7 @@ addHook('comment:beforeSave', pluginId, async (commentData: { _rejected?: string
 
 | Hook | 触发位置 | 参数 | 说明 |
 |------|---------|------|------|
-| `request:route` | 中间件路由分发 | `(result, extra)` | 处理插件自定义路由；管理/API 路径还需 `registerPluginAdminPath`，前台路径建议 `registerPluginRoute` |
+| `request:route` | 中间件路由分发 | `(result, extra)` | 处理插件自定义路由；管理/API 路径还需 `registerPluginAdminPath`，前台路径必须由 `registerRouteResolver` 在 `init()` 中声明 owner-scoped 路由 claim |
 | `admin:head` / `admin:footer` | 管理后台头部/底部 | `(html, extra)` | 安全展示型 HTML 注入 |
 | `admin:nav` | 管理后台导航生成 | `(groups, extra)` | 修改分组/菜单项；系统会校验 href 只能指向本站管理路径或锚点 |
 | `admin:login:head` / `admin:login:form` | 登录页头部/表单 | `(html, extra)` | 登录页 HTML 注入 |
@@ -447,9 +467,9 @@ import { schema } from 'typecho/db';
 
 | 类别 | 导出 |
 |------|------|
-| 类型 | `PluginInitContext`, `PluginRouteResult`, `PluginManifest`, `PluginConfigField`, `AttachmentMeta`, `Database`, `IanaTimezone`, `TimezoneSetting` |
+| 类型 | `PluginInitContext`, `PluginRouteClaim`, `PluginRouteResolver`, `PluginRouteResolverContext`, `PluginRouteResult`, `PluginManifest`, `PluginConfigField`, `AttachmentMeta`, `Database`, `IanaTimezone`, `TimezoneSetting` |
 | 任务类型 | `AsyncTaskDefinition`, `RegisteredAsyncTask`, `RegisteredScheduledTask`, `ScheduledTaskDefinition`, `ScheduledTaskKeyContext`, `ScheduledTaskPayload`, `TaskEnvelope`, `TaskExecutionContext`, `TaskHandler`, `TaskKind`, `TaskLocalSlot`, `TaskResult`, `TaskSource`, `EnqueueAsyncTaskOptions` |
-| 插件系统 | `HookPoints`, `parsePluginOption`, `parsePluginConfigFormData`, `loadPluginConfig`, `escapeAttr`, `registerPluginAdminPath`, `registerPluginRoute`, `getClientIp` |
+| 插件系统 | `HookPoints`, `parsePluginOption`, `parsePluginConfigFormData`, `loadPluginConfig`, `escapeAttr`, `registerPluginAdminPath`, `getClientIp` |
 | 认证 | `hasPermission`, `verifyPassword` |
 | 内容 | `buildPermalink`, `formatDate`, `buildAuthorLink`, `buildCategoryLink` |
 | Markdown/HTML | `escapeHtml`, `renderMarkdown`, `renderMarkdownFiltered`, `renderContentExcerpt`, `generateExcerpt`, `autop`, `stripTypechoMarkers`, `stripHtmlTags` |

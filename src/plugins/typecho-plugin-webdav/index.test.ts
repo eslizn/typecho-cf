@@ -2,6 +2,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { generateAuthToken, generateSecurityToken, hashPassword } from '@/lib/auth';
 import { REQUEST_BODY_LIMITS } from '@/lib/constants';
 import { normalizeHookPoint } from '@/lib/plugin';
+import type { PluginRouteClaim, PluginRouteResolverContext } from 'typecho/plugin-sdk';
 import init, {
   clearWebDavAuthFailures,
   getWebDavClientIp,
@@ -168,6 +169,7 @@ function mockTianyiFetch() {
 
 function collectHooks() {
   const hooks = new Map<string, Function>();
+  let routeResolver: ((context: PluginRouteResolverContext) => ReadonlyArray<PluginRouteClaim>) | undefined;
   init({
     pluginId: 'typecho-plugin-webdav',
     HookPoints: {} as any,
@@ -175,6 +177,9 @@ function collectHooks() {
       hooks.set(point, handler);
     },
     registerTranslations: () => {},
+    registerRouteResolver: (resolver) => {
+      routeResolver = resolver;
+    },
     registerScheduledTask: () => {},
     registerAsyncTask: () => {},
     enqueueAsyncTask: async () => ({
@@ -185,6 +190,7 @@ function collectHooks() {
   });
   const get = hooks.get.bind(hooks);
   hooks.get = ((point: string) => get(normalizeHookPoint(point))) as typeof hooks.get;
+  (hooks as Map<string, Function> & { routeResolver?: typeof routeResolver }).routeResolver = routeResolver;
   return hooks;
 }
 
@@ -590,7 +596,7 @@ describe('typecho-plugin-webdav Tianyi session cache', () => {
 });
 
 describe('typecho-plugin-webdav hooks', () => {
-  it('registers config validation and route hooks', () => {
+  it('registers config validation, route resolver, and route hooks', () => {
     const hooks = collectHooks();
 
     expect([...hooks.keys()].sort()).toEqual([
@@ -599,6 +605,42 @@ describe('typecho-plugin-webdav hooks', () => {
       'plugin:config:beforeSave',
       'request:route',
     ]);
+    expect((hooks as Map<string, Function> & { routeResolver?: Function }).routeResolver).toEqual(expect.any(Function));
+  });
+
+  it('claims the default /webdav route as a prefix', () => {
+    const hooks = collectHooks();
+    const resolver = (hooks as Map<string, Function> & { routeResolver: Function }).routeResolver;
+
+    expect(resolver({ config: {} })).toEqual([
+      { path: '/webdav', match: 'prefix' },
+    ]);
+  });
+
+  it('claims a normalized custom route as a prefix', () => {
+    const hooks = collectHooks();
+    const resolver = (hooks as Map<string, Function> & { routeResolver: Function }).routeResolver;
+
+    expect(resolver({ config: { routePath: 'storage/dav/' } })).toEqual([
+      { path: '/storage/dav', match: 'prefix' },
+    ]);
+  });
+
+  it('keeps /webdav as a legacy claim when /dav is configured', () => {
+    const hooks = collectHooks();
+    const resolver = (hooks as Map<string, Function> & { routeResolver: Function }).routeResolver;
+
+    expect(resolver({ config: { routePath: 'dav/' } })).toEqual([
+      { path: '/dav', match: 'prefix' },
+      { path: '/webdav', match: 'prefix' },
+    ]);
+  });
+
+  it('claims no protocol route when WebDAV protocol is disabled', () => {
+    const hooks = collectHooks();
+    const resolver = (hooks as Map<string, Function> & { routeResolver: Function }).routeResolver;
+
+    expect(resolver({ config: { routePath: '/custom', protocolEnabled: false } })).toEqual([]);
   });
 
   it('normalizes config before saving', () => {

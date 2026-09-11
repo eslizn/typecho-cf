@@ -6,18 +6,23 @@ import {
   addHook,
   doHook,
   applyFilter,
+  applyFilterSafely,
   hasHook,
   normalizeHookPoint,
   removePluginHooks,
   setActivatedPlugins,
   registerPluginInit,
   registerPluginLoaders,
-  registerPluginRoute,
   isPluginRoute,
+  refreshPluginRoutes,
   getPluginInitFailures,
   resetPluginInitState,
   type HookContext,
 } from '@/lib/plugin';
+import {
+  markPluginRouteResolverReady,
+  registerPluginRouteResolver,
+} from '@/lib/plugin-routes';
 
 function mockCtx(): HookContext {
   return { activatedPlugins: new Set<string>() };
@@ -108,14 +113,24 @@ describe('lazy plugin init (G6-3)', () => {
   it('isolates init failures per plugin', async () => {
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const good = vi.fn();
-    const bad = vi.fn(() => { throw new Error('boom'); });
+    const failedHook = vi.fn();
+    const bad = vi.fn(({ addHook: register, pluginId }) => {
+      register('request:begin', pluginId, failedHook);
+      throw new Error('boom');
+    });
     registerPluginInit({ 'lazy-good': good, 'lazy-bad': bad }, { addHook, HookPoints: {} as any });
-    const ctx = mockCtx();
+    const ctx: HookContext = {
+      activatedPlugins: new Set<string>(),
+      routeResolverFailures: new Set<string>(),
+    };
     await expect(setActivatedPlugins(ctx, ['lazy-bad', 'lazy-good'])).resolves.toBeUndefined();
     expect(good).toHaveBeenCalled();
     expect(bad).toHaveBeenCalled();
     expect(errSpy).toHaveBeenCalled();
     expect(getPluginInitFailures()['lazy-bad']?.error).toBe('boom');
+    expect(ctx.activatedPlugins.has('lazy-bad')).toBe(false);
+    await doHook(ctx, 'request:begin');
+    expect(failedHook).not.toHaveBeenCalled();
     errSpy.mockRestore();
   });
 
@@ -127,6 +142,7 @@ describe('lazy plugin init (G6-3)', () => {
     await setActivatedPlugins(ctx, ['lazy-retry']);
     await setActivatedPlugins(ctx, ['lazy-retry']);
     expect(bad).toHaveBeenCalledTimes(1);
+    expect(ctx.activatedPlugins.has('lazy-retry')).toBe(false);
     expect(getPluginInitFailures()['lazy-retry']?.attempts).toBe(1);
     errSpy.mockRestore();
     resetPluginInitState();
@@ -165,14 +181,89 @@ describe('lazy plugin init (G6-3)', () => {
     expect(activeInit).toHaveBeenCalledOnce();
     expect(inactiveLoader).not.toHaveBeenCalled();
   });
+
+  it('skips request route handlers for request-local resolver failures', async () => {
+    const failedHandler = vi.fn((value: string) => `${value}:failed`);
+    const healthyHandler = vi.fn((value: string) => `${value}:healthy`);
+    addHook('request:route', 'route-failed-owner', failedHandler);
+    addHook('request:route', 'route-healthy-owner', healthyHandler);
+    const ctx: HookContext = {
+      activatedPlugins: new Set(['route-failed-owner', 'route-healthy-owner']),
+      routeResolverFailures: new Set(['route-failed-owner']),
+    };
+
+    expect(await applyFilter(ctx, 'request:route', 'start')).toBe('start:healthy');
+    expect(await applyFilterSafely(ctx, 'request:route', 'start')).toBe('start:healthy');
+    expect(failedHandler).not.toHaveBeenCalled();
+    expect(healthyHandler).toHaveBeenCalledTimes(2);
+
+    removePluginHooks('route-failed-owner');
+    removePluginHooks('route-healthy-owner');
+  });
 });
 
-describe('plugin front-end route table', () => {
-  it('matches registered routes and their sub-paths', () => {
-    registerPluginRoute('/unit-test-route');
-    expect(isPluginRoute('/unit-test-route')).toBe(true);
-    expect(isPluginRoute('/unit-test-route/sub/path')).toBe(true);
-    expect(isPluginRoute('/unit-test-routeish')).toBe(false);
-    expect(isPluginRoute('/unrelated')).toBe(false);
+describe('plugin route resolver lifecycle', () => {
+  beforeEach(() => {
+    resetPluginInitState();
+  });
+
+  it('publishes claims after successful plugin init', async () => {
+    registerPluginInit({
+      'route-owner': ({ registerRouteResolver }) => {
+        registerRouteResolver(({ config }) => (
+          config.enabled ? [{ path: '/route-owner', match: 'prefix' }] : []
+        ));
+      },
+    }, { addHook, HookPoints: {} as any });
+
+    const ctx = mockCtx();
+    await setActivatedPlugins(ctx, ['route-owner']);
+
+    expect(isPluginRoute('/route-owner')).toBe(false);
+    refreshPluginRoutes(ctx.activatedPlugins, () => ({ enabled: true }));
+    expect(isPluginRoute('/route-owner')).toBe(true);
+    expect(isPluginRoute('/route-owner/child')).toBe(true);
+    expect(isPluginRoute('/route-ownerish')).toBe(false);
+  });
+
+  it('clears stale claims when plugin init fails', async () => {
+    registerPluginRouteResolver('route-failed', () => [
+      { path: '/stale-route', match: 'prefix' },
+    ]);
+    markPluginRouteResolverReady('route-failed');
+    refreshPluginRoutes(new Set(['route-failed']), () => ({}));
+    expect(isPluginRoute('/stale-route')).toBe(true);
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    registerPluginInit({
+      'route-failed': ({ registerRouteResolver }) => {
+        registerRouteResolver(() => [{ path: '/new-route' }]);
+        throw new Error('route init failed');
+      },
+    }, { addHook, HookPoints: {} as any });
+
+    const ctx = mockCtx();
+    await setActivatedPlugins(ctx, ['route-failed']);
+    refreshPluginRoutes(ctx.activatedPlugins, () => ({}));
+
+    expect(isPluginRoute('/stale-route')).toBe(false);
+    expect(isPluginRoute('/new-route')).toBe(false);
+    errorSpy.mockRestore();
+  });
+
+  it('resets route resolver state with plugin init state', async () => {
+    registerPluginInit({
+      'route-reset': ({ registerRouteResolver }) => {
+        registerRouteResolver(() => [{ path: '/reset-route' }]);
+      },
+    }, { addHook, HookPoints: {} as any });
+
+    const ctx = mockCtx();
+    await setActivatedPlugins(ctx, ['route-reset']);
+    refreshPluginRoutes(ctx.activatedPlugins, () => ({}));
+    expect(isPluginRoute('/reset-route')).toBe(true);
+
+    resetPluginInitState();
+    expect(isPluginRoute('/reset-route')).toBe(false);
   });
 });

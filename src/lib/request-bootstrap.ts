@@ -4,7 +4,15 @@ import { setRequestCoreContext, type RequestCoreContext } from '@/lib/context';
 import { ensureDatabaseReady, TablesMissingError } from '@/lib/isolate-boot';
 import { ensureSecret, loadOptions } from '@/lib/options';
 import { parsePageNumber } from '@/lib/input';
-import { doHook, parseActivatedPlugins, setActivatedPlugins, type HookContext } from '@/lib/plugin';
+import {
+  doHook,
+  getPluginRouteClaimsSnapshot,
+  loadPluginConfig,
+  parseActivatedPlugins,
+  refreshPluginRoutes,
+  setActivatedPlugins,
+  type HookContext,
+} from '@/lib/plugin';
 import { applySecurityHeaders } from '@/lib/security-headers';
 import { createCoreRequestI18n, createRequestI18n } from '@/lib/i18n-runtime';
 import type { I18n, ResolvedLocale } from '@/lib/i18n';
@@ -115,6 +123,11 @@ export async function bootstrapRequestCore(
         parseActivatedPlugins(options.activatedPlugins as string | undefined),
       );
     }
+    pluginCtx.routeResolverFailures = refreshPluginRoutes(
+      pluginCtx.activatedPlugins,
+      pluginId => loadPluginConfig(options, pluginId),
+    );
+    pluginCtx.routeClaims = getPluginRouteClaimsSnapshot();
     const runtime = createRequestI18n(
       options.lang,
       request,

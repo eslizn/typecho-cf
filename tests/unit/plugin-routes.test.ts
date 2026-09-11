@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   clearPluginRouteClaims,
+  getPluginRouteClaimsSnapshot,
   isPluginRoute,
   markPluginRouteResolverReady,
   refreshPluginRoutes,
@@ -23,6 +24,22 @@ describe('owner-scoped plugin route registry', () => {
     expect(isPluginRoute('/first/file')).toBe(true);
 
     refreshPluginRoutes(new Set(['owner']), () => ({ path: '/second' }));
+    expect(isPluginRoute('/first/file')).toBe(false);
+    expect(isPluginRoute('/second/file')).toBe(true);
+  });
+
+  it('keeps a request snapshot stable when the registry is refreshed later', () => {
+    registerPluginRouteResolver('owner', ({ config }) => [
+      { path: String(config.path), match: 'prefix' },
+    ]);
+    markPluginRouteResolverReady('owner');
+
+    refreshPluginRoutes(new Set(['owner']), () => ({ path: '/first' }));
+    const snapshot = getPluginRouteClaimsSnapshot();
+    refreshPluginRoutes(new Set(['owner']), () => ({ path: '/second' }));
+
+    expect(isPluginRoute('/first/file', snapshot)).toBe(true);
+    expect(isPluginRoute('/second/file', snapshot)).toBe(false);
     expect(isPluginRoute('/first/file')).toBe(false);
     expect(isPluginRoute('/second/file')).toBe(true);
   });
@@ -88,14 +105,77 @@ describe('owner-scoped plugin route registry', () => {
     markPluginRouteResolverReady('resolver-error');
     markPluginRouteResolverReady('config-error');
 
-    refreshPluginRoutes(new Set(['resolver-error', 'config-error']), pluginId => {
-      if (pluginId === 'config-error') throw new Error('config failed');
-      return {};
-    });
+    const failedOwners = refreshPluginRoutes(
+      new Set(['resolver-error', 'config-error']),
+      pluginId => {
+        if (pluginId === 'config-error') throw new Error('config failed');
+        return {};
+      },
+    );
 
     expect(isPluginRoute('/resolver-error')).toBe(false);
     expect(isPluginRoute('/config-error')).toBe(false);
+    expect(failedOwners).toEqual(new Set(['resolver-error', 'config-error']));
     expect(errorSpy).toHaveBeenCalledTimes(2);
+    errorSpy.mockRestore();
+  });
+
+  it('fails closed for overlapping claims from different owners', () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    registerPluginRouteResolver('exact-left', () => [{ path: '/same', match: 'exact' }]);
+    registerPluginRouteResolver('exact-right', () => [{ path: '/same', match: 'exact' }]);
+    registerPluginRouteResolver('exact-child', () => [{ path: '/mount/item', match: 'exact' }]);
+    registerPluginRouteResolver('prefix-parent', () => [{ path: '/mount', match: 'prefix' }]);
+    registerPluginRouteResolver('prefix-root', () => [{ path: '/tree', match: 'prefix' }]);
+    registerPluginRouteResolver('prefix-child', () => [{ path: '/tree/branch', match: 'prefix' }]);
+    registerPluginRouteResolver('safe', () => [{ path: '/foo', match: 'prefix' }]);
+    registerPluginRouteResolver('boundary', () => [{ path: '/foo-bar', match: 'exact' }]);
+
+    for (const owner of [
+      'exact-left',
+      'exact-right',
+      'exact-child',
+      'prefix-parent',
+      'prefix-root',
+      'prefix-child',
+      'safe',
+      'boundary',
+    ]) {
+      markPluginRouteResolverReady(owner);
+    }
+
+    const failedOwners = refreshPluginRoutes(
+      new Set([
+        'exact-left',
+        'exact-right',
+        'exact-child',
+        'prefix-parent',
+        'prefix-root',
+        'prefix-child',
+        'safe',
+        'boundary',
+      ]),
+      () => ({}),
+    );
+
+    expect(failedOwners).toEqual(
+      new Set([
+        'exact-left',
+        'exact-right',
+        'exact-child',
+        'prefix-parent',
+        'prefix-root',
+        'prefix-child',
+      ]),
+    );
+    expect(isPluginRoute('/same')).toBe(false);
+    expect(isPluginRoute('/mount')).toBe(false);
+    expect(isPluginRoute('/mount/item')).toBe(false);
+    expect(isPluginRoute('/tree/branch/file')).toBe(false);
+    expect(isPluginRoute('/foo')).toBe(true);
+    expect(isPluginRoute('/foo/file')).toBe(true);
+    expect(isPluginRoute('/foo-bar')).toBe(true);
+    expect(errorSpy).toHaveBeenCalled();
     errorSpy.mockRestore();
   });
 

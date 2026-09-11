@@ -70,6 +70,10 @@ export const onRequest = defineMiddleware(async (context, next) => {
   }
   const { db, options, pluginCtx, i18n, resolvedLocale, autoLocale } = bootstrap.core;
 
+  // Fixed system surfaces claim their paths before cache lookup and plugin
+  // dispatch. This keeps route-priority decisions consistent across layers.
+  const isBuiltInRoute = BUILT_IN_ROUTES.some((re) => re.test(path));
+
   // ── Edge Cache Layer ──────────────────────────────────────────────────────
   const isGetRequest = context.request.method === 'GET';
   const hasAuth = hasAuthCookies(context.request.headers.get('cookie'));
@@ -87,7 +91,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
     // routes are never cached either — they carry their own auth and the
     // cache layer must not bypass it.
     !context.locals._permalinkRewrite &&
-    !isPluginRoute(path) &&
+    !isPluginRoute(path, pluginCtx.routeClaims) &&
     isCacheablePublicPath(path, options);
 
   // Reuse a single Request for both cache.match and cache.put
@@ -109,8 +113,6 @@ export const onRequest = defineMiddleware(async (context, next) => {
   const postPattern = options.permalinkPattern as string | undefined;
   const pagePattern = options.pagePattern as string | undefined;
   const categoryPattern = options.categoryPattern as string | undefined;
-
-  const isBuiltInRoute = BUILT_IN_ROUTES.some((re) => re.test(path));
 
   let permalinkTarget: string | undefined;
 
@@ -230,10 +232,17 @@ export const onRequest = defineMiddleware(async (context, next) => {
   // (priority: system fixed > system routes > plugin routes). permalinkTarget
   // is resolved above, so a plugin can never shadow a configured permalink
   // URL: once a system route claims the path, request:route is skipped. The
-  // same applies to the internal rewrite target (locals._permalinkRewrite is
-  // set on the second middleware pass), so plugins cannot hijack
-  // /contents/{cid}/ either.
-  if (!permalinkTarget && !context.locals._permalinkRewrite) {
+  // same applies to fixed built-in surfaces, reserved core paths, and the
+  // internal rewrite target (locals._permalinkRewrite is set on the second
+  // middleware pass), so plugins cannot hijack core routes. Registered plugin
+  // admin paths remain eligible because isReservedCorePath() explicitly
+  // allows them through.
+  if (
+    !permalinkTarget &&
+    !context.locals._permalinkRewrite &&
+    !isBuiltInRoute &&
+    !isReservedCorePath(path)
+  ) {
     const pluginRoute = await applyFilter(pluginCtx, 'request:route', { handled: false }, {
       request: context.request,
       url,
@@ -247,20 +256,13 @@ export const onRequest = defineMiddleware(async (context, next) => {
       resolvedLocale,
     });
     if (pluginRoute?.handled && pluginRoute.response instanceof Response) {
-      // G6-4: hard-block plugins from claiming reserved core paths.
-      // Even a buggy/malicious plugin that returns handled=true on /admin
-      // must not be able to intercept admin auth, install, or core API.
-      if (isReservedCorePath(path)) {
-        console.warn({ event: 'plugin_reserved_path_rejected', path });
-      } else {
-        return await finalizeRequestResponse(pluginRoute.response, {
-          request: context.request,
-          pluginCtx,
-          i18n,
-          resolvedLocale,
-          autoLocale,
-        });
-      }
+      return await finalizeRequestResponse(pluginRoute.response, {
+        request: context.request,
+        pluginCtx,
+        i18n,
+        resolvedLocale,
+        autoLocale,
+      });
     }
   }
 
@@ -269,7 +271,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
   // served only while they match the configured permalink patterns; once a
   // custom pattern is set, the old default URLs hard-404. Non-content paths
   // pass through (isContentPathAllowed returns true for them). Plugin routes
-  // are exempt via isPluginRoute(): request:route above already resolved
+  // are exempt via the request-local route snapshot: request:route above already resolved
   // plugin paths (lazily registering configurable entry points), and a bare
   // plugin slug must not be mistaken for a deprecated default page form.
   // Internal rewrites mark the request with locals._permalinkRewrite
@@ -277,7 +279,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
   // rejected.
   if (
     !context.locals._permalinkRewrite &&
-    !isPluginRoute(path) &&
+    !isPluginRoute(path, pluginCtx.routeClaims) &&
     !isContentPathAllowed(path, { permalinkPattern: postPattern, pagePattern, categoryPattern })
   ) {
     return finalizeRequestResponse(new Response(i18n.t('core.error.notFound', {}, 'Not Found'), { status: 404 }), {
@@ -302,7 +304,8 @@ export const onRequest = defineMiddleware(async (context, next) => {
     }
   }
 
-  const shouldRunArchiveRenderHooks = isFrontendDocumentRequest(context.request, path) && !isPluginRoute(path);
+  const shouldRunArchiveRenderHooks = isFrontendDocumentRequest(context.request, path)
+    && !isPluginRoute(path, pluginCtx.routeClaims);
   const archiveRenderContext = {
     request: context.request,
     requestUrl: context.request.url,

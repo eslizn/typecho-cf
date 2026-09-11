@@ -15,6 +15,7 @@ import { handleAiHttpRequest, isAiHttpEndpointPath } from './http';
 import {
   AiConfigValidationError,
   isValidHttpBasePath,
+  listChatModelOptions,
   normalizeAiConfig,
   validateAiConfig,
   validateAiConfigLocally,
@@ -22,8 +23,10 @@ import {
 import {
   AI_CAPABILITIES,
   AI_CONFIG_FIELDS,
+  AI_MODEL_CATALOG_CAPABILITY,
   AI_PLUGIN_ID,
   type AiConfig,
+  type AiModelCatalogService,
 } from './types';
 import en from './locales/en.json';
 import zhCN from './locales/zh-CN.json';
@@ -36,6 +39,7 @@ export {
   buildProviderEndpoint,
   isValidHttpBasePath,
   isReservedHttpBasePath,
+  listChatModelOptions,
   listChatModels,
   logicalModelName,
   normalizeAiConfig,
@@ -124,6 +128,16 @@ export default function init({
     ),
   });
 
+  // The catalog is published as a capability so other plugins can offer a
+  // model dropdown without depending on this package or reading its config.
+  registerCapability<AiModelCatalogService>({
+    capability: AI_MODEL_CATALOG_CAPABILITY,
+    version: 1,
+    factory: runtime => ({
+      listOptions: () => listChatModelOptions(normalizeAiConfig(runtime.getOwnPluginConfig())),
+    }),
+  });
+
   registerRouteResolver(({ config }) => configuredRouteClaims(config));
 
   addHook(
@@ -187,4 +201,4 @@ export default function init({
   );
 }
 
-export { AI_CAPABILITIES, AI_CONFIG_FIELDS, AI_PLUGIN_ID, HTTP_V1_PREFIX };
+export { AI_CAPABILITIES, AI_CONFIG_FIELDS, AI_MODEL_CATALOG_CAPABILITY, AI_PLUGIN_ID, HTTP_V1_PREFIX };

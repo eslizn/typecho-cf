@@ -98,7 +98,10 @@ Use `repeatable` for multiple same-shaped config items, such as storage mounts:
 }
 ```
 
-Fields may use `showWhen` for conditional display. Select fields may use `optionsSource: "r2Bindings"` to populate options from R2 bucket bindings in the current Worker environment.
+Fields may use `showWhen` for conditional display. Dynamic `select` options come in two flavors:
+
+- `optionsSource: "r2Bindings"` populates the dropdown from R2 bucket bindings in the current Worker environment.
+- `optionsSource: { capability, ownerPluginId?, minVersion? }` populates the dropdown from a list published by another plugin through a capability (for example Scribe renders `ai.models.list` from the AI plugin). The capability must implement `listOptions(): Array<{ value: string; label?: string }>`; when it is unregistered, inactive, ambiguous, or its factory throws, the field renders an empty list instead of failing the form. Values of such a field are not checked against static options — only length and visible characters are bounded — and the owning plugin re-validates them in `plugin:config:beforeSave` through the same capability.
 
 A `repeatable` can opt into the card view: `collapsible: true` folds every row except the first, `summaryFields` (for example `["name", "baseUrl"]`) builds the header summary, and `statusField` (for example `enabled`) renders a status badge. Without those keys the original flat layout is unchanged.
 

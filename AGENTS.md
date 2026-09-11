@@ -276,7 +276,7 @@ WebDAV 插件的文件管理器是完整参考实现：`admin:page` 返回包含
 - 插件在 `init()` 中通过 `PluginInitContext.registerCapability({ capability, version, factory })` 注册实现；owner 自动绑定当前 `pluginId`，初始化失败或停用后旧注册不可解析
 - Consumer 从请求 Hook extra 的 `capabilityRuntime` 取得上下文，通过 SDK `resolveCapability(runtime, { capability, minVersion?, ownerPluginId? })` 解析；未指定 owner 时多个实现返回 `ambiguous`，不得静默按注册顺序选择
 - Consumer 必须处理 `unavailable`、`ambiguous`、`version-mismatch`、`factory-failed` 和能力调用错误，并自行实现可选功能降级；Capability 不执行 Consumer 提供的工具/函数
-- 当前 AI 能力目录由 `typecho-plugin-ai` 提供，实际实现只有 `ai.chat.generate`；`ai.image.generate`、`ai.audio.speech.generate`、`ai.audio.transcribe`、`ai.embeddings.create` 是预留 ID，不代表已有实现
+- 当前 AI 能力目录由 `typecho-plugin-ai` 提供：`ai.chat.generate` 负责对话生成，`ai.models.list` 发布「已启用 + 支持文本对话」的模型清单（供其他插件的配置下拉与保存前校验使用，服务需实现 `listOptions()`）；Scribe 通过这两个能力消费 AI 插件，不再自带 endpoint / apiKey。`ai.image.generate`、`ai.audio.speech.generate`、`ai.audio.transcribe`、`ai.embeddings.create` 是预留 ID，不代表已有实现
 
 ### 6.6 Hook 触发点
 
@@ -447,7 +447,8 @@ Cloudflare Workers 是单线程单 isolate，以下模块级变量是安全的�
 
 **扩展属性**：
 - `showWhen` — 条件显示，仅适用于 `repeatable.itemFields`。格式：`{ field: "provider", value: "s3" }`，`value` 可为单值或数组
-- `optionsSource` — 动态选项源，仅适用于 `select`。当前支持 `"r2Bindings"`（自动读取 wrangler.toml 中的 R2 binding 名称）
+- `optionsSource` — 动态选项源，仅适用于 `select`。支持 `"r2Bindings"`（自动读取 wrangler.toml 中的 R2 binding 名称），或 `{ capability, ownerPluginId?, minVersion? }`：由其他插件通过 capability 发布选项（能力需实现 `listOptions(): Array<{ value: string; label?: string }>`），解析失败时渲染空列表，字段值只做长度/可见字符校验，由插件在 `plugin:config:beforeSave` 中用同一 capability 复核
+
 - `optionDisabled` — 选项值数组，适用于 `select` / `radio` / `option` 型 `checkbox`。命中该数组的选项渲染为 disabled，且服务端在保存时直接丢弃该值（即使被伪造提交）。用于「能力已预留但暂未实现」这类场景，不要用文案标注代替禁用
 - `itemFields` — 嵌套字段定义，适用于 `object` 与 `repeatable`；两者允许递归嵌套
 - `collapsible` — 仅适用于 `repeatable`。为 true 时每行渲染为可折叠卡片（首行展开、其余收起），头部显示摘要与状态徽标

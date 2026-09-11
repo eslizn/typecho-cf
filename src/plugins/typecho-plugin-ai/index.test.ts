@@ -3,6 +3,7 @@ import { createCapabilityRuntimeContext } from '@/lib/capability';
 import init, {
   AI_CAPABILITIES,
   AI_CONFIG_FIELDS,
+  AI_MODEL_CATALOG_CAPABILITY,
   createAiChatService,
   handleAiHttpRequest,
   isValidHttpBasePath,
@@ -99,6 +100,39 @@ describe('typecho-plugin-ai', () => {
     expect(AI_CONFIG_FIELDS.providers.statusField).toBeUndefined();
     expect(AI_CONFIG_FIELDS.providers.itemFields?.models.itemFields?.enabled.type).toBe('select');
   });
+  it('publishes the chat model catalog capability for other plugins', () => {
+    const { context } = initContext();
+    const registrations: any[] = [];
+    context.registerCapability = (registration: any) => { registrations.push(registration); };
+
+    init(context);
+
+    const catalog = registrations.find(entry => entry.capability === AI_MODEL_CATALOG_CAPABILITY);
+    expect(catalog?.version).toBe(1);
+
+    const service = catalog!.factory({
+      getOwnPluginConfig: () => ({
+        providers: [
+          {
+            name: '智谱',
+            baseUrl: BASE_URL,
+            apiKey: 'key',
+            models: [
+              { model: 'glm-4.7-flash', alias: 'chat', enabled: true, capabilities: ['ai.chat.generate'], modalities: ['text'] },
+              { model: 'disabled-model', enabled: false, capabilities: ['ai.chat.generate'], modalities: ['text'] },
+            ],
+          },
+          { name: 'broken', baseUrl: 'http://localhost/v1', apiKey: 'key', models: [{ model: 'local', enabled: true, capabilities: ['ai.chat.generate'], modalities: ['text'] }] },
+        ],
+        http: { enabled: false, basePath: '/ai', tokens: [] },
+      }),
+    });
+
+    // Only enabled chat models behind a public HTTPS base URL are published,
+    // and the label carries the provider name for the admin dropdown.
+    expect(service.listOptions()).toEqual([{ value: 'chat', label: 'chat · 智谱' }]);
+  });
+
 
   it('disables the reserved capability options instead of labeling them', () => {
     const capabilities = AI_CONFIG_FIELDS.providers.itemFields?.models.itemFields?.capabilities;

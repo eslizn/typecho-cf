@@ -7,6 +7,12 @@
  */
 import { describe, expect, it } from 'vitest';
 import ConfigForm from '@/components/admin/ConfigForm.astro';
+import {
+  createCapabilityRuntimeContext,
+  registerCapability,
+  resetCapabilityRegistry,
+  setCapabilityActivation,
+} from '@/lib/capability';
 import type { ConfigField } from '@/lib/config';
 import { renderComponent, testI18n } from './helpers';
 
@@ -48,6 +54,29 @@ function renderForm(overrides: Record<string, unknown> = {}) {
   });
 }
 
+/** Select field whose options come from another plugin's model catalog. */
+const CATALOG_FIELD: ConfigField = {
+  type: 'select',
+  label: 'Model',
+  optionsSource: { capability: 'ai.models.list', ownerPluginId: 'typecho-plugin-ai' },
+};
+
+/**
+ * Publish one dynamic option source and return the request-scoped runtime the
+ * configuration form needs in order to resolve it.
+ */
+function capabilityRuntime(factory: () => { listOptions: () => Array<{ value: string; label?: string }> }) {
+  resetCapabilityRegistry();
+  registerCapability('typecho-plugin-ai', { capability: 'ai.models.list', version: 1, factory });
+  setCapabilityActivation(new Set(['typecho-plugin-ai']), 1);
+  return createCapabilityRuntimeContext({
+    request: new Request('https://example.com/admin/plugin-config?id=demo-plugin'),
+    db: {} as never,
+    activatedPlugins: new Set(['typecho-plugin-ai']),
+    activationGeneration: 1,
+  });
+}
+
 describe('ConfigForm rendering', () => {
   it('posts to the configured action with CSRF and entity identity', async () => {
     const html = await renderForm();
@@ -56,6 +85,48 @@ describe('ConfigForm rendering', () => {
     expect(html).toContain('name="_" value="csrf-token-value"');
     expect(html).toContain('name="plugin" value="demo-plugin"');
   });
+  it('renders options published by another plugin capability', async () => {
+    const html = await renderForm({
+      configDef: { model: CATALOG_FIELD } as Record<string, ConfigField>,
+      configValues: { model: 'glm-4.7-flash' },
+      optionSourceRuntime: capabilityRuntime(() => ({
+        listOptions: () => [
+          { value: 'glm-4.7-flash', label: 'glm-4.7-flash · 智谱' },
+          { value: 'gpt-5', label: 'gpt-5' },
+        ],
+      })),
+    });
+
+    expect(html).toContain('<select id="cfg-model" name="model"');
+    expect(html).toContain('<option value="glm-4.7-flash" selected>glm-4.7-flash · 智谱</option>');
+    expect(html).toContain('<option value="gpt-5">gpt-5</option>');
+  });
+
+  it('keeps a stored value the option catalog no longer publishes', async () => {
+    const html = await renderForm({
+      configDef: { model: CATALOG_FIELD } as Record<string, ConfigField>,
+      configValues: { model: 'retired-model' },
+      optionSourceRuntime: capabilityRuntime(() => ({
+        listOptions: () => [{ value: 'gpt-5', label: 'gpt-5' }],
+      })),
+    });
+
+    expect(html).toContain('<option value="retired-model" selected>retired-model</option>');
+    expect(html).toContain('<option value="gpt-5">gpt-5</option>');
+  });
+
+  it('renders an empty dynamic select when the capability is unavailable', async () => {
+    resetCapabilityRegistry();
+
+    const html = await renderForm({
+      configDef: { model: CATALOG_FIELD } as Record<string, ConfigField>,
+      configValues: {},
+    });
+
+    expect(html).toContain('<select id="cfg-model" name="model"');
+    expect(html).not.toContain('<option');
+  });
+
 
   it('renders every field type with its saved value', async () => {
     const html = await renderForm();

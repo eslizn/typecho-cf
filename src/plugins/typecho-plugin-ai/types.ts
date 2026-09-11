@@ -14,6 +14,19 @@ export const AI_CAPABILITIES = {
   embeddingsCreate: 'ai.embeddings.create',
 } as const;
 
+/**
+ * Capability that publishes this plugin's public chat model catalog.
+ *
+ * Other plugins (for example Scribe) consume it as a generic dynamic option
+ * source, so they never have to import this plugin or read its stored config.
+ */
+export const AI_MODEL_CATALOG_CAPABILITY = 'ai.models.list';
+
+/** Service shape exposed through {@link AI_MODEL_CATALOG_CAPABILITY}. */
+export interface AiModelCatalogService {
+  listOptions(): ReadonlyArray<{ value: string; label?: string }>;
+}
+
 export type AiCapability = typeof AI_CAPABILITIES[keyof typeof AI_CAPABILITIES];
 
 export const AI_MODALITIES = {

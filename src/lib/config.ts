@@ -20,6 +20,44 @@ export const CONFIG_TOKEN_PATTERN = /^[A-Za-z0-9_-]{16,128}$/;
 /** Stable identifier for one token row. */
 export const CONFIG_TOKEN_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
+/** Maximum length accepted for a value coming from a dynamic option source. */
+export const CONFIG_DYNAMIC_OPTION_MAX_LENGTH = 256;
+
+/**
+ * Select options resolved at render time from another plugin's capability.
+ *
+ * The capability has to resolve to a {@link ConfigOptionSourceService}; the
+ * host renders whatever the owner reports and leaves value validation to the
+ * field's owning plugin, which re-checks the value in plugin:config:beforeSave
+ * through the same capability.
+ */
+export interface ConfigCapabilityOptionSource {
+  /** Capability name, for example "ai.models.list". */
+  capability: string;
+  /** Owner plugin expected to provide the capability. */
+  ownerPluginId?: string;
+  /** Minimum accepted capability version. Defaults to 1. */
+  minVersion?: number;
+}
+
+/** Dynamic option source of a select field. */
+export type ConfigOptionSource = 'r2Bindings' | ConfigCapabilityOptionSource;
+
+/** Service shape a capability exposes to act as a dynamic option source. */
+export interface ConfigOptionSourceService {
+  listOptions(): ReadonlyArray<{ value: string; label?: string }>;
+}
+
+/** True when a field resolves its options from another plugin's capability. */
+export function isCapabilityOptionSource(
+  source: ConfigOptionSource | undefined,
+): source is ConfigCapabilityOptionSource {
+  return !!source
+    && typeof source === 'object'
+    && typeof source.capability === 'string'
+    && source.capability.length > 0;
+}
+
 /**
  * Configuration field definition.
  * Mirrors PHP Typecho's Form Element types (Text, Textarea, Select, Radio, Checkbox, Password, Hidden).
@@ -44,7 +82,7 @@ export interface ConfigField {
   /** Option values rendered as disabled and rejected on save. */
   optionDisabled?: string[];
   /** Dynamic option source for select fields */
-  optionsSource?: 'r2Bindings';
+  optionsSource?: ConfigOptionSource;
   /** Conditional visibility inside repeatable config groups */
   showWhen?: {
     field: string;
@@ -498,6 +536,12 @@ function normalizeConfigValue(field: ConfigField, value: unknown): unknown {
 
   if (field.type === 'select' || field.type === 'radio') {
     const candidate = value === null || value === undefined ? '' : String(value);
+    // A capability-backed option source is resolved at render time from another
+    // plugin, so membership cannot be checked here. Bound the shape instead;
+    // the owning plugin re-validates the value in plugin:config:beforeSave.
+    if (isCapabilityOptionSource(field.optionsSource)) {
+      return isDynamicOptionValue(candidate) ? candidate : normalizeScalarFallback(field, '');
+    }
     if ((!field.options || Object.hasOwn(field.options, candidate)) && !disabledOptions(field).has(candidate)) {
       return candidate;
     }
@@ -514,6 +558,13 @@ function normalizeConfigValue(field: ConfigField, value: unknown): unknown {
 /** Option values a field declares as unavailable in this version. */
 function disabledOptions(field: ConfigField): Set<string> {
   return new Set(Array.isArray(field.optionDisabled) ? field.optionDisabled : []);
+}
+
+/** Shape guard for a value that came from a dynamic option source. */
+function isDynamicOptionValue(value: string): boolean {
+  return value.length > 0
+    && value.length <= CONFIG_DYNAMIC_OPTION_MAX_LENGTH
+    && !/[\u0000-\u001f\u007f]/.test(value);
 }
 
 function normalizeRepeatableRows(field: ConfigField, value: unknown[]): Record<string, unknown>[] {

@@ -210,17 +210,36 @@ export function validateAiConfigLocally(config: AiConfig): void {
     }
   }
 }
-export function listChatModels(config: AiConfig): string[] {
-  const names = new Set<string>();
+export interface AiModelOption {
+  value: string;
+  label: string;
+}
+
+/**
+ * Public chat model catalog: the logical names an admin can pick, together
+ * with the provider they belong to. Only models that are enabled, routed
+ * through a usable public HTTPS base URL, and support text chat are listed.
+ */
+export function listChatModelOptions(config: AiConfig): AiModelOption[] {
+  const options: AiModelOption[] = [];
+  const seen = new Set<string>();
   for (const provider of config.providers) {
     if (!normalizeBaseUrl(provider.baseUrl)) continue;
     for (const model of provider.models) {
       if (!model.enabled || !model.model || !model.capabilities.includes(AI_CAPABILITIES.chatGenerate)) continue;
       if (!model.modalities.includes(AI_MODALITIES.text)) continue;
-      names.add(logicalModelName(model));
+      const value = logicalModelName(model);
+      if (seen.has(value)) continue;
+      seen.add(value);
+      const providerName = provider.name.trim();
+      options.push({ value, label: providerName ? `${value} · ${providerName}` : value });
     }
   }
-  return [...names];
+  return options;
+}
+
+export function listChatModels(config: AiConfig): string[] {
+  return listChatModelOptions(config).map(option => option.value);
 }
 
 export function selectAiModel(

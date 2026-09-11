@@ -1,7 +1,7 @@
 {
   "name": "typecho-plugin-scribe",
-  "version": "1.0.0",
-  "description": "AI writing assistant for Typecho-CF posts and pages",
+  "version": "1.1.0",
+  "description": "AI writing assistant for Typecho-CF posts and pages, powered by the AI plugin",
   "keywords": ["typecho", "plugin", "ai", "writer"],
   "author": "eslizn",
   "license": "MIT",
@@ -11,30 +11,23 @@
     "plugin": {
       "id": "typecho-plugin-scribe",
       "name": "Scribe",
-      "description": "接入 OpenAI 兼容 LLM，在编辑器中生成、润色和纠错正文",
+      "description": "复用 AI 插件的模型能力，在编辑器中生成、润色和纠错正文",
       "author": "eslizn",
       "authorUrl": "https://eslizn.com",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "homepage": "https://github.com/eslizn/typecho-cf/tree/master/src/plugins/typecho-plugin-scribe",
       "license": "MIT",
       "tags": ["ai", "writer", "llm", "content"],
       "config": {
-        "endpoint": {
-          "type": "text",
-          "label": "接口地址",
-          "default": "https://open.bigmodel.cn/api/paas/v4/",
-          "description": "OpenAI 兼容 Base URL，生成时自动追加 /chat/completions，保存时通过 /models 校验"
-        },
-        "apiKey": {
-          "type": "password",
-          "label": "API Key",
-          "default": ""
-        },
         "model": {
-          "type": "text",
-          "label": "模型名称",
-          "default": "glm-4.7-flash",
-          "description": "填写你的 LLM 服务商提供的模型 ID"
+          "type": "select",
+          "label": "模型",
+          "default": "",
+          "optionsSource": {
+            "capability": "ai.models.list",
+            "ownerPluginId": "typecho-plugin-ai"
+          },
+          "description": "下拉选项来自 AI 插件（typecho-plugin-ai）中已启用且支持文本对话的模型；Provider、模型与 API Key 都在 AI 插件里维护"
         },
         "temperature": {
           "type": "text",

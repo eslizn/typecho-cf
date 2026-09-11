@@ -1,5 +1,5 @@
-import { fetchWithTimeout, parseAttachmentMeta, parsePluginOption, safeJsonForScript, stripTypechoMarkers } from 'typecho/plugin-sdk';
-import type { AttachmentMeta, I18n, PluginInitContext } from 'typecho/plugin-sdk';
+import { parseAttachmentMeta, parsePluginOption, resolveCapability, safeJsonForScript, stripTypechoMarkers } from 'typecho/plugin-sdk';
+import type { AttachmentMeta, CapabilityRuntimeContext, I18n, PluginInitContext } from 'typecho/plugin-sdk';
 import type { Database } from 'typecho/db';
 import { schema } from 'typecho/db';
 import { and, desc, eq, inArray, or } from 'drizzle-orm';
@@ -22,8 +22,6 @@ const LENGTH_LABELS: Record<LengthPreset, string> = {
 };
 
 interface ScribeConfig {
-  endpoint: string;
-  apiKey: string;
   model: string;
   temperature: string;
   maxTokens: string;
@@ -58,25 +56,6 @@ interface ConfigValidationResult {
   error?: string;
 }
 
-interface ChatCompletionResponse {
-  choices?: Array<{
-    message?: {
-      content?: string;
-    };
-  }>;
-}
-
-interface ChatCompletionStreamChunk {
-  choices?: Array<{
-    delta?: {
-      content?: string;
-    };
-    message?: {
-      content?: string;
-    };
-  }>;
-}
-
 interface StyleSample {
   title: string;
   text: string;
@@ -96,20 +75,10 @@ type UserContentPart =
   | { type: 'text'; text: string }
   | { type: 'image_url'; image_url: { url: string } };
 
-interface ModelInfo {
-  id?: string;
-}
-
-interface ModelsResponse {
-  data?: ModelInfo[];
-}
-
 const PLUGIN_ID = 'typecho-plugin-scribe';
 
 const DEFAULTS: ScribeConfig = {
-  endpoint: 'https://open.bigmodel.cn/api/paas/v4/',
-  apiKey: '',
-  model: 'glm-4.7-flash',
+  model: '',
   temperature: '0.7',
   maxTokens: '32000',
   stylePostCount: '5',
@@ -120,9 +89,6 @@ const DEFAULTS: ScribeConfig = {
   userPrompt: '',
   includeBodyAssets: '0',
 };
-
-const VALIDATION_TIMEOUT_MS = 3500;
-const LLM_REQUEST_TIMEOUT_MS = 60_000;
 
 function translate(i18n: I18n | undefined, key: string, fallback: string, variables?: Record<string, string | number>): string {
   return i18n?.t(key, variables, fallback) ?? fallback;
@@ -139,8 +105,6 @@ const SYSTEM_PROMPT = [
 
 function normalizeConfig(settings?: Record<string, unknown>): ScribeConfig {
   return {
-    endpoint: String(settings?.endpoint || '').trim(),
-    apiKey: String(settings?.apiKey || '').trim(),
     model: String(settings?.model || '').trim(),
     temperature: String(settings?.temperature || DEFAULTS.temperature).trim(),
     maxTokens: String(settings?.maxTokens || DEFAULTS.maxTokens).trim(),
@@ -179,18 +143,76 @@ function getConfig(options?: Record<string, unknown>): ScribeConfig {
   });
 }
 
-function buildChatCompletionsUrl(endpoint: string): string {
-  return `${endpoint.replace(/\/+$/, '')}/chat/completions`;
+/**
+ * Capability names published by the AI plugin (typecho-plugin-ai). Scribe only
+ * depends on these request-scoped contracts, never on the provider plugin's
+ * modules or stored configuration.
+ */
+const AI_PLUGIN_ID = 'typecho-plugin-ai';
+const AI_CHAT_CAPABILITY = 'ai.chat.generate';
+const AI_MODEL_CATALOG_CAPABILITY = 'ai.models.list';
+
+interface ScribeChatMessage {
+  role: 'system' | 'user';
+  content: string | UserContentPart[];
 }
 
-function buildModelsUrl(endpoint: string): string {
-  return `${endpoint.replace(/\/+$/, '')}/models`;
+interface ScribeChatRequest {
+  model?: string;
+  messages: ScribeChatMessage[];
+  temperature?: number;
+  max_tokens?: number;
+  stream?: boolean;
 }
 
-function buildModelUrl(endpoint: string, model: string): string {
-  return `${buildModelsUrl(endpoint)}/${encodeURIComponent(model)}`;
+interface ScribeChatChunk {
+  choices?: Array<{ delta?: { content?: string | null } }>;
 }
 
+interface ScribeChatCompletion {
+  choices?: Array<{ message?: { content?: string | null } }>;
+}
+
+type ScribeChatResult = ScribeChatCompletion | ReadableStream<ScribeChatChunk>;
+
+interface ScribeChatService {
+  generate(request: ScribeChatRequest): Promise<ScribeChatResult>;
+}
+
+interface ScribeModelCatalog {
+  listOptions(): ReadonlyArray<{ value: string; label?: string }>;
+}
+
+function isChatStream(value: ScribeChatResult): value is ReadableStream<ScribeChatChunk> {
+  return !!value && typeof (value as ReadableStream<ScribeChatChunk>).getReader === 'function';
+}
+
+/** Resolve the AI plugin's chat capability for the current request. */
+function resolveChatService(runtime?: CapabilityRuntimeContext): ScribeChatService | null {
+  if (!runtime) return null;
+  const resolved = resolveCapability<ScribeChatService>(runtime, {
+    capability: AI_CHAT_CAPABILITY,
+    ownerPluginId: AI_PLUGIN_ID,
+  });
+  return resolved.ok ? resolved.value : null;
+}
+
+/** Published chat model names, or null when the catalog cannot be resolved. */
+function resolveModelCatalog(runtime?: CapabilityRuntimeContext): string[] | null {
+  if (!runtime) return null;
+  const resolved = resolveCapability<ScribeModelCatalog>(runtime, {
+    capability: AI_MODEL_CATALOG_CAPABILITY,
+    ownerPluginId: AI_PLUGIN_ID,
+  });
+  if (!resolved.ok) return null;
+  try {
+    return (resolved.value.listOptions() ?? [])
+      .map(option => (option && typeof option.value === 'string' ? option.value : ''))
+      .filter(Boolean);
+  } catch {
+    return null;
+  }
+}
 function normalizeText(text: string): string {
   return stripTypechoMarkers(text).replace(/\s+/g, ' ').trim();
 }
@@ -321,107 +343,56 @@ function buildPrompt(
   ].filter(Boolean).join('\n\n');
 }
 
-async function readErrorSnippet(response: Response): Promise<string> {
-  const text = await response.text().catch(() => '');
-  const message = extractErrorMessageFromText(text);
-  return message ? `：${message.slice(0, 200)}` : '';
-}
-
-function extractErrorMessageFromText(text: string): string {
-  const trimmed = text.trim();
-  if (!trimmed) return '';
-
-  try {
-    const data = JSON.parse(trimmed) as unknown;
-    return extractErrorMessage(data);
-  } catch {
-    return trimmed.startsWith('{') || trimmed.startsWith('[') ? '' : trimmed;
+/**
+ * Translate an AI capability failure into a localized writing error. The
+ * provider plugin is resolved structurally, so only `code` is inspected.
+ */
+function chatErrorMessage(error: unknown, i18n: I18n | undefined, model: string): string {
+  const code = typeof (error as { code?: unknown } | null)?.code === 'string'
+    ? (error as { code: string }).code
+    : '';
+  switch (code) {
+    case 'model-not-found':
+      return translate(i18n, 'plugin.typecho-plugin-scribe.message.modelMissing', `模型不存在：${model}`, { model });
+    case 'no-available-model':
+      return translate(i18n, 'plugin.typecho-plugin-scribe.message.noAvailableModel', 'AI 插件中没有启用的对话模型，请先在 AI 插件中配置模型');
+    case 'unsupported-modality':
+      return translate(i18n, 'plugin.typecho-plugin-scribe.message.unsupportedModality', '所选模型不支持本次请求的内容模态');
+    case 'upstream-timeout':
+      return translate(i18n, 'plugin.typecho-plugin-scribe.message.requestTimeout', 'LLM 请求超时，请稍后重试');
+    case 'invalid-request':
+      return translate(i18n, 'plugin.typecho-plugin-scribe.message.aiInvalidRequest', 'AI 请求无效或超出限制');
+    case 'upstream-client-error':
+      return translate(i18n, 'plugin.typecho-plugin-scribe.message.upstreamClientError', '上游模型服务拒绝了本次请求，请检查 AI 插件中的 Provider 配置与额度');
+    case 'upstream-server-error':
+      return translate(i18n, 'plugin.typecho-plugin-scribe.message.upstreamServerError', '上游模型服务返回错误，请稍后重试');
+    default:
+      return error instanceof Error && error.message
+        ? error.message
+        : translate(i18n, 'plugin.typecho-plugin-scribe.message.aiFailed', 'AI 写作失败');
   }
 }
 
-function extractErrorMessage(data: unknown): string {
-  if (typeof data === 'string') return data;
-  if (!data || typeof data !== 'object') return '';
-
-  const record = data as Record<string, unknown>;
-  const error = record.error;
-  if (typeof error === 'string') return error;
-  if (error && typeof error === 'object') {
-    const errorRecord = error as Record<string, unknown>;
-    if (typeof errorRecord.message === 'string') return errorRecord.message;
-    if (typeof errorRecord.msg === 'string') return errorRecord.msg;
-    if (typeof errorRecord.code === 'string') return errorRecord.code;
-  }
-
-  if (typeof record.message === 'string') return record.message;
-  if (typeof record.msg === 'string') return record.msg;
-  if (typeof record.detail === 'string') return record.detail;
-  return '';
-}
-
-function validationHeaders(config: ScribeConfig): HeadersInit {
-  return {
-    Authorization: `Bearer ${config.apiKey}`,
-  };
-}
-
-async function assertModelsResponse(response: Response, config: ScribeConfig, i18n?: I18n): Promise<void> {
-  if (!response.ok) {
-    const suffix = await readErrorSnippet(response);
-    if (response.status === 401 || response.status === 403) {
-      throw new Error(translate(i18n, 'plugin.typecho-plugin-scribe.message.apiKeyInvalid', `API Key 无效或无权限${suffix}`, { suffix }));
-    }
-    if (response.status === 404) {
-      throw new Error(translate(i18n, 'plugin.typecho-plugin-scribe.message.modelInvalid', `模型不存在或接口地址不正确${suffix}`, { suffix }));
-    }
-    throw new Error(translate(i18n, 'plugin.typecho-plugin-scribe.message.configValidationFailed', `LLM 配置校验失败 (${response.status})${suffix}`, { status: response.status, suffix }));
-  }
-
-  const data = await response.json().catch(() => null) as ModelsResponse | ModelInfo | null;
-  if (Array.isArray((data as ModelsResponse | null)?.data)) {
-    const exists = (data as ModelsResponse).data?.some(item => item.id === config.model);
-    if (!exists) {
-      throw new Error(translate(i18n, 'plugin.typecho-plugin-scribe.message.modelMissing', `模型不存在：${config.model}`, { model: config.model }));
-    }
-  }
-}
-
-async function validateModelAccess(config: ScribeConfig, i18n?: I18n): Promise<void> {
-  const modelResponse = await fetchWithTimeout(buildModelUrl(config.endpoint, config.model), {
-    method: 'GET',
-    headers: validationHeaders(config),
-  }, VALIDATION_TIMEOUT_MS, translate(i18n, 'plugin.typecho-plugin-scribe.message.requestTimeout', 'LLM 请求超时，请稍后重试'));
-
-  if (modelResponse.ok) {
-    return;
-  }
-
-  if (![404, 405].includes(modelResponse.status)) {
-    await assertModelsResponse(modelResponse, config, i18n);
-    return;
-  }
-
-  const listResponse = await fetchWithTimeout(buildModelsUrl(config.endpoint), {
-    method: 'GET',
-    headers: validationHeaders(config),
-  }, VALIDATION_TIMEOUT_MS, translate(i18n, 'plugin.typecho-plugin-scribe.message.requestTimeout', 'LLM 请求超时，请稍后重试'));
-  await assertModelsResponse(listResponse, config, i18n);
-}
-
-async function validateConfig(settings?: Record<string, unknown>, i18n?: I18n): Promise<ScribeConfig> {
+async function validateConfig(
+  settings: Record<string, unknown> | undefined,
+  i18n: I18n | undefined,
+  capabilityRuntime: CapabilityRuntimeContext | undefined,
+): Promise<ScribeConfig> {
   const config = normalizeConfig(settings);
-  if (!config.endpoint || !config.apiKey || !config.model) {
-    throw new Error(translate(i18n, 'plugin.typecho-plugin-scribe.message.configRequired', '请填写接口地址、API Key 和模型名称'));
+  if (!config.model) {
+    throw new Error(translate(i18n, 'plugin.typecho-plugin-scribe.message.modelRequired', '请选择 AI 插件中可用的模型'));
   }
 
-  let url: URL;
-  try {
-    url = new URL(config.endpoint);
-  } catch {
-    throw new Error(translate(i18n, 'plugin.typecho-plugin-scribe.message.endpointInvalid', '接口地址格式不正确'));
+  const catalog = resolveModelCatalog(capabilityRuntime);
+  if (!catalog) {
+    throw new Error(translate(
+      i18n,
+      'plugin.typecho-plugin-scribe.message.aiPluginUnavailable',
+      '未检测到 AI 插件（typecho-plugin-ai）的模型清单，请先启用该插件并配置可用模型',
+    ));
   }
-  if (!['https:', 'http:'].includes(url.protocol)) {
-    throw new Error(translate(i18n, 'plugin.typecho-plugin-scribe.message.endpointProtocol', '接口地址必须使用 http 或 https'));
+  if (!catalog.includes(config.model)) {
+    throw new Error(translate(i18n, 'plugin.typecho-plugin-scribe.message.modelMissing', `模型不存在：${config.model}`, { model: config.model }));
   }
 
   const temperature = Number(config.temperature);
@@ -444,8 +415,6 @@ async function validateConfig(settings?: Record<string, unknown>, i18n?: I18n): 
   assertValid(config.outputLanguage, OUTPUT_LANGUAGES, '输出语言', i18n, 'plugin.typecho-plugin-scribe.message.outputLanguageInvalid');
   assertValid(config.lengthPreset, LENGTH_PRESETS, '篇幅策略', i18n, 'plugin.typecho-plugin-scribe.message.lengthPresetInvalid');
   assertValid(config.factPolicy, FACT_POLICIES, '事实策略', i18n, 'plugin.typecho-plugin-scribe.message.factPolicyInvalid');
-
-  await validateModelAccess(config, i18n);
 
   return config;
 }
@@ -624,123 +593,59 @@ function buildUserContent(prompt: string, assets: ContentAsset[], siteUrl?: stri
   ];
 }
 
-function buildChatCompletionPayload(
-  config: ScribeConfig,
-  mode: WriterMode,
-  payload: WriterPayload,
-  styleSamples: StyleSample[],
-  assets: ContentAsset[],
-  siteUrl?: string,
-  stream = false,
-): Record<string, unknown> {
-  return {
-    model: config.model,
-    temperature: Number(config.temperature) || 0.7,
-    max_tokens: Number(config.maxTokens) || Number(DEFAULTS.maxTokens),
-    stream,
-    messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: buildUserContent(buildPrompt(mode, payload, styleSamples, config, assets), assets, siteUrl) },
-    ],
-  };
+const TEXT_STREAM_HEADERS = {
+  'Content-Type': 'text/plain; charset=utf-8',
+  'Cache-Control': 'no-store',
+  'X-Typecho-Plugin-Stream': '1',
+} as const;
+
+/** Trailing characters held back so a closing code fence can still be removed. */
+const STREAM_TAIL_HOLD = 16;
+
+function sanitizeAssistantText(text: string): string {
+  return text
+    .trim()
+    .replace(/^```(?:markdown|md)?\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
 }
 
-async function callLLM(
-  config: ScribeConfig,
-  mode: WriterMode,
-  payload: WriterPayload,
-  styleSamples: StyleSample[],
-  assets: ContentAsset[],
-  siteUrl?: string,
-  i18n?: I18n,
-): Promise<string> {
-  if (!config.endpoint || !config.apiKey || !config.model) {
-    throw new Error(translate(i18n, 'plugin.typecho-plugin-scribe.message.configRequired', '请先完整配置接口地址、API Key 和模型名称'));
-  }
-
-  const response = await fetchWithTimeout(
-    buildChatCompletionsUrl(config.endpoint),
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...validationHeaders(config),
-      },
-      body: JSON.stringify(buildChatCompletionPayload(config, mode, payload, styleSamples, assets, siteUrl)),
-    },
-    LLM_REQUEST_TIMEOUT_MS,
-    translate(i18n, 'plugin.typecho-plugin-scribe.message.requestTimeout', 'LLM 请求超时，请稍后重试'),
-  );
-
-  if (!response.ok) {
-    const suffix = await readErrorSnippet(response);
-    throw new Error(translate(i18n, 'plugin.typecho-plugin-scribe.message.requestFailed', `LLM 请求失败 (${response.status})${suffix}`, { status: response.status, suffix }));
-  }
-
-  const data = await response.json() as ChatCompletionResponse;
-  const content = data.choices?.[0]?.message?.content;
-  if (!content) {
-    throw new Error(translate(i18n, 'plugin.typecho-plugin-scribe.message.responseInvalid', 'LLM 返回格式不正确'));
-  }
-
-  return content.trim().replace(/^```(?:markdown|md)?\s*/i, '').replace(/\s*```$/i, '').trim();
-}
-
-function createTextStreamFromLLM(response: Response, i18n?: I18n): ReadableStream<Uint8Array> {
-  const decoder = new TextDecoder();
+/**
+ * Adapt the AI capability's chat chunk stream into the plain text stream the
+ * editor consumes, dropping the incidental Markdown fence models like to add.
+ */
+function textStreamFromChunks(chunks: ReadableStream<ScribeChatChunk>): ReadableStream<Uint8Array> {
+  const reader = chunks.getReader();
   const encoder = new TextEncoder();
-  const reader = response.body?.getReader();
-
-  if (!reader) {
-    throw new Error(translate(i18n, 'plugin.typecho-plugin-scribe.message.streamMissing', 'LLM 未返回可读取的流'));
-  }
-
-  let buffer = '';
-  let outputStarted = false;
-
-  function cleanFirstChunk(content: string): string {
-    if (outputStarted) return content;
-    outputStarted = true;
-    return content.replace(/^```(?:markdown|md)?\s*/i, '');
-  }
-
-  function parseLine(line: string): string {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith('data:')) return '';
-    const data = trimmed.slice(5).trim();
-    if (!data || data === '[DONE]') return '';
-
-    try {
-      const chunk = JSON.parse(data) as ChatCompletionStreamChunk;
-      return cleanFirstChunk(chunk.choices?.[0]?.delta?.content || chunk.choices?.[0]?.message?.content || '');
-    } catch {
-      return '';
-    }
-  }
+  let pending = '';
+  let started = false;
 
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
       for (;;) {
-        const newlineIndex = buffer.indexOf('\n');
-        if (newlineIndex >= 0) {
-          const line = buffer.slice(0, newlineIndex);
-          buffer = buffer.slice(newlineIndex + 1);
-          const content = parseLine(line);
-          if (content) {
-            controller.enqueue(encoder.encode(content));
+        if (pending.length > STREAM_TAIL_HOLD) {
+          const emit = pending.slice(0, pending.length - STREAM_TAIL_HOLD);
+          pending = pending.slice(pending.length - STREAM_TAIL_HOLD);
+          if (emit) {
+            controller.enqueue(encoder.encode(emit));
             return;
           }
-          continue;
         }
 
         const { done, value } = await reader.read();
         if (done) {
-          const tail = parseLine(buffer);
-          if (tail) controller.enqueue(encoder.encode(tail.replace(/\s*```$/i, '')));
+          const tail = sanitizeAssistantText(pending);
+          if (tail) controller.enqueue(encoder.encode(tail));
           controller.close();
           return;
         }
-        buffer += decoder.decode(value, { stream: true });
+
+        const content = value?.choices?.[0]?.delta?.content;
+        if (typeof content !== 'string' || !content) continue;
+        pending = started
+          ? pending + content
+          : content.replace(/^\s*```(?:markdown|md)?\s*/i, '');
+        started = true;
       }
     },
     cancel() {
@@ -749,46 +654,54 @@ function createTextStreamFromLLM(response: Response, i18n?: I18n): ReadableStrea
   });
 }
 
-async function callLLMStream(
+/** Run one writing request through the AI plugin and stream the answer back. */
+async function requestDraftStream(
   config: ScribeConfig,
   mode: WriterMode,
   payload: WriterPayload,
   styleSamples: StyleSample[],
   assets: ContentAsset[],
-  siteUrl?: string,
+  siteUrl: string | undefined,
+  capabilityRuntime: CapabilityRuntimeContext | undefined,
   i18n?: I18n,
 ): Promise<Response> {
-  if (!config.endpoint || !config.apiKey || !config.model) {
-    throw new Error(translate(i18n, 'plugin.typecho-plugin-scribe.message.configRequired', '请先完整配置接口地址、API Key 和模型名称'));
+  if (!config.model) {
+    throw new Error(translate(i18n, 'plugin.typecho-plugin-scribe.message.modelRequired', '请选择 AI 插件中可用的模型'));
+  }
+  const service = resolveChatService(capabilityRuntime);
+  if (!service) {
+    throw new Error(translate(
+      i18n,
+      'plugin.typecho-plugin-scribe.message.aiUnavailable',
+      'AI 插件未启用或未提供 ai.chat.generate 能力',
+    ));
   }
 
-  const response = await fetchWithTimeout(
-    buildChatCompletionsUrl(config.endpoint),
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${config.apiKey}`,
-      },
-      body: JSON.stringify(buildChatCompletionPayload(config, mode, payload, styleSamples, assets, siteUrl, true)),
-    },
-    LLM_REQUEST_TIMEOUT_MS,
-    translate(i18n, 'plugin.typecho-plugin-scribe.message.requestTimeout', 'LLM 请求超时，请稍后重试'),
-  );
-
-  if (!response.ok) {
-    const suffix = await readErrorSnippet(response);
-    throw new Error(translate(i18n, 'plugin.typecho-plugin-scribe.message.requestFailed', `LLM 请求失败 (${response.status})${suffix}`, { status: response.status, suffix }));
+  let result: ScribeChatResult;
+  try {
+    result = await service.generate({
+      model: config.model,
+      temperature: Number(config.temperature) || 0.7,
+      max_tokens: Number(config.maxTokens) || Number(DEFAULTS.maxTokens),
+      stream: true,
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: buildUserContent(buildPrompt(mode, payload, styleSamples, config, assets), assets, siteUrl) },
+      ],
+    });
+  } catch (error) {
+    throw new Error(chatErrorMessage(error, i18n, config.model));
   }
 
-  return new Response(createTextStreamFromLLM(response, i18n), {
-    status: 200,
-    headers: {
-      'Content-Type': 'text/plain; charset=utf-8',
-      'Cache-Control': 'no-store',
-      'X-Typecho-Plugin-Stream': '1',
-    },
-  });
+  if (isChatStream(result)) {
+    return new Response(textStreamFromChunks(result), { status: 200, headers: TEXT_STREAM_HEADERS });
+  }
+
+  const content = sanitizeAssistantText(String(result?.choices?.[0]?.message?.content ?? ''));
+  if (!content) {
+    throw new Error(translate(i18n, 'plugin.typecho-plugin-scribe.message.responseInvalid', 'LLM 返回格式不正确'));
+  }
+  return new Response(content, { status: 200, headers: TEXT_STREAM_HEADERS });
 }
 
 function editorHtml(contentType: ContentType, i18n?: I18n): string {
@@ -1469,11 +1382,19 @@ export default function init({ addHook, pluginId, registerTranslations }: Plugin
   addHook(
     'plugin:config:beforeSave',
     pluginId,
-    async (result: ConfigValidationResult, extra?: { pluginId?: string; settings?: Record<string, unknown>; i18n?: I18n }) => {
+    async (
+      result: ConfigValidationResult,
+      extra?: {
+        pluginId?: string;
+        settings?: Record<string, unknown>;
+        capabilityRuntime?: CapabilityRuntimeContext;
+        i18n?: I18n;
+      },
+    ) => {
       if (extra?.pluginId !== pluginId) return result;
 
       try {
-        const settings = await validateConfig(extra.settings || {}, extra.i18n);
+        const settings = await validateConfig(extra.settings || {}, extra.i18n, extra.capabilityRuntime);
         return { success: true, settings };
       } catch (error) {
         return {
@@ -1503,7 +1424,14 @@ export default function init({ addHook, pluginId, registerTranslations }: Plugin
     pluginId,
     async (
       result: PluginActionResult,
-      extra?: { action?: string; payload?: WriterPayload; options?: Record<string, unknown>; db?: Database; i18n?: I18n },
+      extra?: {
+        action?: string;
+        payload?: WriterPayload;
+        options?: Record<string, unknown>;
+        db?: Database;
+        capabilityRuntime?: CapabilityRuntimeContext;
+        i18n?: I18n;
+      },
     ) => {
       const action = extra?.action || '';
       if (!['generate', 'polish', 'correct'].includes(action)) return result;
@@ -1516,7 +1444,16 @@ export default function init({ addHook, pluginId, registerTranslations }: Plugin
           loadStyleSamples(extra?.db, Number.isFinite(Number(config.stylePostCount)) ? Number(config.stylePostCount) : 0),
           loadContentAssets(extra?.db, config, payload),
         ]);
-        const response = await callLLMStream(config, action as WriterMode, payload, styleSamples, assets, siteUrl, extra?.i18n);
+        const response = await requestDraftStream(
+          config,
+          action as WriterMode,
+          payload,
+          styleSamples,
+          assets,
+          siteUrl,
+          extra?.capabilityRuntime,
+          extra?.i18n,
+        );
         return {
           handled: true,
           success: true,

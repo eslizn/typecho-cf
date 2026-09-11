@@ -144,7 +144,8 @@ const { options, urls, user, isLoggedIn, pluginCtx, i18n } = Astro.props as Them
 
 **扩展属性**：
 - `showWhen` — 条件显示，仅适用于 `repeatable.itemFields`。格式：`{ field: "provider", value: "s3" }`，`value` 可为单值或数组
-- `optionsSource` — 动态选项源，仅适用于 `select`。当前支持 `"r2Bindings"`（自动读取运行时 R2 binding 名称）
+- `optionsSource` — 动态选项源，仅适用于 `select`。支持 `"r2Bindings"`（自动读取运行时 R2 binding 名称），或 `{ capability, ownerPluginId?, minVersion? }`（读取另一个插件通过 capability 发布的选项，capability 需实现 `listOptions()`；不可用时渲染为空列表）
+
 - `itemFields` — 嵌套字段定义，仅适用于 `repeatable`
 
 **boolean 型 select / checkbox**：`select` 的选项值按字符串原样存储（主题没有运行时 hook，不会像插件那样在 `plugin:config:beforeSave` 中把 `"true"` / `"false"` 自动转换为 boolean），模板中需要 boolean 时请自行转换；`checkbox` 未声明 `options` 时是布尔开关，存 `"1"` / `"0"`。

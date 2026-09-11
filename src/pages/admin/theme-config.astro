@@ -56,5 +56,6 @@ const pageTitle = ctx.i18n.t('admin.config.themeTitle', { name: manifest.name ||
     backHref="/admin/themes"
     backLabel={ctx.i18n.t('admin.config.backThemes', {}, 'Back to themes')}
     i18n={themeI18n}
+    optionSourceRuntime={ctx.capabilityRuntime}
   />
 </Admin>

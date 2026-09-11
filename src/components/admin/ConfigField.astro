@@ -1,6 +1,14 @@
 ---
 import { env } from 'cloudflare:workers';
-import { CONFIG_ROW_ID, CONFIG_TOKEN_MAX, type ConfigField } from '@/lib/config';
+import { resolveCapability, type CapabilityRuntimeContext } from '@/lib/capability';
+import {
+  CONFIG_ROW_ID,
+  CONFIG_TOKEN_MAX,
+  isCapabilityOptionSource,
+  type ConfigCapabilityOptionSource,
+  type ConfigField,
+  type ConfigOptionSourceService,
+} from '@/lib/config';
 import type { I18n } from '@/lib/i18n';
 
 interface Props {
@@ -13,6 +21,8 @@ interface Props {
   configScope: string;
   i18n?: I18n;
   nested?: boolean;
+  /** Request-scoped capability context used by capability option sources. */
+  optionSourceRuntime?: CapabilityRuntimeContext;
 }
 
 const {
@@ -25,6 +35,7 @@ const {
   configScope,
   i18n,
   nested = false,
+  optionSourceRuntime,
 } = Astro.props;
 
 const t = (key: string, variables: Record<string, string | number> = {}, fallback = key): string =>
@@ -72,8 +83,47 @@ function r2BindingOptions(): Record<string, string> {
   return bindings;
 }
 
-function fieldOptions(fieldDef: ConfigField): Record<string, string> | undefined {
+/**
+ * Resolve the options published by another plugin's capability. A missing or
+ * failing capability renders an empty list instead of breaking the form.
+ */
+function capabilityOptions(
+  source: ConfigCapabilityOptionSource,
+  currentValue: unknown,
+): Record<string, string> {
+  const options: Record<string, string> = {};
+  if (optionSourceRuntime) {
+    try {
+      const resolved = resolveCapability<ConfigOptionSourceService>(optionSourceRuntime, {
+        capability: source.capability,
+        ownerPluginId: source.ownerPluginId,
+        minVersion: source.minVersion,
+      });
+      if (resolved.ok) {
+        for (const entry of resolved.value.listOptions() ?? []) {
+          if (!entry || typeof entry.value !== 'string' || !entry.value) continue;
+          options[entry.value] = typeof entry.label === 'string' && entry.label ? entry.label : entry.value;
+        }
+      }
+    } catch {
+      // A broken option provider must not take the configuration form down.
+    }
+  }
+  // Keep the stored value selectable even after the catalog drops it, so saving
+  // an unrelated field cannot silently discard the setting.
+  const current = optionValue(currentValue);
+  if (current && !Object.hasOwn(options, current)) options[current] = current;
+  return options;
+}
+
+async function fieldOptions(
+  fieldDef: ConfigField,
+  currentValue: unknown,
+): Promise<Record<string, string> | undefined> {
   if (fieldDef.optionsSource === 'r2Bindings') return r2BindingOptions();
+  if (isCapabilityOptionSource(fieldDef.optionsSource)) {
+    return capabilityOptions(fieldDef.optionsSource, currentValue);
+  }
   return fieldDef.options;
 }
 
@@ -191,7 +241,7 @@ function selected(actual: unknown, expected: unknown): true | undefined {
 const fieldText = localizeField(field, path);
 const fieldDescription = localizeDescription(field, path);
 const visible = isFieldVisible(field, row);
-const options = fieldOptions(field);
+const options = await fieldOptions(field, value ?? defaultValue(field));
 const boolCheckbox = field.type === 'checkbox' && !field.options;
 const displayFieldValue = displayValue(value ?? defaultValue(field), field);
 ---
@@ -285,6 +335,7 @@ const displayFieldValue = displayValue(value ?? defaultValue(field), field);
               configScope={configScope}
               i18n={i18n}
               nested
+              optionSourceRuntime={optionSourceRuntime}
             />
           );
         })}
@@ -387,6 +438,7 @@ const displayFieldValue = displayValue(value ?? defaultValue(field), field);
                       configScope={configScope}
                       i18n={i18n}
                       nested
+                      optionSourceRuntime={optionSourceRuntime}
                     />
                   ))}
                   {!field.collapsible && (
@@ -426,6 +478,7 @@ const displayFieldValue = displayValue(value ?? defaultValue(field), field);
                   configScope={configScope}
                   i18n={i18n}
                   nested
+                  optionSourceRuntime={optionSourceRuntime}
                 />
               ))}
               {!field.collapsible && (

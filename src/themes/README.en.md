@@ -144,7 +144,8 @@ Identical to plugin config: `text`, `textarea`, `select`, `radio`, `checkbox`, `
 
 **Extended attributes**:
 - `showWhen` — conditional visibility, only valid inside `repeatable.itemFields`. Format: `{ field: "provider", value: "s3" }`; `value` can be a single value or an array
-- `optionsSource` — dynamic option source, only valid for `select`. Currently supports `"r2Bindings"` (reads runtime R2 binding names)
+- `optionsSource` — dynamic option source, only valid for `select`. Supports `"r2Bindings"` (reads runtime R2 binding names) or `{ capability, ownerPluginId?, minVersion? }` (reads a list published by another plugin's capability, which must implement `listOptions()`; renders empty when unavailable)
+
 - `itemFields` — nested field definitions, only valid for `repeatable`
 
 **Boolean select / checkbox**: `select` option values are stored as raw strings (themes have no runtime hook, so there is no `plugin:config:beforeSave`-style `parseBoolean` conversion — convert in your template when needed); a `checkbox` without `options` is a boolean toggle stored as `"1"` / `"0"`.

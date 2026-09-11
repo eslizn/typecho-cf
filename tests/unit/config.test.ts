@@ -152,6 +152,22 @@ describe('token list fields', () => {
     }, { capabilities: [], mode: 'fast' })).toEqual({ capabilities: ['chat'], mode: '' });
   });
 
+  it('bounds values coming from a dynamic option source', () => {
+    const fields: Record<string, ConfigField> = {
+      model: {
+        type: 'select',
+        label: 'Model',
+        optionsSource: { capability: 'ai.models.list', ownerPluginId: 'typecho-plugin-ai' },
+      },
+    };
+
+    // The catalog lives in another plugin, so a bounded name is kept here and
+    // re-validated by the owning plugin during beforeSave.
+    expect(allowlistConfigSettings(fields, { model: 'glm-4.7-flash' }, {})).toEqual({ model: 'glm-4.7-flash' });
+    expect(allowlistConfigSettings(fields, { model: 'x'.repeat(300) }, {}).model).toBe('');
+    expect(allowlistConfigSettings(fields, { model: 'bad\tname' }, {}).model).toBe('');
+  });
+
   it('detects token lists over the cap instead of trimming them silently', () => {
     const atCap = Array.from({ length: CONFIG_TOKEN_MAX }, (_, index) => ({
       id: `t${index}`,

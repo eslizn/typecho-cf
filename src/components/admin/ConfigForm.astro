@@ -5,6 +5,7 @@
  * ConfigField.astro owns recursive field rendering, so repeatable fields can
  * contain further repeatables without creating a second bespoke form schema.
  */
+import type { CapabilityRuntimeContext } from '@/lib/capability';
 import { type ConfigField } from '@/lib/config';
 import type { I18n } from '@/lib/i18n';
 import ConfigFieldRenderer from './ConfigField.astro';
@@ -20,6 +21,8 @@ interface Props {
   backHref: string;
   backLabel: string;
   i18n?: I18n;
+  /** Request-scoped capability context forwarded to capability option sources. */
+  optionSourceRuntime?: CapabilityRuntimeContext;
 }
 
 const {
@@ -33,6 +36,7 @@ const {
   backHref,
   backLabel,
   i18n,
+  optionSourceRuntime,
 } = Astro.props;
 
 const t = (key: string, variables: Record<string, string | number> = {}, fallback = key): string =>
@@ -62,6 +66,7 @@ const configScope = `${entityName}.${entityId}.config`;
             value={configValues[key] ?? field.default}
             configScope={configScope}
             i18n={i18n}
+            optionSourceRuntime={optionSourceRuntime}
           />
         </li>
       ))}

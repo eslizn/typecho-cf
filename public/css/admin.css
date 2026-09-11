@@ -427,6 +427,8 @@ select { background: #FFF; border: 1px solid #D9D9D6; padding: 0 7px; border-rad
 
 .typecho-option-tabs.right { float: right; }
 
+.typecho-option-tabs.admin-notice { padding: 10px 42px 10px 15px; }
+
 .typecho-option-tabs li.current a, .typecho-option-tabs li.active a { background-color: #E9E9E6; }
 
 /** 表格列表页 */

@@ -15,6 +15,15 @@ describe('admin dismissible notices', () => {
     expect(css).toContain('transform: translateY(-50%)');
   });
 
+  it('restores inner spacing after option-tab styles reset padding', () => {
+    const css = readProjectFile('public/css/admin.css');
+    const tabsRule = css.indexOf('.typecho-option-tabs {');
+    const noticeRule = css.indexOf('.typecho-option-tabs.admin-notice {');
+
+    expect(noticeRule).toBeGreaterThan(tabsRule);
+    expect(css).toContain('.typecho-option-tabs.admin-notice { padding: 10px 42px 10px 15px; }');
+  });
+
   it('renders close buttons for server-rendered admin notices', () => {
     for (const page of [
       'src/pages/admin/plugins.astro',

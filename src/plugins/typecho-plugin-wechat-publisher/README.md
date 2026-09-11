@@ -1,4 +1,4 @@
-# WeChat Publisher
+# WechatPublisher
 
 Typecho-CF 微信公众号同步插件，将文章同步到微信公众号草稿箱，自动处理 Markdown → 微信 HTML 转换和图片上传。
 

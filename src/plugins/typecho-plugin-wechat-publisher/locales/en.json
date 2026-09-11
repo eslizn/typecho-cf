@@ -1,5 +1,5 @@
 {
-  "plugin.typecho-plugin-wechat-publisher.name": "WeChat Publisher",
+  "plugin.typecho-plugin-wechat-publisher.name": "WechatPublisher",
   "plugin.typecho-plugin-wechat-publisher.description": "Sync posts to WeChat Official Account drafts, including Markdown conversion, cover images, and body images.",
   "plugin.typecho-plugin-wechat-publisher.config.appId.label": "AppID",
   "plugin.typecho-plugin-wechat-publisher.config.appId.description": "WeChat Official Account developer AppID.",
@@ -39,7 +39,7 @@
   "plugin.typecho-plugin-wechat-publisher.message.updated": "Updated the WeChat draft.",
   "plugin.typecho-plugin-wechat-publisher.message.synced": "Created a WeChat draft.",
   "plugin.typecho-plugin-wechat-publisher.message.configValidationFailed": "WeChat configuration validation failed.",
-  "plugin.typecho-plugin-wechat-publisher.message.adminMenu": "WeChat Publisher",
+  "plugin.typecho-plugin-wechat-publisher.message.adminMenu": "WechatPublisher",
   "plugin.typecho-plugin-wechat-publisher.message.syncTitle": "Sync to WeChat",
   "plugin.typecho-plugin-wechat-publisher.message.imageReadFailed": "Could not read image {status}: {url}",
   "plugin.typecho-plugin-wechat-publisher.message.operation.getAccessToken": "Get access token",

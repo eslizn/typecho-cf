@@ -554,7 +554,7 @@ src/
 │   ├── typecho-plugin-webdav/       # WebDAV 协议 + 文件管理器（参考高级插件）
 │   ├── typecho-plugin-turnstile/    # Cloudflare Turnstile 人机验证
 │   ├── typecho-plugin-scribe/       # AI 写作辅助
-│   └── typecho-plugin-wechat-publisher/ # 微信公众号发布
+│   └── typecho-plugin-wechat-publisher/ # WechatPublisher
 └── themes/                          # 内置主题（工作区包）
     └── README.md                    # 主题开发完整规范
 tests/

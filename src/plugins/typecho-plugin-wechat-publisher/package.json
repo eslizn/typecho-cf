@@ -14,7 +14,7 @@
   "typecho": {
     "plugin": {
       "id": "typecho-plugin-wechat-publisher",
-      "name": "WeChat Publisher",
+      "name": "WechatPublisher",
       "description": "在文章列表中同步文章到微信公众号草稿，自动处理 Markdown 转换、封面和正文图片上传",
       "author": "eslizn",
       "authorUrl": "https://eslizn.com",

@@ -1,5 +1,5 @@
 {
-  "plugin.typecho-plugin-wechat-publisher.name": "微信公众号发布",
+  "plugin.typecho-plugin-wechat-publisher.name": "WechatPublisher",
   "plugin.typecho-plugin-wechat-publisher.description": "在文章列表中同步文章到微信公众号草稿，自动处理 Markdown 转换、封面和正文图片上传。",
   "plugin.typecho-plugin-wechat-publisher.config.appId.label": "AppID",
   "plugin.typecho-plugin-wechat-publisher.config.appId.description": "微信公众号开发者 AppID。",
@@ -39,7 +39,7 @@
   "plugin.typecho-plugin-wechat-publisher.message.updated": "已更新微信公众号草稿。",
   "plugin.typecho-plugin-wechat-publisher.message.synced": "已创建微信公众号草稿。",
   "plugin.typecho-plugin-wechat-publisher.message.configValidationFailed": "微信公众号配置校验失败。",
-  "plugin.typecho-plugin-wechat-publisher.message.adminMenu": "微信公众号发布",
+  "plugin.typecho-plugin-wechat-publisher.message.adminMenu": "WechatPublisher",
   "plugin.typecho-plugin-wechat-publisher.message.syncTitle": "同步到微信公众号",
   "plugin.typecho-plugin-wechat-publisher.message.imageReadFailed": "读取图片失败：{status}，URL：{url}",
   "plugin.typecho-plugin-wechat-publisher.message.operation.getAccessToken": "获取 access_token",

@@ -186,4 +186,205 @@ describe('ConfigForm rendering', () => {
       bindings.R2_PARTIAL = previousPartial;
     }
   });
+
+  it('renders nested repeatable fields and multi-select checkboxes', async () => {
+    const html = await renderForm({
+      configDef: {
+        providers: {
+          type: 'repeatable',
+          label: 'Providers',
+          itemFields: {
+            models: {
+              type: 'repeatable',
+              label: 'Models',
+              itemFields: {
+                model: { type: 'text', label: 'Model' },
+                capabilities: {
+                  type: 'checkbox',
+                  label: 'Capabilities',
+                  options: { chat: 'Chat', image: 'Image' },
+                },
+              },
+            },
+          },
+        },
+      } as Record<string, ConfigField>,
+      configValues: {
+        providers: [{
+          models: [{ model: 'gpt-test', capabilities: ['chat', 'image'] }],
+        }],
+      },
+    });
+
+    expect(html).toContain('name="providers[0][models][0][model]"');
+    expect(html).toContain('name="providers[0][models][0][capabilities]"');
+    expect(html).toContain('value="chat" checked');
+    expect(html).toContain('value="image" checked');
+    expect(html).toContain('name="providers[__INDEX__][models][__INDEX__][capabilities]"');
+  });
+
+  it('renders a collapsible repeatable as a summary card with a status badge', async () => {
+    const html = await renderForm({
+      configDef: {
+        providers: {
+          type: 'repeatable',
+          label: 'Providers',
+          collapsible: true,
+          summaryFields: ['name', 'baseUrl'],
+          statusField: 'enabled',
+          itemFields: {
+            name: { type: 'text', label: 'Name' },
+            baseUrl: { type: 'text', label: 'Base URL' },
+            enabled: { type: 'select', label: 'Enabled', options: { true: 'Enabled', false: 'Disabled' } },
+          },
+        },
+      } as Record<string, ConfigField>,
+      configValues: {
+        providers: [
+          { name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', enabled: 'true' },
+          { name: 'Azure', baseUrl: '', enabled: 'false' },
+        ],
+      },
+    });
+
+    expect(html).toContain('typecho-repeatable is-collapsible');
+    expect(html).toContain('data-summary-fields="name,baseUrl"');
+    expect(html).toContain('data-status-field="enabled"');
+    expect(html).toContain('<span class="typecho-repeatable-summary" data-item-summary>OpenAI · https://api.openai.com/v1</span>');
+    expect(html).toContain('admin-badge--active');
+    expect(html).toContain('admin-badge--muted');
+    expect(html).toContain('aria-expanded="true"');
+    expect(html).toContain('aria-expanded="false"');
+    // The first card stays open; later cards start collapsed.
+    expect(html).toContain('class="typecho-repeatable-item"');
+    expect(html).toContain('class="typecho-repeatable-item is-collapsed"');
+  });
+
+  it('renders a token list with copy/delete controls and a pending-row template', async () => {
+    const html = await renderForm({
+      configDef: { tokens: { type: 'tokens', label: 'Access tokens' } } as Record<string, ConfigField>,
+      configValues: { tokens: [{ id: 't1', token: 'abcdefghijklmnopqrst' }] },
+    });
+
+    expect(html).toContain('data-token-list="tokens"');
+    expect(html).toContain('name="tokens[0][id]" value="t1"');
+    expect(html).toContain('name="tokens[0][token]" value="abcdefghijklmnopqrst"');
+    // Tokens are shown in full; the page is wide enough and masking would only
+    // make them harder to verify by eye.
+    expect(html).toContain('abcdefghijklmnopqrst');
+    expect(html).not.toContain('abcdef…qrst');
+    expect(html).toContain('typecho-token-copy');
+    expect(html).toContain('typecho-token-remove');
+    expect(html).toContain('Generate token');
+    expect(html).toContain('name="tokens[__INDEX__][id]" value="__TOKEN_ID__"');
+    // The client fills the template row with a freshly generated token; the
+    // row is not persisted until the form is saved.
+    expect(html).toContain('<code class="typecho-token-value" data-token-display></code>');
+    expect(html).toMatch(/class="typecho-token-template"[\s\S]*typecho-token-copy/);
+    // The empty-state hint is hidden while at least one token exists.
+    expect(html).toMatch(/data-token-empty[^>]*hidden/);
+  });
+
+  it('localizes the collapsed-card status badge through the nested field path', async () => {
+    const messages: Record<string, string> = {
+      'plugin.demo.config.providers.enabled.option.true': '提供方启用',
+      'plugin.demo.config.providers.enabled.option.false': '提供方停用',
+      'plugin.demo.config.providers.models.enabled.option.true': '模型启用',
+      'plugin.demo.config.providers.models.enabled.option.false': '模型停用',
+    };
+    const i18n = {
+      locale: 'zh-CN',
+      t: (key: string, _variables: Record<string, string | number> = {}, fallback = '') => messages[key] ?? fallback,
+    };
+
+    const html = await renderForm({
+      entityId: 'demo',
+      i18n: i18n as never,
+      configDef: {
+        providers: {
+          type: 'repeatable',
+          label: 'Providers',
+          collapsible: true,
+          statusField: 'enabled',
+          itemFields: {
+            name: { type: 'text', label: 'Name' },
+            enabled: { type: 'select', label: 'Enabled', options: { true: 'Enabled', false: 'Disabled' } },
+            models: {
+              type: 'repeatable',
+              label: 'Models',
+              collapsible: true,
+              statusField: 'enabled',
+              itemFields: {
+                model: { type: 'text', label: 'Model' },
+                enabled: { type: 'select', label: 'Enabled', options: { true: 'Enabled', false: 'Disabled' } },
+              },
+            },
+          },
+        },
+      } as Record<string, ConfigField>,
+      configValues: {
+        providers: [{
+          name: 'OpenAI',
+          enabled: 'true',
+          models: [{ model: 'gpt-test', enabled: 'false' }],
+        }],
+      },
+    });
+
+    // Both the provider badge and the nested model badge use the localized
+    // option label instead of the English fallback.
+    expect(html).toContain('data-item-badge>提供方启用<');
+    expect(html).toContain('data-item-badge>模型停用<');
+    expect(html).not.toContain('data-item-badge>Enabled<');
+  });
+
+  it('renders options the manifest disables as disabled controls', async () => {
+    const html = await renderForm({
+      configDef: {
+        capabilities: {
+          type: 'checkbox',
+          label: 'Capabilities',
+          options: { chat: 'Chat generation', image: 'Image generation' },
+          optionDisabled: ['image'],
+        },
+        mode: { type: 'select', label: 'Mode', options: { fast: 'Fast', safe: 'Safe' }, optionDisabled: ['safe'] },
+      } as Record<string, ConfigField>,
+      configValues: { capabilities: ['chat', 'image'], mode: 'fast' },
+    });
+
+    expect(html).toContain('value="chat" checked');
+    expect(html).toMatch(/value="image" checked disabled/);
+    expect(html).toMatch(/<option value="safe"[^>]*disabled/);
+    expect(html).not.toMatch(/<option value="fast"[^>]*disabled/);
+  });
+
+  it('disables token generation once the cap is reached', async () => {
+    const tokens = Array.from({ length: 20 }, (_, index) => ({
+      id: `t${index}`,
+      token: `token-${index}-0123456789`,
+    }));
+
+    const html = await renderForm({
+      configDef: { tokens: { type: 'tokens', label: 'Access tokens' } } as Record<string, ConfigField>,
+      configValues: { tokens },
+    });
+
+    expect(html).toContain('data-max="20"');
+    expect(html).toMatch(/class="btn typecho-token-generate" disabled/);
+    expect(html).toMatch(/data-token-limit(?! hidden)/);
+  });
+
+  it('shows the token empty state when every token is deleted', async () => {
+    const html = await renderForm({
+      configDef: { tokens: { type: 'tokens', label: 'Access tokens' } } as Record<string, ConfigField>,
+      configValues: { tokens: [] },
+    });
+
+    expect(html).toContain('data-token-list="tokens"');
+    expect(html).not.toContain('name="tokens[0][id]"');
+    expect(html).not.toMatch(/data-token-empty[^>]*hidden/);
+    expect(html).toContain('makes the endpoint unreachable');
+    // The generate template is always present for client-side rows.
+    expect(html).toContain('class="typecho-token-template"');
+  });
 });

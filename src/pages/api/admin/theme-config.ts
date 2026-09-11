@@ -15,7 +15,9 @@ function domainError(error: unknown, json: boolean, i18n: I18n): Response {
   if (error instanceof ThemeConfigurationError) {
     const message = error.code === 'not_found'
       ? i18nMessage('admin.config.themeNotFound', 'The theme does not exist or has no settings.')
-      : i18nMessage('admin.error.invalidRequest', error.message || 'Invalid request.');
+      : error.code === 'validation_failed'
+        ? error.message
+        : i18nMessage('admin.error.invalidRequest', error.message || 'Invalid request.');
     return json ? jsonError(error.status, message, undefined, i18n) : textError(error.status, message, undefined, i18n);
   }
   if (error instanceof InputError) {

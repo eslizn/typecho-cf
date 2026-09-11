@@ -274,6 +274,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     try {
       const filtered = await applyFilter(pluginCtx, hookName, { ...protectedContentData }, {
         request, formData, db, options, user: auth.user, action, i18n: admin.i18n,
+        capabilityRuntime: pluginCtx.capabilityRuntime,
       });
       contentData = validateFilteredContent(protectedContentData, filtered);
     } catch (error) {
@@ -316,9 +317,13 @@ export const POST: APIRoute = async ({ request, locals }) => {
     // Trigger post/page finish hooks
     const finishData = { ...contentData, cid: newCid };
     if (!isDraft) {
-      await doHook(pluginCtx, type === 'page' ? 'page:afterPublish' : 'post:afterPublish', finishData);
+      await doHook(pluginCtx, type === 'page' ? 'page:afterPublish' : 'post:afterPublish', finishData, {
+        capabilityRuntime: pluginCtx.capabilityRuntime,
+      });
     }
-    await doHook(pluginCtx, type === 'page' ? 'page:afterSave' : 'post:afterSave', finishData);
+    await doHook(pluginCtx, type === 'page' ? 'page:afterSave' : 'post:afterSave', finishData, {
+      capabilityRuntime: pluginCtx.capabilityRuntime,
+    });
 
     await purgeContentAndRelatedCache(db, options, newCid, finishData as typeof schema.contents.$inferSelect);
 
@@ -371,6 +376,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       try {
         const filtered = await applyFilter(pluginCtx, hookNameForType(existingBaseType), { ...revisionBaseline }, {
           request, formData, db, options, user: auth.user, action, existing, i18n: admin.i18n,
+          capabilityRuntime: pluginCtx.capabilityRuntime,
         });
         revisionData = validateFilteredContent(revisionBaseline, filtered);
         revisionData.parent = cid;
@@ -399,7 +405,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       await attachTags(db, revisionCid, tags, false);
       await doHook(pluginCtx, existingBaseType === 'page' ? 'page:afterSave' : 'post:afterSave', {
         ...revisionData, cid: revisionCid, parent: cid,
-      });
+      }, { capabilityRuntime: pluginCtx.capabilityRuntime });
       return new Response(null, { status: 302, headers: { Location: `/admin/write-${existingBaseType}?cid=${cid}` } });
     }
     const protectedType = isDraft ? `${existingBaseType}_draft` : existingBaseType;
@@ -424,6 +430,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     try {
       const filtered = await applyFilter(pluginCtx, hookName, { ...protectedContentData }, {
         request, formData, db, options, user: auth.user, action, existing, i18n: admin.i18n,
+        capabilityRuntime: pluginCtx.capabilityRuntime,
       });
       contentData = validateFilteredContent(protectedContentData, filtered);
     } catch (error) {
@@ -513,7 +520,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     // Trigger pre-delete hook
     const isPage = existing.type?.startsWith('page');
-    await doHook(pluginCtx, isPage ? 'page:beforeDelete' : 'post:beforeDelete', existing);
+    await doHook(pluginCtx, isPage ? 'page:beforeDelete' : 'post:beforeDelete', existing, {
+      capabilityRuntime: pluginCtx.capabilityRuntime,
+    });
 
     // Decrement meta counts before deleting relationships (single UPDATE
     // over all mids linked to this content, restricted to category/tag
@@ -546,7 +555,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
     await purgeContentAndRelatedCache(db, options, cid, existing);
 
     // Trigger post-delete hook
-    await doHook(pluginCtx, isPage ? 'page:afterDelete' : 'post:afterDelete', existing);
+    await doHook(pluginCtx, isPage ? 'page:afterDelete' : 'post:afterDelete', existing, {
+      capabilityRuntime: pluginCtx.capabilityRuntime,
+    });
 
     const redirectTo = isPage ? '/admin/manage-pages' : '/admin/manage-posts';
     return new Response(null, {

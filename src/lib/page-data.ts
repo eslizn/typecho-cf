@@ -107,7 +107,11 @@ async function filterContentRow(
   post: ContentRow,
   stage: 'list' | 'single',
 ): Promise<ContentRow> {
-  const filtered = await applyFilterSafely(ctx, 'content:data', { ...post }, { content: post, stage });
+  const filtered = await applyFilterSafely(ctx, 'content:data', { ...post }, {
+    content: post,
+    stage,
+    capabilityRuntime: ctx.capabilityRuntime,
+  });
   if (!filtered || typeof filtered !== 'object') return post;
   const candidate = filtered as Record<string, unknown>;
   const display: Partial<ContentRow> = {};
@@ -136,17 +140,26 @@ async function filterContentRow(
 }
 
 async function filterContentTitle(ctx: RequestContext, title: string, post: ContentRow): Promise<string> {
-  const filtered = await applyFilterSafely(ctx, 'content:title', title, { content: post });
+  const filtered = await applyFilterSafely(ctx, 'content:title', title, {
+    content: post,
+    capabilityRuntime: ctx.capabilityRuntime,
+  });
   return typeof filtered === 'string' ? filtered : title;
 }
 
 async function filterContentExcerpt(ctx: RequestContext, excerpt: string, post: ContentRow): Promise<string> {
-  const filtered = await applyFilterSafely(ctx, 'content:excerpt', excerpt, { content: post });
+  const filtered = await applyFilterSafely(ctx, 'content:excerpt', excerpt, {
+    content: post,
+    capabilityRuntime: ctx.capabilityRuntime,
+  });
   return typeof filtered === 'string' ? filtered : excerpt;
 }
 
 async function filterCommentRow(ctx: RequestContext, comment: CommentRow): Promise<CommentRow> {
-  const filtered = await applyFilterSafely(ctx, 'comment:data', { ...comment }, { comment });
+  const filtered = await applyFilterSafely(ctx, 'comment:data', { ...comment }, {
+    comment,
+    capabilityRuntime: ctx.capabilityRuntime,
+  });
   if (!filtered || typeof filtered !== 'object') return comment;
   const candidate = filtered as Record<string, unknown>;
   const display: Partial<CommentRow> = {};
@@ -359,6 +372,7 @@ interface ArchiveLifecycleContext {
   options: SiteOptions;
   urls: RequestContext['urls'];
   user: RequestContext['user'];
+  capabilityRuntime: RequestContext['capabilityRuntime'];
 }
 
 interface ArchiveQueryState {
@@ -381,6 +395,7 @@ function buildArchiveLifecycleContext(
     options: ctx.options,
     urls: ctx.urls,
     user: ctx.user,
+    capabilityRuntime: ctx.capabilityRuntime,
   };
 }
 
@@ -703,6 +718,7 @@ export async function preparePostData(
     options,
     urls,
     user,
+    capabilityRuntime: ctx.capabilityRuntime,
   };
   await doHook(ctx, 'archive:init', singleLifecycle);
   await doHook(ctx, 'archive:single', singleLifecycle);
@@ -863,6 +879,7 @@ export async function preparePageData(
     options,
     urls,
     user,
+    capabilityRuntime: ctx.capabilityRuntime,
   };
   await doHook(ctx, 'archive:init', singleLifecycle);
   await doHook(ctx, 'archive:single', singleLifecycle);

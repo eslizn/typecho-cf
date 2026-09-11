@@ -30,6 +30,12 @@ importers:
       sanitize-html:
         specifier: ^2.17.7
         version: 2.17.7
+      semver:
+        specifier: ^7.8.5
+        version: 7.8.5
+      typecho-plugin-ai:
+        specifier: file:src/plugins/typecho-plugin-ai
+        version: file:src/plugins/typecho-plugin-ai
       typecho-plugin-antispam:
         specifier: file:src/plugins/typecho-plugin-antispam
         version: file:src/plugins/typecho-plugin-antispam
@@ -61,6 +67,9 @@ importers:
       '@types/sanitize-html':
         specifier: ^2.16.1
         version: 2.16.1
+      '@types/semver':
+        specifier: ^7.8.0
+        version: 7.8.0
       '@typescript-eslint/eslint-plugin':
         specifier: ^8.68.0
         version: 8.68.0(@typescript-eslint/parser@8.68.0(eslint@10.10.0)(typescript@7.0.2))(eslint@10.10.0)(typescript@7.0.2)
@@ -1341,6 +1350,9 @@ packages:
 
   '@types/sanitize-html@2.16.1':
     resolution: {integrity: sha512-n9wjs8bCOTyN/ynwD8s/nTcTreIHB1vf31vhLMGqUPNHaweKC4/fAl4Dj+hUlCTKYgm4P3k83fmiFfzkZ6sgMA==}
+
+  '@types/semver@7.8.0':
+    resolution: {integrity: sha512-1mAINjtQCXXeLkJ9ehXkwOcBpqtLxiVtKhpUf83DdRNdQKV0iXZpaHYqRr7nj+wvxuJzoAmAwXI+sCNMv1CzLQ==}
 
   '@types/unist@3.0.3':
     resolution: {integrity: sha512-ko/gIFJRv177XgZsZcBwnqJN5x/Gien8qNOn0D5bQU/zAzVf9Zt3BlcUiLqhV9y4ARk0GbT3tnUiPNgnTXzc/Q==}
@@ -2629,6 +2641,9 @@ packages:
     resolution: {integrity: sha512-XleUoc9uwGXqjWwXaUTZAmzMcFZ5858QA2vvx1Ur5xIcixXIP+8LnFDgRplU30us6teqdlskFfu+ae4K79Ooew==}
     engines: {node: '>= 0.8.0'}
 
+  typecho-plugin-ai@file:src/plugins/typecho-plugin-ai:
+    resolution: {directory: src/plugins/typecho-plugin-ai, type: directory}
+
   typecho-plugin-antispam@file:src/plugins/typecho-plugin-antispam:
     resolution: {directory: src/plugins/typecho-plugin-antispam, type: directory}
 
@@ -3876,6 +3891,8 @@ snapshots:
   '@types/sanitize-html@2.16.1':
     dependencies:
       htmlparser2: 10.1.0
+
+  '@types/semver@7.8.0': {}
 
   '@types/unist@3.0.3': {}
 
@@ -5224,6 +5241,8 @@ snapshots:
   type-check@0.4.0:
     dependencies:
       prelude-ls: 1.2.1
+
+  typecho-plugin-ai@file:src/plugins/typecho-plugin-ai: {}
 
   typecho-plugin-antispam@file:src/plugins/typecho-plugin-antispam: {}
 

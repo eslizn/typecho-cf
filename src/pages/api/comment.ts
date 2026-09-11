@@ -249,6 +249,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
   try {
     const filtered = await applyFilter(pluginCtx, 'comment:beforeSave', commentData, {
       request, formData, db, options, isLoggedIn: !!userId, i18n,
+      capabilityRuntime: pluginCtx.capabilityRuntime,
     });
     commentData = validateFilteredComment(protectedCommentData, filtered);
   } catch (err) {
@@ -287,9 +288,14 @@ export const POST: APIRoute = async ({ request, locals }) => {
   commentData.coid = newCoid;
 
   // Trigger comment:afterCreate hook — plugins can act after comment saved
-  await doHook(pluginCtx, 'comment:afterCreate', commentData);
+  await doHook(pluginCtx, 'comment:afterCreate', commentData, {
+    capabilityRuntime: pluginCtx.capabilityRuntime,
+  });
   if (parent > 0) {
-    await doHook(pluginCtx, 'comment:reply', commentData, { parent });
+    await doHook(pluginCtx, 'comment:reply', commentData, {
+      parent,
+      capabilityRuntime: pluginCtx.capabilityRuntime,
+    });
   }
 
   const contentUrl = buildPermalink(

@@ -177,6 +177,7 @@ function collectHooks() {
       hooks.set(point, handler);
     },
     registerTranslations: () => {},
+    registerAdminPath: () => {},
     registerRouteResolver: (resolver) => {
       routeResolver = resolver;
     },

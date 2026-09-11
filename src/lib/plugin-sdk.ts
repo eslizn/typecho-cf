@@ -32,6 +32,27 @@ export type { I18n, I18nMessage, MessageVariables } from './i18n';
 export type { IanaTimezone, TimezoneSetting } from './timezone';
 export type { AttachmentMeta } from './attachment';
 export type { Database } from '../db/index';
+export type {
+  CapabilityDescriptor,
+  CapabilityFactory,
+  CapabilityFactoryContext,
+  CapabilityRegistration,
+  CapabilityResolveFailure,
+  CapabilityResolveFailureReason,
+  CapabilityResolveResult,
+  CapabilityResolveSuccess,
+  CapabilityRuntimeContext,
+  CapabilityRuntimeContextInput,
+} from './capability';
+export type {
+  PluginActivationActionPlan,
+  PluginActivationPlan,
+  PluginDependency,
+  PluginDependencyIssue,
+  PluginDependencyIssueCode,
+  PluginDependencyKind,
+  PluginDependencyNode,
+} from './plugin-dependencies';
 
 // ── Plugin system ──
 export {
@@ -40,13 +61,17 @@ export {
   parsePluginConfigFormData,
   loadPluginConfig,
   escapeAttr,
-  registerPluginAdminPath,
 } from './plugin';
+export {
+  createCapabilityRuntimeContext,
+  getCapabilityActivationGeneration,
+  resolveCapability,
+} from './capability';
 export { getClientIp } from './client-ip';
 export { safeJsonForScript } from './escape';
 
 // ── Auth ──
-export { hasPermission, timeSafeEqual, verifyPassword } from './auth';
+export { generateRandomString, hasPermission, timeSafeEqual, verifyPassword } from './auth';
 
 // ── Content ──
 export { buildPermalink, formatDate, buildAuthorLink, buildCategoryLink } from './content';

@@ -24,6 +24,7 @@ const pageContent = await applyFilterSafely(ctx, 'admin:page', '', {
   request: Astro.request,
   i18n: ctx.i18n,
   resolvedLocale: ctx.resolvedLocale,
+  capabilityRuntime: ctx.capabilityRuntime,
 });
 ---
 

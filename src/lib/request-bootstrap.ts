@@ -16,6 +16,7 @@ import {
 import { applySecurityHeaders } from '@/lib/security-headers';
 import { createCoreRequestI18n, createRequestI18n } from '@/lib/i18n-runtime';
 import type { I18n, ResolvedLocale } from '@/lib/i18n';
+import { createCapabilityRuntimeContext } from '@/lib/capability';
 
 export interface RequestTarget {
   originalUrl: URL;
@@ -135,6 +136,16 @@ export async function bootstrapRequestCore(
     );
     pluginCtx.i18n = runtime.i18n;
     pluginCtx.resolvedLocale = runtime.resolvedLocale;
+    const capabilityRuntime = createCapabilityRuntimeContext({
+      request,
+      db,
+      options,
+      env: env as unknown as Record<string, unknown>,
+      activatedPlugins: pluginCtx.activatedPlugins,
+      activationGeneration: pluginCtx.activationGeneration,
+      getPluginConfig: pluginId => loadPluginConfig(options, pluginId),
+    });
+    pluginCtx.capabilityRuntime = capabilityRuntime;
     const core = {
       db,
       options,
@@ -142,6 +153,7 @@ export async function bootstrapRequestCore(
       i18n: runtime.i18n,
       resolvedLocale: runtime.resolvedLocale,
       autoLocale: runtime.autoLocale,
+      capabilityRuntime,
     };
     setRequestCoreContext(locals, core, request);
     return { ok: true, core };
@@ -202,6 +214,7 @@ export async function finalizeRequestResponse(
       response: finalized,
       i18n: finalization.i18n,
       resolvedLocale: finalization.resolvedLocale,
+      capabilityRuntime: finalization.pluginCtx.capabilityRuntime,
     });
   }
   return finalized;

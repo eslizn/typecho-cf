@@ -122,7 +122,7 @@ describe('POST /api/admin/plugin', () => {
     expect(configRow).not.toBeNull();
   });
 
-  it('deactivates a plugin and removes config', async () => {
+  it('deactivates a plugin and preserves config', async () => {
     // First activate
     await testDb.insert(schema.options).values({
       name: 'plugin:typecho-plugin-test', user: 0, value: JSON.stringify({ apiEndpoint: 'https://api.example.com' }),
@@ -145,11 +145,11 @@ describe('POST /api/admin/plugin', () => {
     expect(body.success).toBe(true);
     expect(body.activatedPlugins).not.toContain('typecho-plugin-test');
 
-    // Config should be deleted
+    // Disabling a plugin must not destroy its saved configuration.
     const configRow = await testDb.query.options.findFirst({
       where: (t, { eq, and }) => and(eq(t.name, 'plugin:typecho-plugin-test'), eq(t.user, 0)),
     });
-    expect(configRow).toBeUndefined();
+    expect(configRow?.value).toBe(JSON.stringify({ apiEndpoint: 'https://api.example.com' }));
   });
 
   it('returns 400 for malformed JSON', async () => {

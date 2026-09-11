@@ -100,6 +100,7 @@ const adminHookContext = {
   activeMenu,
   title,
   i18n: pageI18n,
+  capabilityRuntime: _pluginCtx.capabilityRuntime,
 };
 await doHook(_pluginCtx, 'admin:begin', adminHookContext);
 
@@ -157,7 +158,7 @@ const safeMenuGroups = normalizeMenuGroups(filteredMenuGroups, menuGroups);
 const visibleGroups = safeMenuGroups.filter(g => g.show);
 const focusGroupIdx = visibleGroups.findIndex(g => g.children.some(c => c.active));
 const adminHeadHtml = await applyFilterSafely(_pluginCtx, 'admin:head', '', adminHookContext);
-const adminFooterHtml = await applyFilterSafely(_pluginCtx, 'admin:footer', '', { options, urls, user, activeMenu, title, i18n: pageI18n });
+const adminFooterHtml = await applyFilterSafely(_pluginCtx, 'admin:footer', '', { ...adminHookContext, activeMenu, title });
 const flashError = user ? await readAdminFlash(Astro.request, options, user.uid, pageI18n) : null;
 if (flashError) Astro.response.headers.append('Set-Cookie', clearAdminFlash(Astro.request));
 await doHook(_pluginCtx, 'admin:end', { ...adminHookContext, menuGroups: safeMenuGroups });

@@ -114,7 +114,7 @@ for (const row of catData) {
 const titleActionHtml = new Map<number, string>(
   await Promise.all(posts.map(async (post) => [
     post.cid,
-    await applyFilterSafely(ctx, 'admin:managePosts:titleActions', '', { post, options, urls, user, i18n: ctx.i18n }),
+    await applyFilterSafely(ctx, 'admin:managePosts:titleActions', '', { post, options, urls, user, i18n: ctx.i18n, capabilityRuntime: ctx.capabilityRuntime }),
   ] as [number, string]))
 );
 ---

@@ -71,10 +71,10 @@ const isMarkdown = !page || (page.text && page.text.indexOf('<!--markdown-->') >
 
 // Build preview URL
 const previewUrl = isEdit && page ? buildPermalink(page, urls.siteUrl, options.permalinkPattern, options.pagePattern) : '';
-const writePageHookExtra = { options, page, user, isEdit, i18n: ctx.i18n };
+const writePageHookExtra = { options, page, user, isEdit, i18n: ctx.i18n, capabilityRuntime: ctx.capabilityRuntime };
 const writePageOptionHtml = await applyFilterSafely(ctx, 'admin:writePage:option', '', writePageHookExtra);
 const writePageAdvanceOptionHtml = await applyFilterSafely(ctx, 'admin:writePage:advanceOption', '', writePageHookExtra);
-const writePageBottomHtml = await applyFilterSafely(ctx, 'admin:writePage:bottom', '', { options, page, user, isEdit, i18n: ctx.i18n });
+const writePageBottomHtml = await applyFilterSafely(ctx, 'admin:writePage:bottom', '', writePageHookExtra);
 const t = ctx.i18n.t.bind(ctx.i18n);
 const tPlural = ctx.i18n.tPlural.bind(ctx.i18n);
 const formatAttachmentSize = (size: number): string => {

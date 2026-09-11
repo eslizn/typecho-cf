@@ -112,7 +112,7 @@ export const GET: APIRoute = async ({ request, locals, params }) => {
       categories: cats,
     };
     // Apply feed:item filter — plugins can modify each feed item
-    item = await applyFilterSafely(pluginCtx, 'feed:item', item, { i18n });
+    item = await applyFilterSafely(pluginCtx, 'feed:item', item, { i18n, capabilityRuntime: pluginCtx.capabilityRuntime });
     items.push(item);
   }
 
@@ -137,6 +137,7 @@ export const GET: APIRoute = async ({ request, locals, params }) => {
     urls,
     i18n,
     autoLocale,
+    capabilityRuntime: pluginCtx.capabilityRuntime,
   });
 };
 
@@ -187,7 +188,7 @@ async function generateCommentsFeed(
     date: new Date((comment.created || 0) * 1000),
     author: comment.author || i18n.t('feed.anonymous', {}, 'Anonymous'),
     };
-    item = await applyFilterSafely(pluginCtx, 'feed:item', item, { i18n });
+    item = await applyFilterSafely(pluginCtx, 'feed:item', item, { i18n, capabilityRuntime: pluginCtx.capabilityRuntime });
     items.push(item);
   }
 
@@ -212,5 +213,6 @@ async function generateCommentsFeed(
     urls,
     i18n,
     autoLocale,
+    capabilityRuntime: pluginCtx.capabilityRuntime,
   });
 }

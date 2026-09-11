@@ -1,0 +1,452 @@
+---
+import { env } from 'cloudflare:workers';
+import { CONFIG_ROW_ID, CONFIG_TOKEN_MAX, type ConfigField } from '@/lib/config';
+import type { I18n } from '@/lib/i18n';
+
+interface Props {
+  field: ConfigField;
+  name: string;
+  id: string;
+  path: string;
+  value: unknown;
+  row?: Record<string, any>;
+  configScope: string;
+  i18n?: I18n;
+  nested?: boolean;
+}
+
+const {
+  field,
+  name,
+  id,
+  path,
+  value,
+  row = {},
+  configScope,
+  i18n,
+  nested = false,
+} = Astro.props;
+
+const t = (key: string, variables: Record<string, string | number> = {}, fallback = key): string =>
+  i18n?.t(key, variables, fallback) ?? fallback;
+
+interface LocalizedText {
+  value: string;
+  translated: boolean;
+}
+
+function localizeText(key: string, fallback: string): LocalizedText {
+  const value = i18n?.t(key, {}, '') ?? '';
+  return value ? { value, translated: true } : { value: fallback, translated: false };
+}
+
+function localizeField(fieldDef: ConfigField, fieldPath: string): LocalizedText {
+  return localizeText(fieldDef.labelKey || `${configScope}.${fieldPath}.label`, fieldDef.label);
+}
+
+function localizeDescription(fieldDef: ConfigField, fieldPath: string): LocalizedText | null {
+  if (!fieldDef.description) return null;
+  return localizeText(fieldDef.descriptionKey || `${configScope}.${fieldPath}.description`, fieldDef.description);
+}
+
+function localizeOption(fieldDef: ConfigField, fieldPath: string, valueKey: string, fallback: string): LocalizedText {
+  return localizeText(fieldDef.optionKeys?.[valueKey] || `${configScope}.${fieldPath}.option.${valueKey}`, fallback);
+}
+
+function isR2BucketBinding(valueToCheck: unknown): boolean {
+  return !!valueToCheck
+    && typeof valueToCheck === 'object'
+    && typeof (valueToCheck as any).get === 'function'
+    && typeof (valueToCheck as any).put === 'function'
+    && typeof (valueToCheck as any).delete === 'function'
+    && typeof (valueToCheck as any).head === 'function'
+    && typeof (valueToCheck as any).list === 'function';
+}
+
+function r2BindingOptions(): Record<string, string> {
+  const bindings: Record<string, string> = {};
+  for (const [key, valueToCheck] of Object.entries(env as Record<string, unknown>)) {
+    if (isR2BucketBinding(valueToCheck)) bindings[key] = key;
+  }
+  if (Object.keys(bindings).length === 0) bindings.BUCKET = 'BUCKET';
+  return bindings;
+}
+
+function fieldOptions(fieldDef: ConfigField): Record<string, string> | undefined {
+  if (fieldDef.optionsSource === 'r2Bindings') return r2BindingOptions();
+  return fieldDef.options;
+}
+
+function repeatableRows(valueToParse: unknown, fieldDef: ConfigField): Record<string, any>[] {
+  let rows: unknown = valueToParse;
+  if (typeof rows === 'string') {
+    try { rows = JSON.parse(rows); } catch { rows = []; }
+  }
+  if (!Array.isArray(rows) || rows.length === 0) {
+    rows = Array.isArray(fieldDef.default) && fieldDef.default.length > 0 ? fieldDef.default : [{}];
+  }
+  return rows.map(rowValue => rowValue && typeof rowValue === 'object' ? rowValue as Record<string, any> : {});
+}
+
+function defaultValue(fieldDef: ConfigField): unknown {
+  if (fieldDef.default !== undefined) return fieldDef.default;
+  if (fieldDef.type === 'object') {
+    return Object.fromEntries(Object.entries(fieldDef.itemFields || {}).map(([key, child]) => [key, defaultValue(child)]));
+  }
+  if (fieldDef.type === 'repeatable') return [];
+  if (fieldDef.type === 'checkbox') return fieldDef.options ? [] : '0';
+  return '';
+}
+
+function summaryFields(fieldDef: ConfigField): string[] {
+  if (fieldDef.summaryFields && fieldDef.summaryFields.length > 0) return fieldDef.summaryFields;
+  const firstText = Object.entries(fieldDef.itemFields || {}).find(([, child]) => child.type === 'text');
+  return firstText ? [firstText[0]] : [];
+}
+
+function summaryText(row: Record<string, any>, fieldDef: ConfigField): string {
+  return summaryFields(fieldDef)
+    .map(key => row[key])
+    .filter(value => value !== undefined && value !== null && String(value).trim() !== '')
+    .map(value => String(value))
+    .join(' · ');
+}
+
+function isEnabledValue(value: unknown): boolean {
+  return value === true || value === '1' || value === 'true';
+}
+
+function statusInfo(
+  row: Record<string, any>,
+  fieldDef: ConfigField,
+  fieldPath: string,
+): { label: string; enabled: boolean } | null {
+  const statusField = fieldDef.statusField;
+  if (!statusField) return null;
+  const child = (fieldDef.itemFields || {})[statusField];
+  const enabled = isEnabledValue(row[statusField]);
+  const fallback = enabled ? 'Enabled' : 'Disabled';
+  return {
+    // The badge follows the same convention key as every other label, so the
+    // path must include the nesting (for example providers.models.enabled).
+    label: child
+      ? localizeOption(child, `${fieldPath}.${statusField}`, enabled ? 'true' : 'false', fallback).value
+      : fallback,
+    enabled,
+  };
+}
+
+interface TokenRow { id: string; token: string; }
+
+function tokenRows(valueToParse: unknown): TokenRow[] {
+  if (!Array.isArray(valueToParse)) return [];
+  return valueToParse
+    .filter((entry): entry is Record<string, unknown> => (
+      !!entry && typeof entry === 'object' && !Array.isArray(entry)
+    ))
+    .map(entry => ({
+      id: typeof entry.id === 'string' ? entry.id : '',
+      token: typeof entry.token === 'string' ? entry.token : '',
+    }));
+}
+
+
+function rowDefaults(fields: Record<string, ConfigField>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(fields).map(([key, fieldDef]) => [key, defaultValue(fieldDef)]));
+}
+
+function isFieldVisible(fieldDef: ConfigField, currentRow: Record<string, any>): boolean {
+  if (!fieldDef.showWhen) return true;
+  const current = currentRow[fieldDef.showWhen.field];
+  const expected = Array.isArray(fieldDef.showWhen.value) ? fieldDef.showWhen.value : [fieldDef.showWhen.value];
+  if (Array.isArray(current)) return expected.some(item => current.map(String).includes(String(item)));
+  return expected.map(String).includes(String(current ?? ''));
+}
+
+function displayValue(valueToDisplay: unknown, fieldDef: ConfigField): unknown {
+  if (fieldDef.type === 'text' && fieldDef.default === '/' && valueToDisplay === '') return '/';
+  if (fieldDef.type === 'text' && fieldDef.default === '/' && typeof valueToDisplay === 'string' && valueToDisplay && !valueToDisplay.startsWith('/')) {
+    return `/${valueToDisplay}`;
+  }
+  return valueToDisplay;
+}
+
+function isOptionDisabled(fieldDef: ConfigField, optionKey: string): boolean {
+  return Array.isArray(fieldDef.optionDisabled) && fieldDef.optionDisabled.includes(optionKey);
+}
+
+function optionValue(valueToDisplay: unknown): string {
+  if (typeof valueToDisplay === 'boolean') return valueToDisplay ? 'true' : 'false';
+  return String(valueToDisplay ?? '');
+}
+
+function descriptionMarkup(description: LocalizedText | null): string {
+  return description?.value ?? '';
+}
+
+function selected(actual: unknown, expected: unknown): true | undefined {
+  return optionValue(actual) === String(expected) ? true : undefined;
+}
+
+const fieldText = localizeField(field, path);
+const fieldDescription = localizeDescription(field, path);
+const visible = isFieldVisible(field, row);
+const options = fieldOptions(field);
+const boolCheckbox = field.type === 'checkbox' && !field.options;
+const displayFieldValue = displayValue(value ?? defaultValue(field), field);
+---
+{field.type === 'hidden' && (
+  <input type="hidden" name={name} value={String(displayFieldValue)} disabled={!visible} />
+)}
+
+{field.type !== 'hidden' && (
+  <div class:list={[nested ? 'typecho-repeatable-field' : '', { hidden: !visible }]}
+    data-show-when-field={field.showWhen?.field}
+    data-show-when-value={Array.isArray(field.showWhen?.value) ? field.showWhen?.value.join(',') : field.showWhen?.value}>
+    {!boolCheckbox && field.type !== 'repeatable' && field.type !== 'object' && field.type !== 'tokens' && (
+      <label for={id} class="typecho-label">{fieldText.value}</label>
+    )}
+
+    {field.type === 'text' && (
+      <p><input type="text" id={id} name={name} class="text w-100" value={String(displayFieldValue)} disabled={!visible} /></p>
+    )}
+
+    {field.type === 'password' && (
+      <p><input type="password" id={id} name={name} class="text w-100" value={String(displayFieldValue)} disabled={!visible} /></p>
+    )}
+
+    {field.type === 'textarea' && (
+      <p><textarea id={id} name={name} class="text w-100" rows={nested ? '3' : '4'} disabled={!visible}>{String(displayFieldValue)}</textarea></p>
+    )}
+
+    {field.type === 'select' && options && (
+      <p>
+        <select id={id} name={name} disabled={!visible} data-current-value={optionValue(displayFieldValue)}>
+          {Object.entries(options).map(([optionKey, optionLabel]) => (
+            <option value={optionKey} selected={selected(displayFieldValue, optionKey)} disabled={isOptionDisabled(field, optionKey)}>
+              {localizeOption(field, path, optionKey, optionLabel).value}
+            </option>
+          ))}
+        </select>
+      </p>
+    )}
+
+    {field.type === 'radio' && options && (
+      <p>
+        {Object.entries(options).map(([optionKey, optionLabel]) => (
+          <span class="admin-choice">
+            <input type="radio" id={`${id}-${optionKey}`} name={name} value={optionKey} checked={String(displayFieldValue) === optionKey} disabled={!visible || isOptionDisabled(field, optionKey)} />
+            <label for={`${id}-${optionKey}`}>{localizeOption(field, path, optionKey, optionLabel).value}</label>
+          </span>
+        ))}
+      </p>
+    )}
+
+    {boolCheckbox && (
+      <p>
+        <label for={id}>
+          <input type="checkbox" id={id} name={name} value="1" checked={displayFieldValue === '1' || displayFieldValue === true} disabled={!visible} />
+          {' '}{fieldText.value}
+        </label>
+      </p>
+    )}
+
+    {field.type === 'checkbox' && options && (
+      <p>
+        {Object.entries(options).map(([optionKey, optionLabel]) => {
+          const checked = Array.isArray(displayFieldValue)
+            ? displayFieldValue.map(String).includes(optionKey)
+            : String(displayFieldValue) === optionKey;
+          return (
+            <span class="admin-choice">
+              <input type="checkbox" id={`${id}-${optionKey}`} name={name} value={optionKey} checked={checked} disabled={!visible || isOptionDisabled(field, optionKey)} />
+              <label for={`${id}-${optionKey}`}>{localizeOption(field, path, optionKey, optionLabel).value}</label>
+            </span>
+          );
+        })}
+      </p>
+    )}
+
+    {field.type === 'object' && field.itemFields && (
+      <fieldset class="typecho-config-group">
+        <legend>{fieldText.value}</legend>
+        {Object.entries(field.itemFields).map(([itemKey, itemField]) => {
+          const objectValue = displayFieldValue && typeof displayFieldValue === 'object'
+            ? (displayFieldValue as Record<string, unknown>)[itemKey]
+            : undefined;
+          return (
+            <Astro.self
+              field={itemField}
+              name={`${name}[${itemKey}]`}
+              id={`${id}-${itemKey}`}
+              path={`${path}.${itemKey}`}
+              value={displayValue(objectValue ?? defaultValue(itemField), itemField)}
+              row={displayFieldValue as Record<string, any>}
+              configScope={configScope}
+              i18n={i18n}
+              nested
+            />
+          );
+        })}
+      </fieldset>
+    )}
+
+    {field.type === 'tokens' && (
+      <div
+        class="typecho-token-list"
+        data-token-list={name}
+        data-max={String(CONFIG_TOKEN_MAX)}
+        data-next-index={String(tokenRows(displayFieldValue).length)}
+      >
+        <label class="typecho-label">{fieldText.value}</label>
+        <p class="typecho-token-empty" data-token-empty hidden={tokenRows(displayFieldValue).length > 0}>
+          {t('admin.config.tokensEmpty', {}, 'No access tokens yet.')}
+        </p>
+        <div class="typecho-token-items">
+          {tokenRows(displayFieldValue).map((tokenRow, rowIndex) => (
+            <div class="typecho-token-row" data-token-row>
+              <input type="hidden" name={`${name}[${rowIndex}][id]`} value={tokenRow.id} />
+              <input type="hidden" name={`${name}[${rowIndex}][token]`} value={tokenRow.token} data-token-value />
+              <code class="typecho-token-value" data-token-display>{tokenRow.token}</code>
+              <span class="typecho-token-actions">
+                <button type="button" class="btn btn-xs typecho-token-copy" data-copied-label={t('admin.config.tokenCopied', {}, 'Copied')}>
+                  {t('admin.action.copy', {}, 'Copy')}
+                </button>
+                <button type="button" class="btn btn-xs typecho-token-remove">{t('admin.action.delete', {}, 'Delete')}</button>
+              </span>
+            </div>
+          ))}
+        </div>
+        <button
+          type="button"
+          class="btn typecho-token-generate"
+          disabled={tokenRows(displayFieldValue).length >= CONFIG_TOKEN_MAX}
+        >
+          {t('admin.action.generateToken', {}, 'Generate token')}
+        </button>
+        <p class="description" data-token-limit hidden={tokenRows(displayFieldValue).length < CONFIG_TOKEN_MAX}>
+          {t('admin.config.tokenLimitReached', { max: CONFIG_TOKEN_MAX }, `At most ${CONFIG_TOKEN_MAX} tokens are allowed.`)}
+        </p>
+        <template class="typecho-token-template">
+          <div class="typecho-token-row" data-token-row>
+            <input type="hidden" name={`${name}[__INDEX__][id]`} value="__TOKEN_ID__" />
+            <input type="hidden" name={`${name}[__INDEX__][token]`} value="" data-token-value />
+            <code class="typecho-token-value" data-token-display></code>
+            <span class="typecho-token-actions">
+              <button type="button" class="btn btn-xs typecho-token-copy" data-copied-label={t('admin.config.tokenCopied', {}, 'Copied')}>
+                {t('admin.action.copy', {}, 'Copy')}
+              </button>
+              <button type="button" class="btn btn-xs typecho-token-remove">{t('admin.action.delete', {}, 'Delete')}</button>
+            </span>
+          </div>
+        </template>
+      </div>
+    )}
+
+    {field.type === 'repeatable' && field.itemFields && (
+      <div
+        class:list={['typecho-repeatable', field.collapsible ? 'is-collapsible' : undefined]}
+        data-repeatable={name}
+        data-label={field.label}
+        data-label-translated={fieldText.value}
+        data-summary-fields={summaryFields(field).join(',')}
+        data-status-field={field.statusField || ''}
+        data-next-index={String(repeatableRows(displayFieldValue, field).length)}
+      >
+        <div class="typecho-repeatable-items">
+          {repeatableRows(displayFieldValue, field).map((repeatableRow, rowIndex) => {
+            const status = statusInfo(repeatableRow, field, path);
+            return (
+              <fieldset class:list={['typecho-repeatable-item', field.collapsible && rowIndex > 0 ? 'is-collapsed' : undefined]}>
+                {field.collapsible ? (
+                  <legend class="typecho-repeatable-header">
+                    <button type="button" class="typecho-repeatable-toggle" aria-expanded={rowIndex === 0}>
+                      <span class="typecho-repeatable-index" data-index-label>{fieldText.value} #{rowIndex + 1}</span>
+                    </button>
+                    <span class="typecho-repeatable-summary" data-item-summary>{summaryText(repeatableRow, field)}</span>
+                    <span class="typecho-repeatable-badges">
+                      {status && (
+                        <span class:list={['admin-badge', status.enabled ? 'admin-badge--active' : 'admin-badge--muted']} data-item-badge>{status.label}</span>
+                      )}
+                    </span>
+                    <button type="button" class="btn btn-xs typecho-repeatable-remove">{t('admin.action.delete', {}, 'Delete')}</button>
+                  </legend>
+                ) : (
+                  <legend>{fieldText.value} #{rowIndex + 1}</legend>
+                )}
+                <div class="typecho-repeatable-body">
+                  <input type="hidden" name={`${name}[${rowIndex}][${CONFIG_ROW_ID}]`} value={String(repeatableRow[CONFIG_ROW_ID] ?? '')} />
+                  {Object.entries(field.itemFields || {}).map(([itemKey, itemField]) => (
+                    <Astro.self
+                      field={itemField}
+                      name={`${name}[${rowIndex}][${itemKey}]`}
+                      id={`${id}-${rowIndex}-${itemKey}`}
+                      path={`${path}.${itemKey}`}
+                      value={displayValue(repeatableRow[itemKey] ?? defaultValue(itemField), itemField)}
+                      row={repeatableRow}
+                      configScope={configScope}
+                      i18n={i18n}
+                      nested
+                    />
+                  ))}
+                  {!field.collapsible && (
+                    <p><button type="button" class="btn btn-xs typecho-repeatable-remove">{t('admin.action.delete', {}, 'Delete')}</button></p>
+                  )}
+                </div>
+              </fieldset>
+            );
+          })}
+        </div>
+        <button type="button" class="btn typecho-repeatable-add">{t('admin.action.add', {}, 'Add')}</button>
+        <template class="typecho-repeatable-template">
+          <fieldset class:list={['typecho-repeatable-item', field.collapsible ? 'is-collapsed' : undefined]}>
+            {field.collapsible ? (
+              <legend class="typecho-repeatable-header">
+                <button type="button" class="typecho-repeatable-toggle" aria-expanded="false">
+                  <span class="typecho-repeatable-index" data-index-label>{fieldText.value} #__NUMBER__</span>
+                </button>
+                <span class="typecho-repeatable-summary" data-item-summary></span>
+                <span class="typecho-repeatable-badges">
+                  {field.statusField && <span class="admin-badge admin-badge--muted" data-item-badge></span>}
+                </span>
+                <button type="button" class="btn btn-xs typecho-repeatable-remove">{t('admin.action.delete', {}, 'Delete')}</button>
+              </legend>
+            ) : (
+              <legend>{fieldText.value} #__NUMBER__</legend>
+            )}
+            <div class="typecho-repeatable-body">
+              {Object.entries(field.itemFields || {}).map(([itemKey, itemField]) => (
+                <Astro.self
+                  field={itemField}
+                  name={`${name}[__INDEX__][${itemKey}]`}
+                  id={`${id}-__INDEX__-${itemKey}`}
+                  path={`${path}.${itemKey}`}
+                  value={displayValue(defaultValue(itemField), itemField)}
+                  row={rowDefaults(field.itemFields || {})}
+                  configScope={configScope}
+                  i18n={i18n}
+                  nested
+                />
+              ))}
+              {!field.collapsible && (
+                <p><button type="button" class="btn btn-xs typecho-repeatable-remove">{t('admin.action.delete', {}, 'Delete')}</button></p>
+              )}
+            </div>
+          </fieldset>
+        </template>
+      </div>
+    )}
+
+    {field.type !== 'repeatable' && fieldDescription && (
+      fieldDescription.translated
+        ? <p class="description">{fieldDescription.value}</p>
+        : <p class="description" set:html={descriptionMarkup(fieldDescription)}></p>
+    )}
+  </div>
+)}
+
+{field.type === 'repeatable' && fieldDescription && (
+  fieldDescription.translated
+    ? <p class="description">{fieldDescription.value}</p>
+    : <p class="description" set:html={descriptionMarkup(fieldDescription)}></p>
+)}

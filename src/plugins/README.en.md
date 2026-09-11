@@ -73,7 +73,9 @@ Plugin metadata belongs in the `typecho.plugin` field. Do not use the retired ro
 | `select` | Dropdown | `options: { value: label }` |
 | `radio` | Radio buttons | `options: { value: label }` |
 | `checkbox` | Checkboxes (multi-select) | `options: { value: label }`, default is array |
+| `object` | Nested configuration object | `itemFields: { fieldName: fieldDef }` |
 | `repeatable` | Repeatable config group | `itemFields: { fieldName: fieldDef }`, default is an object array |
+| `tokens` | Read-only secret list (generate / copy / delete, no edit box) | default is `[]`; value is `[{ id, token }]` |
 
 When `config` is declared, the admin plugin list automatically shows a "Settings" link that navigates to `/admin/plugin-config?id=<pluginId>`.
 
@@ -98,7 +100,15 @@ Use `repeatable` for multiple same-shaped config items, such as storage mounts:
 
 Fields may use `showWhen` for conditional display. Select fields may use `optionsSource: "r2Bindings"` to populate options from R2 bucket bindings in the current Worker environment.
 
+A `repeatable` can opt into the card view: `collapsible: true` folds every row except the first, `summaryFields` (for example `["name", "baseUrl"]`) builds the header summary, and `statusField` (for example `enabled`) renders a status badge. Without those keys the original flat layout is unchanged.
+
+Fields with `options` can use `optionDisabled: ["value"]` to render individual options as disabled; the server also drops those values on save. Use it for reserved-but-unimplemented capabilities or enum values instead of annotating the option label.
+
+`tokens` covers features that need several credentials (for example Bearer tokens for a public API): the page renders read-only rows with generate / copy / delete controls. "Generate token" mints the value in the frontend with `crypto.getRandomValues` and submits it like any other field, so it only persists when the form is saved and merely reading a config never mints a credential. The server only validates and allowlists, and rows without a value are not stored. A list longer than 20 entries fails the save instead of being silently trimmed, and the admin UI disables the generate button at the cap. Deleting a row revokes that credential, and an empty list means the feature must treat itself as unreachable.
+
 `password` and `hidden` values are returned to admin APIs and pages only as placeholders; plaintext is never sent to the browser. Secrets inside `repeatable` rows are masked recursively and restored to the correct row after removal or reordering through internal row metadata that is never stored. `plugin:config:beforeSave` receives restored values restricted to manifest-declared fields.
+
+`object` and `repeatable` fields can be nested to any depth. Every level is allowlisted and normalized against the current schema when saved; unknown values are dropped and incompatible known values fall back to their field defaults. Disabling a plugin does not delete its `plugin:<id>` configuration, so re-enabling it can restore the previous settings.
 
 ---
 
@@ -136,6 +146,85 @@ responsible for handling the request.
 
 System routes retain priority over plugin routes. WebDAV's historical `/dav`
 matching behavior must remain compatible when its configured route is changed.
+
+### Admin / API paths
+
+An `/admin/` or `/api/admin/` path handled through `request:route` must be declared
+during `init()` with `registerAdminPath(path)`, otherwise the middleware's
+reserved-path guard blocks it:
+
+```ts
+export default function init({ addHook, pluginId, registerAdminPath }: PluginInitContext): void {
+  registerAdminPath('/api/admin/example');
+
+  addHook('request:route', pluginId, (result, extra) => {
+    if (extra.path === '/api/admin/example') { /* ... */ }
+    return result;
+  });
+}
+```
+
+Path claims share the frontend route owner lifecycle: registration binds the
+current `pluginId` automatically, and the claims are released when the plugin is
+disabled, fails to initialize, or the registry is reset. The old global
+`registerPluginAdminPath(path)` export has been removed from the SDK.
+
+---
+
+## Capability sharing
+
+Capability is a new generic mechanism, separate from Hooks, Manifest `requires`, and npm package dependencies. The host only handles registration, version matching, activation state, and owner lifecycle; it does not know the business meaning of a capability. A plugin registers an implementation during `init()` through its `PluginInitContext`, and a consumer resolves it with the current request runtime context:
+
+A provider registers only within its own `init()` lifecycle; the host binds the owner automatically:
+
+```ts
+registerCapability({
+  capability: 'example.text.transform',
+  version: 1,
+  factory: runtime => createService(runtime),
+});
+```
+
+```ts
+import { resolveCapability, type CapabilityRuntimeContext } from 'typecho/plugin-sdk';
+import type { AiChatGenerationService } from 'typecho-plugin-ai';
+
+const result = resolveCapability<AiChatGenerationService>(runtimeContext, {
+  capability: 'ai.chat.generate',
+  minVersion: 1,
+});
+
+if (!result.ok) {
+  // unavailable / ambiguous / version-mismatch / factory-failed
+  return renderWithoutAi();
+}
+
+const response = await result.value.generate(request);
+```
+
+`runtimeContext` comes from `capabilityRuntime` on Hook extras or from the host request context. Do not cache a handle at module scope or capture a particular request inside a Capability factory. Without `ownerPluginId`, multiple active implementations return `ambiguous` instead of being silently selected by registration order; an explicit owner is required for directed resolution. Registrations from disabled or failed plugins, and registrations from old activation generations, are not resolvable.
+
+Consumers must treat resolution and invocation failures as downgrade branches: skip the AI enhancement, use the existing rule-based path, or report a clear unavailable feature. The Capability layer never executes consumer-provided tools/functions. AI tool calls only return the function name and arguments requested by the model; the consumer executes them and submits the result in a later message.
+
+`typecho-plugin-ai` currently provides:
+
+- `ai.chat.generate`: OpenAI Chat Completions semantics with text, image input, audio input/output, tools/function-calling compatibility, normal responses, and streaming; each request selects exactly one Provider/model at random and never retries or downgrades across models.
+- Reserved IDs: `ai.image.generate`, `ai.audio.speech.generate`, `ai.audio.transcribe`, and `ai.embeddings.create`. They can be selected in model configuration, but the first version has no stub implementation, so resolution remains `unavailable`.
+
+The AI plugin is independent of Scribe. A plugin that needs AI should declare `typecho-plugin-ai` in its runtime `package.json` dependencies and use this generic API; it should not import the AI plugin's runtime initializer.
+
+### Plugin dependencies and downgrade
+
+Dependencies come from package-manager metadata, not a new `typecho.plugin` Manifest field: `dependencies` and non-optional `peerDependencies` create required edges, `optionalDependencies` and optional peers create optional edges, and `devDependencies` are excluded from the production plugin graph. The graph recursively discovers installed Typecho plugins and checks the target package version with standard semver. `file:` / `workspace:` specifiers are not version-compared, and non-semver specifiers (`latest`, `npm:` aliases, git URLs) cannot be evaluated offline: they are recorded as an `unverifiable-dependency-range` diagnostic without blocking activation, while a semver range that provably does not match still blocks the plugin.
+
+- Enabling a consumer never auto-enables dependencies; required dependencies must already be installed and active or the enable request is rejected with diagnostics.
+- Missing or inactive optional dependencies do not block a consumer; the consumer downgrades based on Capability resolution.
+- Disabling a plugin recursively disables consumers that require it; optional consumers stay active and downgrade themselves. All plugin configuration is preserved.
+- Missing/unsatisfied dependencies, duplicate IDs, and cycles do not fail the site build, but affected plugins cannot be enabled. Explicit admin enable/disable operations recalculate and persist a cleaned activation list; ordinary requests use the effective plan in memory without writing D1.
+
+### Optional AI HTTP compatibility endpoint
+
+The AI plugin configuration page can enable an OpenAI-compatible HTTP endpoint and choose a site-relative path (default `/ai`). It exposes `{basePath}/v1/models` and `{basePath}/v1/chat/completions`; whenever enabled, every request must include `Authorization: Bearer <token>` and anonymous access is never allowed. Tokens are a multi-value `tokens` field: "Generate token" mints the value in the browser and it is saved with the rest of the configuration, and every row can be copied or deleted. Tokens are never generated implicitly, and deleting all of them makes every request fail with 401 (the endpoint is unreachable). Authentication compares every configured token in constant time without an early return and does not query D1. The first version does not expose `/responses`, Embeddings, standalone image generation, or standalone audio routes.
 
 ### Parameters
 
@@ -338,7 +427,7 @@ Adding a hook requires updating `HookPoints`, the call site, and this guide toge
 
 | Hook | Trigger Location | Arguments | Description |
 |------|-----------------|-----------|-------------|
-| `request:route` | Middleware route dispatch | `(result, extra)` | Handles plugin routes; admin/API paths also require `registerPluginAdminPath` |
+| `request:route` | Middleware route dispatch | `(result, extra)` | Handles plugin routes; admin/API paths require `registerAdminPath`, frontend paths require an owner-scoped claim from `registerRouteResolver` |
 | `admin:head` / `admin:footer` | Admin head/footer | `(html, extra)` | Safe display-oriented HTML injection |
 | `admin:nav` | Admin navigation generation | `(groups, extra)` | Adjusts menu groups/items; hrefs are checked to stay on same-origin admin paths or anchors |
 | `admin:login:head` / `admin:login:form` | Login head/form | `(html, extra)` | Login-page HTML injection |
@@ -461,9 +550,9 @@ The host project supplies the `typecho` package at install time, and `typecho/pl
 
 | Category | Exports |
 |----------|---------|
-| Types | `PluginInitContext`, `PluginRouteClaim`, `PluginRouteResolver`, `PluginRouteResolverContext`, `PluginRouteResult`, `PluginManifest`, `PluginConfigField`, `AttachmentMeta`, `Database`, `IanaTimezone`, `TimezoneSetting` |
+| Types | `PluginInitContext`, `PluginRouteClaim`, `PluginRouteResolver`, `PluginRouteResolverContext`, `PluginRouteResult`, `PluginManifest`, `PluginConfigField`, `CapabilityDescriptor`, `CapabilityFactory`, `CapabilityRuntimeContext`, `CapabilityResolveResult`, `PluginActivationPlan`, `PluginDependency`, `PluginDependencyIssue`, `AttachmentMeta`, `Database`, `IanaTimezone`, `TimezoneSetting` |
 | Task types | `AsyncTaskDefinition`, `RegisteredAsyncTask`, `RegisteredScheduledTask`, `ScheduledTaskDefinition`, `ScheduledTaskKeyContext`, `ScheduledTaskPayload`, `TaskEnvelope`, `TaskExecutionContext`, `TaskHandler`, `TaskKind`, `TaskLocalSlot`, `TaskResult`, `TaskSource`, `EnqueueAsyncTaskOptions` |
-| Plugin system | `HookPoints`, `parsePluginOption`, `parsePluginConfigFormData`, `loadPluginConfig`, `escapeAttr`, `registerPluginAdminPath`, `getClientIp` |
+| Plugin system | `HookPoints`, `parsePluginOption`, `parsePluginConfigFormData`, `loadPluginConfig`, `escapeAttr`, `resolveCapability`, `createCapabilityRuntimeContext`, `getClientIp` |
 | Auth | `hasPermission`, `verifyPassword` |
 | Content | `buildPermalink`, `formatDate`, `buildAuthorLink`, `buildCategoryLink` |
 | Markdown/HTML | `escapeHtml`, `renderMarkdown`, `renderMarkdownFiltered`, `renderContentExcerpt`, `generateExcerpt`, `autop`, `stripTypechoMarkers`, `stripHtmlTags` |
@@ -516,6 +605,7 @@ function collectHooks() {
     addHook: (point: string, _pluginId: string, handler: Function) => {
       hooks.set(point, handler);
     },
+    registerAdminPath: () => {},
     registerTranslations: () => {},
     registerScheduledTask: () => {},
     registerAsyncTask: () => {},

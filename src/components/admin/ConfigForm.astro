@@ -1,37 +1,24 @@
 ---
 /**
- * Shared admin configuration form.
+ * Shared admin configuration form for plugin and theme settings.
  *
- * Used by both the plugin config page and the theme config page so the
- * field rendering, repeatable row interactions, R2 dynamic options and
- * conditional visibility logic stay in a single place. Both pages pass
- * the masked field definitions + values produced by their configuration
- * view module; this component only renders and submits them.
+ * ConfigField.astro owns recursive field rendering, so repeatable fields can
+ * contain further repeatables without creating a second bespoke form schema.
  */
-import { env } from 'cloudflare:workers';
-import { CONFIG_ROW_ID, type ConfigField } from '@/lib/config';
+import { type ConfigField } from '@/lib/config';
 import type { I18n } from '@/lib/i18n';
+import ConfigFieldRenderer from './ConfigField.astro';
 
 interface Props {
-  /** Form submit action (e.g. /api/admin/plugin-config) */
   action: string;
-  /** Admin CSRF token for the hidden `_` field */
   csrfToken: string;
-  /** Hidden entity field name ("plugin" or "theme") */
   entityName: string;
-  /** Hidden entity field value (plugin/theme id) */
   entityId: string;
-  /** Masked field definitions from the configuration view */
   configDef: Record<string, ConfigField>;
-  /** Masked saved values from the configuration view */
   configValues: Record<string, unknown>;
-  /** Success banner text; rendered only when non-empty */
   message?: string;
-  /** Back link target */
   backHref: string;
-  /** Back link label */
   backLabel: string;
-  /** Request-local translator for host controls and optional metadata keys. */
   i18n?: I18n;
 }
 
@@ -51,101 +38,9 @@ const {
 const t = (key: string, variables: Record<string, string | number> = {}, fallback = key): string =>
   i18n?.t(key, variables, fallback) ?? fallback;
 
-interface LocalizedText {
-  value: string;
-  translated: boolean;
-}
-
 const configScope = `${entityName}.${entityId}.config`;
-
-function localizeText(key: string, fallback: string): LocalizedText {
-  const value = i18n?.t(key, {}, '') ?? '';
-  return value ? { value, translated: true } : { value: fallback, translated: false };
-}
-
-function localizeField(field: ConfigField, path: string): LocalizedText {
-  return localizeText(field.labelKey || `${configScope}.${path}.label`, field.label);
-}
-
-function localizeDescription(field: ConfigField, path: string): LocalizedText | null {
-  if (!field.description) return null;
-  return localizeText(field.descriptionKey || `${configScope}.${path}.description`, field.description);
-}
-
-function localizeOption(field: ConfigField, path: string, value: string, fallback: string): LocalizedText {
-  return localizeText(field.optionKeys?.[value] || `${configScope}.${path}.option.${value}`, fallback);
-}
-
-function isR2BucketBinding(value: unknown): boolean {
-  return !!value
-    && typeof value === 'object'
-    && typeof (value as any).get === 'function'
-    && typeof (value as any).put === 'function'
-    && typeof (value as any).delete === 'function'
-    && typeof (value as any).head === 'function'
-    && typeof (value as any).list === 'function';
-}
-
-function r2BindingOptions(): Record<string, string> {
-  const bindings: Record<string, string> = {};
-  for (const [key, value] of Object.entries(env as Record<string, unknown>)) {
-    if (isR2BucketBinding(value)) {
-      bindings[key] = key;
-    }
-  }
-  if (Object.keys(bindings).length === 0) {
-    bindings.BUCKET = 'BUCKET';
-  }
-  return bindings;
-}
-
-function fieldOptions(field: ConfigField): Record<string, string> | undefined {
-  if (field.optionsSource === 'r2Bindings') return r2BindingOptions();
-  return field.options;
-}
-
-function repeatableRows(value: unknown, field: ConfigField): Record<string, any>[] {
-  let rows: unknown = value;
-  if (typeof rows === 'string') {
-    try {
-      rows = JSON.parse(rows);
-    } catch {
-      rows = [];
-    }
-  }
-  if (!Array.isArray(rows) || rows.length === 0) {
-    rows = Array.isArray(field.default) && field.default.length > 0 ? field.default : [{}];
-  }
-  return rows.map(row => row && typeof row === 'object' ? row as Record<string, any> : {});
-}
-
-function isFieldVisible(field: ConfigField, row: Record<string, any>): boolean {
-  if (!field.showWhen) return true;
-  const current = String(row[field.showWhen.field] ?? '');
-  const expected = Array.isArray(field.showWhen.value) ? field.showWhen.value : [field.showWhen.value];
-  return expected.map(String).includes(current);
-}
-
-function displayRepeatableValue(value: unknown, field: ConfigField): unknown {
-  if (field.type === 'text' && field.default === '/' && value === '') {
-    return '/';
-  }
-  if (field.type === 'text' && field.default === '/' && typeof value === 'string' && value && !value.startsWith('/')) {
-    return `/${value}`;
-  }
-  return value;
-}
-
-function fieldValueForOption(value: unknown): string {
-  if (typeof value === 'boolean') return value ? 'true' : 'false';
-  return String(value);
-}
-
-function selectedAttr(actual: unknown, expected: unknown): true | undefined {
-  return fieldValueForOption(actual) === String(expected) ? true : undefined;
-}
 ---
-<div class="col-mb-12 col-tb-8 col-tb-offset-2" role="form">
+<div class="col-mb-12" role="form">
   {message && (
     <div class="typecho-option-tabs notice typecho-dismissible notice-success admin-notice admin-notice--success">
       <p>{message}</p>
@@ -153,240 +48,23 @@ function selectedAttr(actual: unknown, expected: unknown): true | undefined {
     </div>
   )}
 
-  <form method="post" action={action}>
+  <form method="post" action={action} data-config-form>
     <input type="hidden" name="_" value={csrfToken} />
     <input type="hidden" name={entityName} value={entityId} />
     <ul class="typecho-option">
-      {Object.entries(configDef).map(([key, field]: [string, ConfigField]) => {
-        const value = configValues[key] ?? field.default ?? '';
-        const fieldText = localizeField(field, key);
-        const fieldDescription = localizeDescription(field, key);
-
-        if (field.type === 'hidden') {
-          return (
-            <input type="hidden" name={key} value={String(value)} />
-          );
-        }
-
-        const isBoolCheckbox = field.type === 'checkbox' && !field.options;
-
-        return (
-          <li>
-            {!isBoolCheckbox && (
-              <label for={`cfg-${key}`} class="typecho-label">{fieldText.value}</label>
-            )}
-
-            {field.type === 'text' && (
-              <p><input type="text" id={`cfg-${key}`} name={key} class="text w-100" value={String(value)} /></p>
-            )}
-
-            {field.type === 'password' && (
-              <p><input type="password" id={`cfg-${key}`} name={key} class="text w-100" value={String(value)} /></p>
-            )}
-
-            {field.type === 'textarea' && (
-              <p><textarea id={`cfg-${key}`} name={key} class="text w-100" rows="4">{String(value)}</textarea></p>
-            )}
-
-            {field.type === 'select' && fieldOptions(field) && (
-              <p>
-                <select id={`cfg-${key}`} name={key} data-current-value={fieldValueForOption(value)}>
-                  {Object.entries(fieldOptions(field)!).map(([optVal, optLabel]) => (
-                    <option value={optVal} selected={selectedAttr(value, optVal)}>{localizeOption(field, key, optVal, optLabel).value}</option>
-                  ))}
-                </select>
-              </p>
-            )}
-
-            {field.type === 'radio' && field.options && (
-              <p>
-                {Object.entries(field.options).map(([optVal, optLabel]) => (
-                  <span class="admin-choice">
-                    <input
-                      type="radio"
-                      id={`cfg-${key}-${optVal}`}
-                      name={key}
-                      value={optVal}
-                      checked={String(value) === String(optVal)}
-                    />
-                    <label for={`cfg-${key}-${optVal}`}>{localizeOption(field, key, optVal, optLabel).value}</label>
-                  </span>
-                ))}
-              </p>
-            )}
-
-            {isBoolCheckbox && (
-              <p>
-                <label for={`cfg-${key}`}>
-                  <input
-                    type="checkbox"
-                    id={`cfg-${key}`}
-                    name={key}
-                    value="1"
-                    checked={value === '1' || value === true}
-                  />
-                  {' '}{fieldText.value}
-                </label>
-              </p>
-            )}
-
-            {field.type === 'checkbox' && field.options && (
-              <p>
-                {Object.entries(field.options).map(([optVal, optLabel]) => {
-                  const checked = Array.isArray(value)
-                    ? value.includes(optVal)
-                    : String(value) === optVal;
-                  return (
-                    <span class="admin-choice">
-                      <input
-                        type="checkbox"
-                        id={`cfg-${key}-${optVal}`}
-                        name={key}
-                        value={optVal}
-                        checked={checked}
-                      />
-                      <label for={`cfg-${key}-${optVal}`}>{localizeOption(field, key, optVal, optLabel).value}</label>
-                    </span>
-                  );
-                })}
-              </p>
-            )}
-
-            {field.type === 'repeatable' && field.itemFields && (
-              <div
-                class="typecho-repeatable"
-                data-repeatable={key}
-                 data-label={field.label}
-                 data-label-translated={fieldText.value}
-                data-next-index={String(repeatableRows(value, field).length)}
-              >
-                <div class="typecho-repeatable-items">
-                  {repeatableRows(value, field).map((row, rowIndex) => (
-                    <fieldset class="typecho-repeatable-item">
-                       <legend>{fieldText.value} #{rowIndex + 1}</legend>
-                      <input
-                        type="hidden"
-                        name={`${key}[${rowIndex}][${CONFIG_ROW_ID}]`}
-                        value={String(row[CONFIG_ROW_ID] ?? '')}
-                      />
-                      {Object.entries(field.itemFields || {}).map(([itemKey, itemField]: [string, ConfigField]) => {
-                         const itemValue = displayRepeatableValue(row[itemKey] ?? itemField.default ?? '', itemField);
-                         const itemPath = `${key}.${itemKey}`;
-                         const itemText = localizeField(itemField, itemPath);
-                         const itemDescription = localizeDescription(itemField, itemPath);
-                        const inputName = `${key}[${rowIndex}][${itemKey}]`;
-                        const inputId = `cfg-${key}-${rowIndex}-${itemKey}`;
-                        const visible = isFieldVisible(itemField, row);
-                        const showWhenValue = Array.isArray(itemField.showWhen?.value)
-                          ? itemField.showWhen?.value.join(',')
-                          : itemField.showWhen?.value;
-                        return (
-                          <div
-                            class:list={['typecho-repeatable-field', { hidden: !visible }]}
-                            data-show-when-field={itemField.showWhen?.field}
-                            data-show-when-value={showWhenValue}
-                          >
-                            <label for={inputId} class="typecho-label">{itemText.value}</label>
-
-                            {itemField.type === 'text' && (
-                              <p><input type="text" id={inputId} name={inputName} class="text w-100" value={String(itemValue)} disabled={!visible} /></p>
-                            )}
-
-                            {itemField.type === 'password' && (
-                              <p><input type="password" id={inputId} name={inputName} class="text w-100" value={String(itemValue)} disabled={!visible} /></p>
-                            )}
-
-                            {itemField.type === 'textarea' && (
-                              <p><textarea id={inputId} name={inputName} class="text w-100" rows="3" disabled={!visible}>{String(itemValue)}</textarea></p>
-                            )}
-
-                            {itemField.type === 'select' && fieldOptions(itemField) && (
-                              <p>
-                                <select id={inputId} name={inputName} disabled={!visible} data-current-value={fieldValueForOption(itemValue)}>
-                                   {Object.entries(fieldOptions(itemField)!).map(([optVal, optLabel]) => (
-                                     <option value={optVal} selected={selectedAttr(itemValue, optVal)}>{localizeOption(itemField, itemPath, optVal, optLabel).value}</option>
-                                  ))}
-                                </select>
-                              </p>
-                            )}
-
-                             {itemDescription && (
-                               itemDescription.translated
-                                 ? <p class="description">{itemDescription.value}</p>
-                                 : <p class="description" set:html={itemDescription.value}></p>
-                             )}
-                          </div>
-                        );
-                      })}
-                      <p>
-                        <button type="button" class="btn btn-xs typecho-repeatable-remove">{t('admin.action.delete', {}, 'Delete')}</button>
-                      </p>
-                    </fieldset>
-                  ))}
-                </div>
-                <button type="button" class="btn typecho-repeatable-add">{t('admin.action.add', {}, 'Add')}</button>
-                <template class="typecho-repeatable-template">
-                  <fieldset class="typecho-repeatable-item">
-                    <legend>{fieldText.value} #__NUMBER__</legend>
-                    {Object.entries(field.itemFields || {}).map(([itemKey, itemField]: [string, ConfigField]) => {
-                      const inputName = `${key}[__INDEX__][${itemKey}]`;
-                      const inputId = `cfg-${key}-__INDEX__-${itemKey}`;
-                      const itemValue = itemField.default ?? '';
-                      const visible = !itemField.showWhen || isFieldVisible(itemField, Object.fromEntries(
-                        Object.entries(field.itemFields || {}).map(([k, f]) => [k, f.default ?? ''])
-                      ));
-                      const showWhenValue = Array.isArray(itemField.showWhen?.value)
-                        ? itemField.showWhen?.value.join(',')
-                        : itemField.showWhen?.value;
-                      return (
-                        <div
-                          class:list={['typecho-repeatable-field', { hidden: !visible }]}
-                          data-show-when-field={itemField.showWhen?.field}
-                          data-show-when-value={showWhenValue}
-                        >
-                           <label for={inputId} class="typecho-label">{localizeField(itemField, `${key}.${itemKey}`).value}</label>
-                          {itemField.type === 'text' && (
-                            <p><input type="text" id={inputId} name={inputName} class="text w-100" value={String(itemValue)} disabled={!visible} /></p>
-                          )}
-                          {itemField.type === 'password' && (
-                            <p><input type="password" id={inputId} name={inputName} class="text w-100" value={String(itemValue)} disabled={!visible} /></p>
-                          )}
-                          {itemField.type === 'textarea' && (
-                            <p><textarea id={inputId} name={inputName} class="text w-100" rows="3" disabled={!visible}>{String(itemValue)}</textarea></p>
-                          )}
-                          {itemField.type === 'select' && fieldOptions(itemField) && (
-                            <p>
-                              <select id={inputId} name={inputName} disabled={!visible} data-current-value={fieldValueForOption(itemValue)}>
-                                   {Object.entries(fieldOptions(itemField)!).map(([optVal, optLabel]) => (
-                                     <option value={optVal} selected={selectedAttr(itemValue, optVal)}>{localizeOption(itemField, `${key}.${itemKey}`, optVal, optLabel).value}</option>
-                                ))}
-                              </select>
-                            </p>
-                          )}
-                           {localizeDescription(itemField, `${key}.${itemKey}`) && (
-                             localizeDescription(itemField, `${key}.${itemKey}`)!.translated
-                               ? <p class="description">{localizeDescription(itemField, `${key}.${itemKey}`)!.value}</p>
-                               : <p class="description" set:html={localizeDescription(itemField, `${key}.${itemKey}`)!.value}></p>
-                           )}
-                        </div>
-                      );
-                    })}
-                    <p>
-                      <button type="button" class="btn btn-xs typecho-repeatable-remove">{t('admin.action.delete', {}, 'Delete')}</button>
-                    </p>
-                  </fieldset>
-                </template>
-              </div>
-            )}
-
-            {fieldDescription && (
-              fieldDescription.translated
-                ? <p class="description">{fieldDescription.value}</p>
-                : <p class="description" set:html={fieldDescription.value}></p>
-            )}
-          </li>
-        );
-      })}
+      {Object.entries(configDef).map(([key, field]) => (
+        <li>
+          <ConfigFieldRenderer
+            field={field}
+            name={key}
+            id={`cfg-${key}`}
+            path={key}
+            value={configValues[key] ?? field.default}
+            configScope={configScope}
+            i18n={i18n}
+          />
+        </li>
+      ))}
     </ul>
 
     <ul class="typecho-option typecho-option-submit">
@@ -397,35 +75,91 @@ function selectedAttr(actual: unknown, expected: unknown): true | undefined {
     </ul>
   </form>
 </div>
-<style is:inline>
-  .typecho-repeatable-item {
-    border: 1px solid #e9e9e9;
-    margin: 0 0 16px;
-    padding: 12px 14px 4px;
-  }
-  .typecho-repeatable-item legend {
-    color: #666;
-    font-weight: 700;
-    padding: 0 6px;
-  }
-  .typecho-repeatable-field {
-    margin-bottom: 10px;
-  }
-</style>
 <script is:inline>
-  document.addEventListener('click', function(event) {
-    var target = event.target;
-    if (!(target instanceof HTMLElement)) return;
+  (function () {
+    function ownFields(scope, selector) {
+      return Array.from(scope.querySelectorAll(selector)).filter(function (element) {
+        return element.closest('.typecho-repeatable-item') === scope;
+      });
+    }
 
-    var addButton = target.closest('.typecho-repeatable-add');
-    if (addButton) {
-      var root = addButton.closest('.typecho-repeatable');
-      if (!root) return;
-      var items = root.querySelector('.typecho-repeatable-items');
-      var template = root.querySelector('.typecho-repeatable-template');
+    function ownControls(item, fieldName) {
+      return ownFields(item, '[name$="[' + fieldName + ']"]');
+    }
+
+    function toggleConditionalFields(item) {
+      ownFields(item, '[data-show-when-field]').forEach(function (field) {
+        var controllerName = field.getAttribute('data-show-when-field');
+        var expected = String(field.getAttribute('data-show-when-value') || '').split(',');
+        var controllers = controllerName ? ownControls(item, controllerName) : [];
+        var values = controllers.length > 0 && controllers[0] instanceof HTMLInputElement && controllers[0].type === 'checkbox'
+          ? controllers.filter(function (input) { return input.checked; }).map(function (input) { return input.value; })
+          : [controllers.length > 0 ? controllers[0].value : ''];
+        var visible = controllers.length === 0 || values.some(function (current) {
+          return expected.indexOf(String(current || '')) >= 0;
+        });
+        field.classList.toggle('hidden', !visible);
+        Array.from(field.querySelectorAll('input, textarea, select')).forEach(function (input) {
+          if (input.closest('[data-show-when-field]') === field) input.disabled = !visible;
+        });
+      });
+    }
+
+    function refreshSummary(item) {
+      var root = item.closest('.typecho-repeatable');
+      var summary = item.querySelector(':scope > .typecho-repeatable-header > [data-item-summary]');
+      if (!root || !summary) return;
+      var fields = (root.getAttribute('data-summary-fields') || '').split(',').filter(Boolean);
+      var parts = [];
+      fields.forEach(function (fieldName) {
+        var control = ownControls(item, fieldName)[0];
+        if (!control) return;
+        var value = String(control.value || '').trim();
+        if (value !== '') parts.push(value);
+      });
+      summary.textContent = parts.join(' · ');
+    }
+
+    function refreshBadge(item) {
+      var root = item.closest('.typecho-repeatable');
+      var badge = item.querySelector(':scope > .typecho-repeatable-header [data-item-badge]');
+      var statusField = root ? root.getAttribute('data-status-field') : '';
+      if (!root || !badge || !statusField) return;
+      var control = ownControls(item, statusField)[0];
+      if (!control) return;
+      var enabled = control instanceof HTMLInputElement && control.type === 'checkbox'
+        ? control.checked
+        : control.value === 'true' || control.value === '1';
+      var option = control instanceof HTMLSelectElement ? control.options[control.selectedIndex] : null;
+      badge.textContent = option && option.textContent ? option.textContent : (enabled ? 'Enabled' : 'Disabled');
+      badge.classList.toggle('admin-badge--active', enabled);
+      badge.classList.toggle('admin-badge--muted', !enabled);
+    }
+
+    function refreshItem(item) {
+      toggleConditionalFields(item);
+      refreshSummary(item);
+      refreshBadge(item);
+    }
+
+    function renumberRepeatableItems(root) {
+      var label = root.getAttribute('data-label-translated') || root.getAttribute('data-label') || '';
+      root.querySelectorAll(':scope > .typecho-repeatable-items > .typecho-repeatable-item').forEach(function (item, index) {
+        var indexLabel = item.querySelector(':scope > .typecho-repeatable-header [data-index-label]');
+        if (indexLabel) {
+          indexLabel.textContent = label + ' #' + String(index + 1);
+          return;
+        }
+        var legend = item.querySelector(':scope > legend');
+        if (legend) legend.textContent = label + ' #' + String(index + 1);
+      });
+    }
+
+    function addRepeatableRow(root) {
+      var items = root.querySelector(':scope > .typecho-repeatable-items');
+      var template = root.querySelector(':scope > .typecho-repeatable-template');
       if (!items || !(template instanceof HTMLTemplateElement)) return;
-
-      var index = Number(root.getAttribute('data-next-index') || items.querySelectorAll('.typecho-repeatable-item').length);
+      var index = Number(root.getAttribute('data-next-index') || items.querySelectorAll(':scope > .typecho-repeatable-item').length);
       root.setAttribute('data-next-index', String(index + 1));
       var wrapper = document.createElement('div');
       wrapper.appendChild(template.content.cloneNode(true));
@@ -435,66 +169,180 @@ function selectedAttr(actual: unknown, expected: unknown): true | undefined {
       while (wrapper.firstElementChild) {
         var element = wrapper.firstElementChild;
         items.appendChild(element);
-        if (element instanceof HTMLElement) toggleConditionalFields(element);
+        if (element instanceof HTMLElement) {
+          element.querySelectorAll('.typecho-repeatable-item').forEach(refreshItem);
+          refreshItem(element);
+        }
       }
       renumberRepeatableItems(root);
-      return;
     }
 
-    var removeButton = target.closest('.typecho-repeatable-remove');
-    if (removeButton) {
-      var item = removeButton.closest('.typecho-repeatable-item');
-      var root = removeButton.closest('.typecho-repeatable');
-      if (!item || !root) return;
-      item.remove();
-      renumberRepeatableItems(root);
+    function refreshTokenEmptyState(list) {
+      var empty = list.querySelector(':scope > [data-token-empty]');
+      var rows = list.querySelectorAll(':scope > .typecho-token-items > [data-token-row]');
+      if (empty) empty.hidden = rows.length > 0;
     }
-  });
 
-  function renumberRepeatableItems(root) {
-     var label = root.getAttribute('data-label-translated') || root.getAttribute('data-label') || '';
-    root.querySelectorAll('.typecho-repeatable-item').forEach(function(item, index) {
-      var legend = item.querySelector('legend');
-      if (legend) legend.textContent = label + ' #' + String(index + 1);
-    });
-  }
+    function refreshTokenLimit(list) {
+      var max = Number(list.getAttribute('data-max') || '0');
+      if (!max) return;
+      var rows = list.querySelectorAll(':scope > .typecho-token-items > [data-token-row]').length;
+      var atLimit = rows >= max;
+      var generate = list.querySelector(':scope > .typecho-token-generate');
+      var hint = list.querySelector(':scope > [data-token-limit]');
+      if (generate instanceof HTMLButtonElement) generate.disabled = atLimit;
+      if (hint) hint.hidden = !atLimit;
+    }
 
-  function toggleConditionalFields(item) {
-    var fields = item.querySelectorAll('[data-show-when-field]');
-    fields.forEach(function(field) {
-      var controllerName = field.getAttribute('data-show-when-field');
-      var expected = String(field.getAttribute('data-show-when-value') || '').split(',');
-      var controller = controllerName
-        ? item.querySelector('[name$="[' + controllerName + ']"]')
-        : null;
-      var visible = !controller || expected.indexOf(String(controller.value || '')) >= 0;
-      field.classList.toggle('hidden', !visible);
-      field.querySelectorAll('input, textarea, select').forEach(function(input) {
-        input.disabled = !visible;
+    var TOKEN_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+
+    function randomToken(length) {
+      var limit = Math.floor(256 / TOKEN_ALPHABET.length) * TOKEN_ALPHABET.length;
+      var value = '';
+      while (value.length < length) {
+        var bytes = new Uint8Array(length * 2);
+        crypto.getRandomValues(bytes);
+        for (var index = 0; index < bytes.length && value.length < length; index += 1) {
+          if (bytes[index] >= limit) continue;
+          value += TOKEN_ALPHABET.charAt(bytes[index] % TOKEN_ALPHABET.length);
+        }
+      }
+      return value;
+    }
+
+
+    function addTokenRow(list) {
+      var items = list.querySelector(':scope > .typecho-token-items');
+      var template = list.querySelector(':scope > .typecho-token-template');
+      if (!items || !(template instanceof HTMLTemplateElement)) return;
+      var index = Number(list.getAttribute('data-next-index') || items.querySelectorAll(':scope > [data-token-row]').length);
+      list.setAttribute('data-next-index', String(index + 1));
+      var tokenId = 't' + Date.now().toString(16) + Math.random().toString(16).slice(2, 10);
+      var token = randomToken(64);
+      var wrapper = document.createElement('div');
+      wrapper.appendChild(template.content.cloneNode(true));
+      wrapper.innerHTML = wrapper.innerHTML
+        .replace(/__INDEX__/g, String(index))
+        .replace(/__TOKEN_ID__/g, tokenId);
+      while (wrapper.firstElementChild) {
+        var row = wrapper.firstElementChild;
+        items.appendChild(row);
+        if (row instanceof HTMLElement) {
+          var valueInput = row.querySelector('[data-token-value]');
+          var display = row.querySelector('[data-token-display]');
+          if (valueInput instanceof HTMLInputElement) valueInput.value = token;
+          if (display) display.textContent = token;
+        }
+      }
+      refreshTokenEmptyState(list);
+      refreshTokenLimit(list);
+    }
+
+    function fallbackCopy(value, done) {
+      var area = document.createElement('textarea');
+      area.value = value;
+      area.setAttribute('readonly', 'readonly');
+      area.style.position = 'fixed';
+      area.style.opacity = '0';
+      document.body.appendChild(area);
+      area.select();
+      try { document.execCommand('copy'); done(); } catch (error) { /* clipboard unavailable */ }
+      area.remove();
+    }
+
+    function copyTokenValue(value, button) {
+      var done = function () {
+        var label = button.getAttribute('data-copied-label');
+        if (!label) return;
+        var original = button.textContent;
+        button.textContent = label;
+        window.setTimeout(function () { button.textContent = original; }, 1200);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(value).then(done, function () { fallbackCopy(value, done); });
+        return;
+      }
+      fallbackCopy(value, done);
+    }
+
+    function onClick(event) {
+      var target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+
+      var toggle = target.closest('.typecho-repeatable-toggle');
+      if (toggle) {
+        var toggleItem = toggle.closest('.typecho-repeatable-item');
+        if (toggleItem) {
+          var collapsed = toggleItem.classList.toggle('is-collapsed');
+          toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        }
+        return;
+      }
+
+      var addButton = target.closest('.typecho-repeatable-add');
+      if (addButton) {
+        var addRoot = addButton.closest('.typecho-repeatable');
+        if (addRoot) addRepeatableRow(addRoot);
+        return;
+      }
+
+      var removeButton = target.closest('.typecho-repeatable-remove');
+      if (removeButton) {
+        var removeItem = removeButton.closest('.typecho-repeatable-item');
+        var removeRoot = removeButton.closest('.typecho-repeatable');
+        if (removeItem) removeItem.remove();
+        if (removeRoot) {
+          renumberRepeatableItems(removeRoot);
+          var parentItem = removeRoot.closest('.typecho-repeatable-item');
+          if (parentItem) refreshItem(parentItem);
+        }
+        return;
+      }
+
+      var generateButton = target.closest('.typecho-token-generate');
+      if (generateButton) {
+        var list = generateButton.closest('[data-token-list]');
+        if (list) addTokenRow(list);
+        return;
+      }
+
+      var tokenRemove = target.closest('.typecho-token-remove');
+      if (tokenRemove) {
+        var tokenRow = tokenRemove.closest('[data-token-row]');
+        var tokenList = tokenRemove.closest('[data-token-list]');
+        if (tokenRow) tokenRow.remove();
+        if (tokenList) {
+          refreshTokenEmptyState(tokenList);
+          refreshTokenLimit(tokenList);
+        }
+        return;
+      }
+
+      var copyButton = target.closest('.typecho-token-copy');
+      if (copyButton) {
+        var copyRow = copyButton.closest('[data-token-row]');
+        var valueInput = copyRow ? copyRow.querySelector('[data-token-value]') : null;
+        if (valueInput instanceof HTMLInputElement && valueInput.value) copyTokenValue(valueInput.value, copyButton);
+      }
+    }
+
+    function onFieldChange(event) {
+      var target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      var item = target.closest('.typecho-repeatable-item');
+      if (item) refreshItem(item);
+    }
+
+    document.querySelectorAll('[data-config-form]').forEach(function (form) {
+      if (!(form instanceof HTMLFormElement)) return;
+      form.addEventListener('click', onClick);
+      form.addEventListener('input', onFieldChange);
+      form.addEventListener('change', onFieldChange);
+      form.querySelectorAll('.typecho-repeatable-item').forEach(refreshItem);
+      form.querySelectorAll('[data-token-list]').forEach(refreshTokenLimit);
+      form.querySelectorAll('select[data-current-value]').forEach(function (select) {
+        if (select instanceof HTMLSelectElement) select.value = select.getAttribute('data-current-value') || '';
       });
     });
-  }
-
-  document.querySelectorAll('.typecho-repeatable-item').forEach(function(item) {
-    toggleConditionalFields(item);
-    item.addEventListener('change', function(event) {
-      var target = event.target;
-      if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement || target instanceof HTMLTextAreaElement) {
-        toggleConditionalFields(item);
-      }
-    });
-  });
-
-  document.addEventListener('change', function(event) {
-    var target = event.target;
-    if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement || target instanceof HTMLTextAreaElement)) return;
-    var item = target.closest('.typecho-repeatable-item');
-    if (item) toggleConditionalFields(item);
-  });
-
-  document.querySelectorAll('select[data-current-value]').forEach(function(select) {
-    if (select instanceof HTMLSelectElement) {
-      select.value = select.getAttribute('data-current-value') || '';
-    }
-  });
+  })();
 </script>

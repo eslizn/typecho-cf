@@ -27,7 +27,7 @@ const [stats, gravatarUrl] = await Promise.all([
   buildGravatarUrl(user!.mail, { size: 220, defaultImage: 'mp' }),
 ]);
 const [postCount, commentCount, catCount] = stats;
-const profileBottomHtml = await applyFilterSafely(ctx, 'admin:profile:bottom', '', { options, urls, user, csrfToken });
+const profileBottomHtml = await applyFilterSafely(ctx, 'admin:profile:bottom', '', { options, urls, user, csrfToken, capabilityRuntime: ctx.capabilityRuntime });
 ---
 <Admin title={ctx.i18n.t('admin.page.profile', {}, 'Profile')} options={options} urls={urls} user={user} activeMenu="profile" pluginCtx={ctx}>
   <div class="col-mb-12 col-tb-3">

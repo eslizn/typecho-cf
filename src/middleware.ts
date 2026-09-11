@@ -77,10 +77,14 @@ export const onRequest = defineMiddleware(async (context, next) => {
   // ── Edge Cache Layer ──────────────────────────────────────────────────────
   const isGetRequest = context.request.method === 'GET';
   const hasAuth = hasAuthCookies(context.request.headers.get('cookie'));
+  // Capability-compatible HTTP surfaces authenticate with Bearer tokens. A
+  // public cache hit must never bypass that authorization header.
+  const hasAuthorization = context.request.headers.has('authorization');
   const isCacheable =
     options.cacheEnabled &&
     isGetRequest &&
     !hasAuth &&
+    !hasAuthorization &&
     // path is the pagination-normalized effective path. The cacheable URL
     // space follows the admin permalink settings (post/page/category) plus
     // the fixed public surfaces; admin/api/usr are guarded inside the policy.
@@ -252,6 +256,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
       db,
       options,
       env,
+      capabilityRuntime: pluginCtx.capabilityRuntime,
       i18n,
       resolvedLocale,
     });
@@ -314,6 +319,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
     pluginCtx,
     i18n,
     resolvedLocale,
+    capabilityRuntime: pluginCtx.capabilityRuntime,
   };
   if (shouldRunArchiveRenderHooks) {
     await doHook(pluginCtx, 'archive:beforeRender', archiveRenderContext);
@@ -420,7 +426,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
  * flow, login, or admin endpoints.
  */
 function isReservedCorePath(path: string): boolean {
-  // Allow plugins to claim specific admin paths (registered via registerPluginAdminPath)
+  // Allow plugins to claim specific admin paths (registered via registerAdminPath)
   if (isPluginAdminPath(path)) return false;
   if (path === '/install' || path === '/api/install') return true;
   if (path === '/admin' || path.startsWith('/admin/')) return true;

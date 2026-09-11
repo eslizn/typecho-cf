@@ -205,6 +205,44 @@ describe('Middleware: no redirect loops when DB is ready', () => {
     putSpy.mockRestore();
   });
 
+  it('never serves or stores a cache entry for an Authorization-bearing request', async () => {
+    // Capability-compatible HTTP surfaces (such as the AI plugin) authenticate
+    // with a Bearer token instead of Session cookies. A public cache hit would
+    // bypass that authorization, so the header must disable both the cache read
+    // and the cache write for the request.
+    const waitUntil = vi.fn();
+    const putSpy = vi.spyOn(caches.default, 'put');
+    const matchSpy = vi.spyOn(caches.default, 'match');
+    const request = new Request(`${SITE}/archives/123/`, {
+      method: 'GET',
+      headers: { authorization: 'Bearer access-secret' },
+    });
+    const ctx = {
+      request,
+      url: new URL(request.url),
+      locals: { cfContext: { waitUntil } },
+      redirect: (p: string) => new Response(null, { status: 302, headers: { Location: p } }),
+      rewrite: (p: string) => new Response(null, { status: 302, headers: { Location: p } }),
+    } as any;
+
+    const response = await onRequest(
+      ctx,
+      async () => new Response('bearer surface', { status: 200 }),
+    ) as Response;
+
+    const cacheKeyText = (value: unknown): string => typeof value === 'string'
+      ? value
+      : value instanceof Request
+        ? value.url
+        : String(value);
+
+    expect(response.status).toBe(200);
+    expect(matchSpy.mock.calls.some(([key]) => cacheKeyText(key).includes('/archives/123/'))).toBe(false);
+    expect(putSpy.mock.calls.some(([key]) => cacheKeyText(key).includes('/archives/123/'))).toBe(false);
+    putSpy.mockRestore();
+    matchSpy.mockRestore();
+  });
+
   it('rewrites the default bare-slug page form to the unified content entry', async () => {
     await testDb.insert(schema.contents).values({
       cid: 777, title: 'About', slug: 'about-default', type: 'page', status: 'publish',

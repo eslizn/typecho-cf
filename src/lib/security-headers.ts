@@ -92,6 +92,7 @@ export async function applySecurityHeaders(
       const filtered = await applyFilterSafely(pluginCtx, 'csp:directives', directives, {
         request: secCtx.request,
         i18n: secCtx.i18n,
+        capabilityRuntime: pluginCtx.capabilityRuntime,
       });
       if (filtered && typeof filtered === 'object') {
         directives = filtered as CspDirectives;

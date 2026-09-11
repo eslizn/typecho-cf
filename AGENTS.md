@@ -150,7 +150,7 @@ src/lib/constants.ts   — 跨模块常量（密码最小长度、slug 后缀上
 
 - 存储在 `typecho_options` 表：`name = "plugin:<pluginId>"`，值为 JSON 字符串
 - 通过 `loadPluginConfig(options, pluginId)` 读取（自动合并 manifest 默认值）
-- 启用插件时自动写入默认配置，禁用时删除配置
+- 启用插件时自动写入默认配置；禁用插件时保留现有配置，重新启用可恢复原设置
 - `typecho_options.secret` 是签名密钥，跨部署必须保留，**不可重置**
 
 主题自定义配置（可选）使用同一套机制：`name = "theme:<themeId>"`，通过
@@ -226,11 +226,9 @@ addHook(hookPoint, pluginId, handler, priority = 10)
 插件通过 `request:route` hook 处理的 admin/api 路径必须注册，否则中间件的 `isReservedCorePath` 会拦截：
 
 ```typescript
-import { registerPluginAdminPath } from 'typecho/plugin-sdk';
-
-export default function init({ addHook, pluginId }: PluginInitContext): void {
+export default function init({ addHook, pluginId, registerAdminPath }: PluginInitContext): void {
   // 注册插件的管理路径，使其不被中间件拦截
-  registerPluginAdminPath('/api/admin/webdav');
+  registerAdminPath('/api/admin/webdav');
 
   addHook('request:route', pluginId, async (result, extra) => {
     if (extra.path === '/api/admin/webdav') { /* ... */ }
@@ -239,11 +237,12 @@ export default function init({ addHook, pluginId }: PluginInitContext): void {
 }
 ```
 
-- 路径应在插件 `init()` 中注册，在任何 hook handler 之前
+- 路径应在插件 `init()` 中注册，在任何 hook handler 之前；`registerAdminPath()` 会把路径绑定到当前 `pluginId`
 - `isPluginAdminPath(path)` 在中间件 `isReservedCorePath` 中调用，白名单通过后放行
+- 管理/API 路径与前台路由使用同一套 owner 生命周期：插件停用、初始化失败或注册表重置时，该 owner 的全部路径 claim 立即注销；插件只能注销自己的 claim
 - 前台自定义路由（如 WebDAV 入口）必须在插件 `init()` 中通过 `PluginInitContext.registerRouteResolver(resolver)` 声明 owner-scoped 路由：resolver 根据当前配置返回该插件当前有效的路径 claim；插件停用、初始化失败或配置变化时，核心替换或注销该 owner 的旧 claim。中间件据此（1）豁免内容路径废弃检查；（2）禁止插件路径进入边缘缓存（插件自带鉴权，缓存会绕过）。路由优先级保持为：系统固定 > 系统路由表 > 插件路由表
 - route resolver 只负责声明和生命周期管理，不负责处理请求；实际请求仍由 `request:route` hook 分发。核心必须在缓存决策和 `request:route` 分发前同步当前 claim；不同插件的冲突 claim 必须 fail-closed（相关 owner 均不可用），WebDAV 保留历史兼容路径 `/dav` 的匹配行为
-- 插件路由声明按 owner 管理，插件只能替换或注销自己的 claim；插件停用后不得残留旧路径。管理/API 路径仍使用 `registerPluginAdminPath()`，除非后续纳入同一套 owner-scoped 管理
+- 插件路由声明按 owner 管理，插件只能替换或注销自己的 claim；插件停用后不得残留旧路径。旧的全局 `registerPluginAdminPath(path)` 已从 SDK 移除，管理/API 路径统一改用 `PluginInitContext.registerAdminPath(path)`
 
 ### 6.4 插件专属管理页面
 
@@ -269,6 +268,15 @@ WebDAV 插件的文件管理器是完整参考实现：`admin:page` 返回包含
 - 由 `src/integrations/plugin-loader.ts` 在构建时发现并注入
 - 本地插件放在 `src/plugins/<name>/`，需在根 `package.json` 添加 file 依赖
 - 入口优先发现 `index.ts`，其次 `index.js` / `index.mjs` / `plugin.ts` / `plugin.js`
+- 依赖图只读取运行时 `dependencies`、`optionalDependencies` 和 `peerDependencies`（可选 peer 按可选依赖处理）；`devDependencies` 不参与生产插件发现。Typecho 插件之间的 required / optional 关系由这些包元数据递归推导，不新增 Manifest 依赖字段
+
+### 6.5.1 Capability 能力注册
+
+- Capability 是独立于 Hook、Manifest 和包依赖的新系统概念，核心只提供通用注册/解析、版本匹配、激活代次和 owner 生命周期，不硬编码具体能力
+- 插件在 `init()` 中通过 `PluginInitContext.registerCapability({ capability, version, factory })` 注册实现；owner 自动绑定当前 `pluginId`，初始化失败或停用后旧注册不可解析
+- Consumer 从请求 Hook extra 的 `capabilityRuntime` 取得上下文，通过 SDK `resolveCapability(runtime, { capability, minVersion?, ownerPluginId? })` 解析；未指定 owner 时多个实现返回 `ambiguous`，不得静默按注册顺序选择
+- Consumer 必须处理 `unavailable`、`ambiguous`、`version-mismatch`、`factory-failed` 和能力调用错误，并自行实现可选功能降级；Capability 不执行 Consumer 提供的工具/函数
+- 当前 AI 能力目录由 `typecho-plugin-ai` 提供，实际实现只有 `ai.chat.generate`；`ai.image.generate`、`ai.audio.speech.generate`、`ai.audio.transcribe`、`ai.embeddings.create` 是预留 ID，不代表已有实现
 
 ### 6.6 Hook 触发点
 
@@ -346,7 +354,7 @@ WebDAV 插件的文件管理器是完整参考实现：`admin:page` 返回包含
 - 存储于 Cookie：`__typecho_uid` 和 `__typecho_authCode`
 - 每次请求由 `src/lib/context.ts` 的 `createContext()` 验证
 - Cookie 的 `Secure` 标志由 `shouldUseSecureCookie(request)` 决定（HTTPS / `x-forwarded-proto: https` 时设为 true）
-- 边缘缓存只对没有任一认证 Cookie 的请求生效（`hasAuthCookies` 闸门，避免登录态被缓存命中）
+- 边缘缓存只对既没有认证 Cookie、也没有 `Authorization` 头的请求生效（`hasAuthCookies` + `Authorization` 闸门，避免登录态或 Bearer 鉴权保护的插件 HTTP 面被缓存命中或回填）
 
 ### 8.3 CSRF 保护
 
@@ -435,12 +443,17 @@ Cloudflare Workers 是单线程单 isolate，以下模块级变量是安全的�
 ### 9.4 配置表单类型（插件 / 主题共用）
 
 `package.json` 的 `typecho.plugin.config` 与 `theme.json` 的 `config` 字段支持以下类型：
-`text`, `textarea`, `select`, `radio`, `checkbox`, `password`, `hidden`, `repeatable`
+`text`, `textarea`, `select`, `radio`, `checkbox`, `password`, `hidden`, `object`, `repeatable`, `tokens`
 
 **扩展属性**：
 - `showWhen` — 条件显示，仅适用于 `repeatable.itemFields`。格式：`{ field: "provider", value: "s3" }`，`value` 可为单值或数组
 - `optionsSource` — 动态选项源，仅适用于 `select`。当前支持 `"r2Bindings"`（自动读取 wrangler.toml 中的 R2 binding 名称）
-- `itemFields` — 嵌套字段定义，仅适用于 `repeatable`
+- `optionDisabled` — 选项值数组，适用于 `select` / `radio` / `option` 型 `checkbox`。命中该数组的选项渲染为 disabled，且服务端在保存时直接丢弃该值（即使被伪造提交）。用于「能力已预留但暂未实现」这类场景，不要用文案标注代替禁用
+- `itemFields` — 嵌套字段定义，适用于 `object` 与 `repeatable`；两者允许递归嵌套
+- `collapsible` — 仅适用于 `repeatable`。为 true 时每行渲染为可折叠卡片（首行展开、其余收起），头部显示摘要与状态徽标
+- `summaryFields` — 仅适用于 `collapsible` 的 `repeatable`。声明构成摘要的 itemFields，缺省取第一个 `text` 字段
+- `statusField` — 仅适用于 `collapsible` 的 `repeatable`。声明在卡片头部渲染为状态徽标的 itemFields（如 `enabled`）
+- `tokens` — 只读的密钥列表，值为 `[{ id, token }]`。页面只提供「生成 / 复制 / 删除」，没有编辑框；「生成」在**前端**用 `crypto.getRandomValues` 生成（最多 20 个，16–128 位 `A-Za-z0-9_-`），随表单提交、点保存才持久化。服务端只做校验与 allowlist，空值行不落库；超过 20 个时保存直接报错，不做静默截断，前端达到上限会禁用生成按钮。删除行即删除密钥，全部删空表示该功能不再可用。`tokens` 不做掩码，因为需要复制原文
 
 **boolean 型 select**：当选项值为 `"true"` / `"false"` 时，系统通过 `parseBoolean` 辅助函数转换为实际 boolean 存储。在 `plugin:config:beforeSave` hook 中需显式返回该字段（boolean 值），否则会被过滤丢失。
 

@@ -3,9 +3,10 @@ import { clearAuthCookieHeaders } from '@/lib/auth';
 import { getDb } from '@/db';
 import { env } from 'cloudflare:workers';
 import { loadOptions } from '@/lib/options';
-import { doHook, parseActivatedPlugins, setActivatedPlugins, type HookContext } from '@/lib/plugin';
+import { doHook, loadPluginConfig, parseActivatedPlugins, setActivatedPlugins, type HookContext } from '@/lib/plugin';
 import { getRequestCoreContextFromLocals } from '@/lib/context';
 import { createCoreRequestI18n } from '@/lib/i18n-runtime';
+import { createCapabilityRuntimeContext } from '@/lib/capability';
 
 /**
  * Logout — POST only to actually clear cookies. The CSRF risk of clearing
@@ -33,8 +34,19 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const db = getDb(env.DB);
     const options = await loadOptions(db);
     await setActivatedPlugins(pluginCtx, parseActivatedPlugins(options.activatedPlugins as string | undefined));
+    pluginCtx.capabilityRuntime = createCapabilityRuntimeContext({
+      request,
+      db,
+      options,
+      env: env as unknown as Record<string, unknown>,
+      activatedPlugins: pluginCtx.activatedPlugins,
+      activationGeneration: pluginCtx.activationGeneration,
+      getPluginConfig: pluginId => loadPluginConfig(options, pluginId),
+    });
   }
-  await doHook(pluginCtx, 'user:logout', { request });
+  await doHook(pluginCtx, 'user:logout', { request }, {
+    capabilityRuntime: pluginCtx.capabilityRuntime,
+  });
   const headers = new Headers();
   headers.set('Location', '/');
   for (const cookie of cookieHeaders) {

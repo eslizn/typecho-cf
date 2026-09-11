@@ -10,11 +10,13 @@ import type { AdminActionContext } from '@/lib/admin-auth';
 import { setOption, type SiteOptions } from '@/lib/options';
 import {
   allowlistConfigSettings,
+  findTokenLimitOverflow,
   isRecord,
   maskConfigDefinitions,
   maskConfigValues,
   parseConfigFormData,
   restoreConfigSecrets,
+  stripConfigRowIds,
   type ConfigField,
 } from '@/lib/config';
 import {
@@ -27,7 +29,7 @@ import {
 
 export class ThemeConfigurationError extends Error {
   constructor(
-    public readonly code: 'not_found' | 'invalid',
+    public readonly code: 'not_found' | 'invalid' | 'validation_failed',
     message: string,
     public readonly status: 400 | 404 = code === 'not_found' ? 404 : 400,
   ) {
@@ -91,11 +93,21 @@ export async function saveThemeConfiguration(
   if (!isRecord(submitted)) {
     throw new ThemeConfigurationError('invalid', '请提供配置数据');
   }
+  {
+    const overflow = findTokenLimitOverflow(fields, submitted);
+    if (overflow) {
+      throw new ThemeConfigurationError('validation_failed', auth.i18n.t(
+        'admin.config.tokenLimitReached',
+        { max: overflow.max },
+        `At most ${overflow.max} tokens are allowed.`,
+      ));
+    }
+  }
 
   const defaults = getThemeConfigDefaults(themeId);
   const previous = loadThemeConfig(auth.options, themeId);
   const sanitized = allowlistConfigSettings(fields, submitted, defaults);
-  const finalSettings = restoreConfigSecrets(fields, sanitized, previous);
+  const finalSettings = stripConfigRowIds(fields, restoreConfigSecrets(fields, sanitized, previous)) as Record<string, unknown>;
 
   await setOption(auth.db, `theme:${themeId}`, JSON.stringify(finalSettings));
 

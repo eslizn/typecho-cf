@@ -10,7 +10,12 @@
 import type { AstroIntegration } from 'astro';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { discoverDeclaredPackages } from './declared-packages';
+import { satisfies, valid, validRange } from 'semver';
+import {
+  discoverRuntimePackageDependencies,
+  type RuntimePackageDependency,
+} from './declared-packages';
+import type { PluginDependency, PluginDependencyIssue } from '../lib/plugin-dependencies';
 
 export interface DiscoveredPlugin {
   id: string;
@@ -19,6 +24,8 @@ export interface DiscoveredPlugin {
   manifest: Record<string, any>;
   entryFile: string;
   importPath: string;
+  dependencies: PluginDependency[];
+  issues: PluginDependencyIssue[];
 }
 
 /**
@@ -58,16 +65,120 @@ function findEntryFile(packageDir: string, manifest?: Record<string, any>): stri
 }
 
 export function discoverPlugins(rootDir: string): DiscoveredPlugin[] {
-  const plugins: DiscoveredPlugin[] = [];
-  for (const dependency of discoverDeclaredPackages(rootDir)) {
+  const { packages, dependencies } = discoverRuntimePackageDependencies(rootDir);
+  const pluginsByDirectory = new Map<string, DiscoveredPlugin>();
+  for (const packageInfo of packages) {
     const plugin = tryLoadPlugin(
-      dependency.packageName,
-      dependency.packageDir,
-      dependency.importBase,
+      packageInfo.packageName,
+      packageInfo.packageDir,
+      packageInfo.importBase,
     );
-    if (plugin) plugins.push(plugin);
+    if (plugin) pluginsByDirectory.set(packageInfo.packageDir, plugin);
   }
-  return plugins;
+
+  const pluginsById = new Map<string, DiscoveredPlugin[]>();
+  for (const plugin of pluginsByDirectory.values()) {
+    const list = pluginsById.get(plugin.id) ?? [];
+    list.push(plugin);
+    pluginsById.set(plugin.id, list);
+  }
+
+  for (const [id, plugins] of pluginsById) {
+    if (plugins.length <= 1) continue;
+    for (const plugin of plugins) {
+      plugin.issues.push({
+        pluginId: id,
+        code: 'duplicate-plugin-id',
+        message: `Plugin ID ${id} is provided by multiple packages: ${plugins.map(item => item.packageName).join(', ')}.`,
+      });
+    }
+  }
+
+  for (const plugin of pluginsByDirectory.values()) {
+    for (const dependency of dependencies) {
+      if (dependency.parent.packageDir !== plugin.packageDir) continue;
+      addPluginDependency(plugin, dependency, pluginsByDirectory);
+    }
+  }
+
+  // A duplicate ID is not enableable. Keep the first package in discovery
+  // order for deterministic imports and diagnostics, but never register two
+  // implementations under one runtime ID.
+  return [...pluginsById.values()].map(plugins => plugins[0]);
+}
+
+function addPluginDependency(
+  plugin: DiscoveredPlugin,
+  dependency: RuntimePackageDependency,
+  pluginsByDirectory: ReadonlyMap<string, DiscoveredPlugin>,
+): void {
+  const targetPlugin = dependency.target
+    ? pluginsByDirectory.get(dependency.target.packageDir)
+    : undefined;
+
+  if (!targetPlugin) {
+    if (dependency.kind === 'required' && looksLikePluginPackage(dependency.packageName)) {
+      plugin.issues.push({
+        pluginId: plugin.id,
+        dependencyId: dependency.packageName,
+        code: 'missing-required-dependency',
+        message: `Plugin ${plugin.id} requires missing plugin ${dependency.packageName}.`,
+      });
+    }
+    return;
+  }
+
+  plugin.dependencies.push({
+    pluginId: targetPlugin.id,
+    packageName: dependency.packageName,
+    range: dependency.specifier,
+    kind: dependency.kind,
+  });
+
+  const targetVersion = typeof dependency.target?.packageJson.version === 'string'
+    ? dependency.target.packageJson.version
+    : targetPlugin.manifest.version || '0.0.0';
+  const versionCheck = checkVersionRange(targetVersion, dependency.specifier);
+  if (dependency.kind !== 'required' || versionCheck === 'satisfied') return;
+  plugin.issues.push(versionCheck === 'unsatisfied'
+    ? {
+      pluginId: plugin.id,
+      dependencyId: targetPlugin.id,
+      code: 'unsatisfied-required-dependency',
+      message: `Plugin ${plugin.id} requires ${targetPlugin.id}@${dependency.specifier}, but ${targetVersion} is installed.`,
+    }
+    : {
+      pluginId: plugin.id,
+      dependencyId: targetPlugin.id,
+      code: 'unverifiable-dependency-range',
+      message: `Plugin ${plugin.id} depends on ${targetPlugin.id}@${dependency.specifier}; that specifier is not a semver range, so the installed ${targetVersion} was accepted without a version check.`,
+    });
+}
+
+function looksLikePluginPackage(packageName: string): boolean {
+  return /(?:^|[-_/])plugin(?:[-_/]|$)/i.test(packageName) || packageName.startsWith('typecho-');
+}
+
+type VersionCheck = 'satisfied' | 'unsatisfied' | 'unverifiable';
+
+/**
+ * Compare an installed version against a package.json dependency specifier.
+ *
+ * `file:` and `workspace:` specs point at the workspace copy and carry no
+ * comparable version. Non-semver specs (`latest`, `npm:` aliases, git URLs)
+ * cannot be evaluated offline either, so they are reported as unverifiable
+ * rather than silently blocking activation: the author still sees a
+ * diagnostic, but the admin may enable the plugin.
+ */
+function checkVersionRange(version: string, range: string): VersionCheck {
+  if (range.startsWith('file:') || range.startsWith('workspace:')) return 'satisfied';
+  const options = { includePrerelease: true } as const;
+  // `satisfies()` swallows an invalid range and returns false, so validity has
+  // to be checked separately to tell "does not match" from "cannot verify".
+  if (valid(version) === null) return 'unverifiable';
+  const parsedRange = validRange(range, options);
+  if (parsedRange === null) return 'unverifiable';
+  return satisfies(version, parsedRange, options) ? 'satisfied' : 'unsatisfied';
 }
 
 /**
@@ -134,6 +245,8 @@ function tryLoadPlugin(packageName: string, packageDir: string, importBase?: str
     importPath: importBase
       ? `${importBase}/${entryFile.replace(/\\/g, '/')}`
       : `${packageName}/${entryFile}`,
+    dependencies: [],
+    issues: [],
   };
 }
 
@@ -149,7 +262,11 @@ function tryLoadPlugin(packageName: string, packageDir: string, importBase?: str
 function buildRegistryCode(discoveredPlugins: DiscoveredPlugin[]): string {
   const registrations = discoveredPlugins.map((plugin) => {
     const manifest = JSON.stringify(plugin.manifest);
-    return `registerPlugin(${JSON.stringify(plugin.packageName)}, ${manifest});`;
+    const dependencyMetadata = JSON.stringify({
+      dependencies: plugin.dependencies,
+      issues: plugin.issues,
+    });
+    return `registerPlugin(${JSON.stringify(plugin.packageName)}, ${manifest}, ${dependencyMetadata});`;
   }).join('\n');
 
   const pluginEntries = discoveredPlugins.map((plugin) => {

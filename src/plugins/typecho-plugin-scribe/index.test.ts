@@ -12,6 +12,7 @@ function collectHooks() {
       hooks.set(point, list);
     },
     registerRouteResolver: () => {},
+    registerAdminPath: () => {},
     registerTranslations: () => {},
     registerScheduledTask: () => {},
     registerAsyncTask: () => {},

@@ -70,6 +70,7 @@ export async function loadSidebarData(
       cloneSidebarData(cached.data),
       db,
       siteUrl,
+      { capabilityRuntime: ctx.capabilityRuntime },
     );
   }
 
@@ -195,7 +196,14 @@ export async function loadSidebarData(
   };
 
   // Apply sidebar:data filter — plugins can add/modify sidebar widgets
-  return await applyFilterSafely(ctx, 'sidebar:data', cloneSidebarData(sidebarData), db, siteUrl);
+  return await applyFilterSafely(
+    ctx,
+    'sidebar:data',
+    cloneSidebarData(sidebarData),
+    db,
+    siteUrl,
+    { capabilityRuntime: ctx.capabilityRuntime },
+  );
 }
 
 /**

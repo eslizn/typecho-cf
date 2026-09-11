@@ -56,6 +56,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     // returning { rejected: 'reason' } in the filter result.
     const beforeResult = await applyFilter(pluginCtx, 'upload:before', { rejected: null as string | null }, {
       file, request, options, user: ctx.user,
+      capabilityRuntime: pluginCtx.capabilityRuntime,
     });
     if (beforeResult?.rejected) {
       return jsonError(403, String(beforeResult.rejected));
@@ -91,7 +92,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const cid = inserted[0]?.cid;
 
     // upload:after — post-upload notification.
-    await doHook(pluginCtx, 'upload:after', { ...result, cid }, { request, options, user: ctx.user, i18n: ctx.i18n });
+    await doHook(pluginCtx, 'upload:after', { ...result, cid }, {
+      request, options, user: ctx.user, i18n: ctx.i18n,
+      capabilityRuntime: pluginCtx.capabilityRuntime,
+    });
 
     return jsonOk([
       result.url,

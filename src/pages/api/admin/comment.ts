@@ -50,6 +50,7 @@ export const POST: APIRoute = async ({ request, url }) => {
   try {
     filtered = validateFilteredComment(baseline, await applyFilter(auth.pluginCtx, 'comment:beforeSave', candidate, {
       request, formData: form, db: auth.db, options: auth.options, isLoggedIn: true, editing: true, i18n: auth.i18n,
+      capabilityRuntime: auth.pluginCtx.capabilityRuntime,
     }));
   } catch (error) {
     if (error instanceof WriteFilterError) return new Response(error.message, { status: 400 });
@@ -64,6 +65,7 @@ export const POST: APIRoute = async ({ request, url }) => {
   }).where(eq(schema.comments.coid, coid));
   await doHook(auth.pluginCtx, 'comment:action', existing, {
     action: 'edit', oldStatus, newStatus: oldStatus, options: auth.options,
+    capabilityRuntime: auth.pluginCtx.capabilityRuntime,
   });
   await purgeCommentModerationCache(auth.db);
   return new Response(null, {

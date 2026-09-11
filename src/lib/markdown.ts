@@ -166,13 +166,17 @@ export async function renderCommentTextFiltered(
   const sanitizeOptions = buildCommentSanitizeOptions(options.htmlTagAllowed, !!options.markdown);
   let rendered: string;
   if (options.markdown) {
-    const filteredSource = await applyFilterSafely(ctx, 'comment:markdown', source);
+    const filteredSource = await applyFilterSafely(ctx, 'comment:markdown', source, {
+      capabilityRuntime: ctx.capabilityRuntime,
+    });
     if (typeof filteredSource === 'string') source = filteredSource;
     rendered = sanitizeHtml(marked.parse(source, { async: false }) as string, sanitizeOptions);
   } else {
     rendered = autop(sanitizeHtml(source, sanitizeOptions));
   }
-  const filteredRendered = await applyFilterSafely(ctx, 'comment:rendered', rendered);
+  const filteredRendered = await applyFilterSafely(ctx, 'comment:rendered', rendered, {
+    capabilityRuntime: ctx.capabilityRuntime,
+  });
   return typeof filteredRendered === 'string' ? filteredRendered : rendered;
 }
 
@@ -189,14 +193,18 @@ export async function renderMarkdownFiltered(ctx: HookContext, text: string): Pr
   content = content.replace(MORE_COMMENT_RE, '');
 
   // Apply content:markdown filter — plugins can modify the raw markdown
-  const filteredContent = await applyFilter(ctx, 'content:markdown', content);
+  const filteredContent = await applyFilter(ctx, 'content:markdown', content, {
+    capabilityRuntime: ctx.capabilityRuntime,
+  });
   if (typeof filteredContent === 'string') content = filteredContent;
 
   const html = marked.parse(content, { async: false }) as string;
   let sanitized = sanitizeHtml(html, SANITIZE_OPTIONS);
 
   // Apply content:rendered filter — plugins can modify the rendered HTML
-  const filteredRendered = await applyFilter(ctx, 'content:rendered', sanitized);
+  const filteredRendered = await applyFilter(ctx, 'content:rendered', sanitized, {
+    capabilityRuntime: ctx.capabilityRuntime,
+  });
   if (typeof filteredRendered === 'string') sanitized = filteredRendered;
 
   return sanitized;

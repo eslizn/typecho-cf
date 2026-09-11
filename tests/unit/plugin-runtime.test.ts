@@ -13,6 +13,8 @@ import {
   setActivatedPlugins,
   registerPluginInit,
   registerPluginLoaders,
+  registerPlugin,
+  isPluginAdminPath,
   isPluginRoute,
   refreshPluginRoutes,
   getPluginInitFailures,
@@ -23,6 +25,7 @@ import {
   markPluginRouteResolverReady,
   registerPluginRouteResolver,
 } from '@/lib/plugin-routes';
+import { createCapabilityRuntimeContext, resolveCapability } from '@/lib/capability';
 
 function mockCtx(): HookContext {
   return { activatedPlugins: new Set<string>() };
@@ -48,6 +51,7 @@ describe('canonical Hook point names', () => {
 
   it('deduplicates a handler registered through canonical and legacy names', async () => {
     const pluginId = 'p-canonical-dedupe';
+    registerPlugin(pluginId, { id: pluginId, name: pluginId });
     const ctx = mockCtx();
     await setActivatedPlugins(ctx, [pluginId]);
     const handler = vi.fn();
@@ -65,6 +69,7 @@ describe('addHook deduplication (G6-1)', () => {
   let ctx: HookContext;
   beforeEach(async () => {
     ctx = mockCtx();
+    registerPlugin('p-dedupe', { id: 'p-dedupe', name: 'p-dedupe' });
     await setActivatedPlugins(ctx, ['p-dedupe']);
   });
 
@@ -182,6 +187,55 @@ describe('lazy plugin init (G6-3)', () => {
     expect(inactiveLoader).not.toHaveBeenCalled();
   });
 
+  it('tears down owner capabilities on deactivation and reinitializes on reactivation', async () => {
+    const pluginId = 'capability-lifecycle-owner';
+    const init = vi.fn(({ registerCapability }: any) => {
+      registerCapability({
+        capability: 'lifecycle.service',
+        version: 1,
+        factory: () => ({ generation: init.mock.calls.length }),
+      });
+    });
+    registerPlugin(pluginId, { id: pluginId, name: pluginId });
+    registerPluginInit({ [pluginId]: init }, { addHook, HookPoints: {} as any });
+    const ctx = mockCtx();
+
+    await setActivatedPlugins(ctx, [pluginId]);
+    const firstRuntime = createCapabilityRuntimeContext({
+      request: new Request('https://example.com/'),
+      db: {} as any,
+      activatedPlugins: new Set([pluginId]),
+      activationGeneration: ctx.activationGeneration,
+    });
+    expect(resolveCapability(firstRuntime, { capability: 'lifecycle.service' })).toMatchObject({
+      ok: true,
+      value: { generation: 1 },
+    });
+
+    await setActivatedPlugins(ctx, []);
+    const inactiveRuntime = createCapabilityRuntimeContext({
+      request: new Request('https://example.com/'),
+      db: {} as any,
+      activatedPlugins: new Set(),
+      activationGeneration: ctx.activationGeneration,
+    });
+    expect(resolveCapability(inactiveRuntime, { capability: 'lifecycle.service' }))
+      .toMatchObject({ ok: false, reason: 'unavailable' });
+
+    await setActivatedPlugins(ctx, [pluginId]);
+    expect(init).toHaveBeenCalledTimes(2);
+    const secondRuntime = createCapabilityRuntimeContext({
+      request: new Request('https://example.com/'),
+      db: {} as any,
+      activatedPlugins: new Set([pluginId]),
+      activationGeneration: ctx.activationGeneration,
+    });
+    expect(resolveCapability(secondRuntime, { capability: 'lifecycle.service' })).toMatchObject({
+      ok: true,
+      value: { generation: 2 },
+    });
+  });
+
   it('skips request route handlers for request-local resolver failures', async () => {
     const failedHandler = vi.fn((value: string) => `${value}:failed`);
     const healthyHandler = vi.fn((value: string) => `${value}:healthy`);
@@ -265,5 +319,39 @@ describe('plugin route resolver lifecycle', () => {
 
     resetPluginInitState();
     expect(isPluginRoute('/reset-route')).toBe(false);
+  });
+
+  it('scopes admin path claims to the owning plugin lifecycle', async () => {
+    registerPluginInit({
+      'admin-path-owner': ({ registerAdminPath }) => {
+        registerAdminPath('/api/admin/owned');
+      },
+      'admin-path-failed': ({ registerAdminPath }) => {
+        registerAdminPath('/api/admin/failed');
+        throw new Error('admin path init failed');
+      },
+    }, { addHook, HookPoints: {} as any });
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const ctx = mockCtx();
+
+    await setActivatedPlugins(ctx, ['admin-path-owner']);
+    expect(isPluginAdminPath('/api/admin/owned')).toBe(true);
+
+    // A failed owner never keeps its claim, and other owners are untouched.
+    await setActivatedPlugins(ctx, ['admin-path-owner', 'admin-path-failed']);
+    expect(isPluginAdminPath('/api/admin/failed')).toBe(false);
+    expect(isPluginAdminPath('/api/admin/owned')).toBe(true);
+
+    // Disabling the owner releases its claim...
+    await setActivatedPlugins(ctx, ['admin-path-failed']);
+    expect(isPluginAdminPath('/api/admin/owned')).toBe(false);
+
+    // ...and re-enabling re-registers it before the registry is reset.
+    await setActivatedPlugins(ctx, ['admin-path-owner']);
+    expect(isPluginAdminPath('/api/admin/owned')).toBe(true);
+    resetPluginInitState();
+    expect(isPluginAdminPath('/api/admin/owned')).toBe(false);
+    errorSpy.mockRestore();
   });
 });

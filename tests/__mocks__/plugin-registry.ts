@@ -15,6 +15,7 @@
 import { registerPluginLoaders, addHook, HookPoints } from '@/lib/plugin';
 
 registerPluginLoaders({
+  'typecho-plugin-ai': () => import('@/plugins/typecho-plugin-ai/index').then((module) => module.default),
   'typecho-plugin-antispam': () => import('@/plugins/typecho-plugin-antispam/index').then((module) => module.default),
   'typecho-plugin-scribe': () => import('@/plugins/typecho-plugin-scribe/index').then((module) => module.default),
   'typecho-plugin-turnstile': () => import('@/plugins/typecho-plugin-turnstile/index').then((module) => module.default),

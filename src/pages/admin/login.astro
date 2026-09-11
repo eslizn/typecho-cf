@@ -23,8 +23,8 @@ try {
   }
 
   [loginHeadHtml, loginFormHtml] = await Promise.all([
-    applyFilterSafely(ctx, 'admin:login:head', '', { options, i18n: ctx.i18n }),
-    applyFilterSafely(ctx, 'admin:login:form', '', { options, i18n: ctx.i18n }),
+    applyFilterSafely(ctx, 'admin:login:head', '', { options, i18n: ctx.i18n, capabilityRuntime: ctx.capabilityRuntime }),
+    applyFilterSafely(ctx, 'admin:login:form', '', { options, i18n: ctx.i18n, capabilityRuntime: ctx.capabilityRuntime }),
   ]);
 } catch {
   // DB not initialized - redirect to install

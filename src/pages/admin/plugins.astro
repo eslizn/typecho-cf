@@ -28,19 +28,23 @@ if (Astro.request.method === 'POST') {
     const pluginId = formData.get('plugin') as string;
 
     if (pluginId && (action === 'activate' || action === 'deactivate')) {
-      const { pluginExists, serializeActivatedPlugins, setActivatedPlugins, getPluginConfigDefaults } = await import('@/lib/plugin');
-      const { setOption, deleteOption } = await import('@/lib/options');
+      const { pluginExists, setActivatedPlugins, getPluginConfigDefaults, getPluginActivationActionPlan } = await import('@/lib/plugin');
+      const { setOption } = await import('@/lib/options');
 
       if (!pluginExists(pluginId)) {
         message = ctx.i18n.t('admin.plugin.notFound', { id: pluginId }, `Plugin "${pluginId}" does not exist`);
         messageType = 'error';
       } else {
-        // Get current activated list
+        // Use the same dependency-aware action planner as the JSON API.
         const currentIds = parseActivatedPlugins(options.activatedPlugins as string | undefined);
-        const idSet = new Set(currentIds);
-
-        if (action === 'activate') {
-          idSet.add(pluginId);
+        const activationPlan = getPluginActivationActionPlan(currentIds, pluginId, action);
+        if (!activationPlan.ok) {
+          message = activationPlan.diagnostics
+            .filter(issue => issue.pluginId === pluginId || issue.dependencyId === pluginId)
+            .map(issue => issue.message)
+            .join(' ') || ctx.i18n.t('admin.plugin.dependenciesUnsatisfied', {}, 'Plugin dependencies are not satisfied.');
+          messageType = 'error';
+        } else if (action === 'activate') {
 
           // Save default config values on activation (like PHP Typecho's Edit::activate)
           if (pluginHasConfig(pluginId)) {
@@ -58,30 +62,30 @@ if (Astro.request.method === 'POST') {
           message = ctx.i18n.t('admin.plugin.activated', { id: pluginId }, `Plugin "${pluginId}" enabled`);
           messageType = 'success';
         } else {
-          idSet.delete(pluginId);
-
-          // Delete plugin config on deactivation (like PHP Typecho's Edit::deactivate)
-          await deleteOption(db, `plugin:${pluginId}`);
-          delete (options as any)[`plugin:${pluginId}`];
-
-          message = ctx.i18n.t('admin.plugin.deactivated', { id: pluginId }, `Plugin "${pluginId}" disabled`);
+          const cascade = activationPlan.cascadedDependents.length > 0
+            ? ` (${ctx.i18n.t('admin.plugin.dependentsDisabled', { ids: activationPlan.cascadedDependents.join(', ') }, `also disabled: ${activationPlan.cascadedDependents.join(', ')}`)})`
+            : '';
+          message = ctx.i18n.t('admin.plugin.deactivated', { id: pluginId }, `Plugin "${pluginId}" disabled`) + cascade;
           messageType = 'success';
         }
 
-        // Save to DB
-        const newIds = Array.from(idSet);
-        await setActivatedPlugins(ctx, newIds);
-        const serialized = JSON.stringify(newIds);
-        await setOption(db, 'activatedPlugins', serialized);
-        (options as any).activatedPlugins = serialized;
-        // The current response must observe the new active catalog set too;
-        // otherwise a just-deactivated plugin could still translate this
-        // page, while a just-activated plugin would not be visible until the
-        // next request.
-        const runtime = createRequestI18n(options.lang, Astro.request, ctx.activatedPlugins);
-        ctx.i18n = runtime.i18n;
-        ctx.resolvedLocale = runtime.resolvedLocale;
-        ctx.autoLocale = runtime.autoLocale;
+        if (activationPlan.ok) {
+          // Persist the corrected effective list. Disabling a plugin keeps
+          // its configuration so a later re-enable can restore it.
+          const newIds = activationPlan.effective;
+          await setActivatedPlugins(ctx, newIds);
+          const serialized = JSON.stringify(newIds);
+          await setOption(db, 'activatedPlugins', serialized);
+          (options as any).activatedPlugins = serialized;
+          // The current response must observe the new active catalog set too;
+          // otherwise a just-deactivated plugin could still translate this
+          // page, while a just-activated plugin would not be visible until the
+          // next request.
+          const runtime = createRequestI18n(options.lang, Astro.request, ctx.activatedPlugins);
+          ctx.i18n = runtime.i18n;
+          ctx.resolvedLocale = runtime.resolvedLocale;
+          ctx.autoLocale = runtime.autoLocale;
+        }
       }
     }
   } catch (e) {
@@ -163,8 +167,18 @@ const pluginDescription = (plugin: typeof plugins[number]): string => plugin.isA
                       )}
                     </strong>
                     {plugin.isActive && (
-                      <span class="admin-badge admin-badge--active">
+                      <span class="admin-badge admin-badge--active admin-badge--spaced">
                         {ctx.i18n.t('admin.status.enabled', {}, 'Enabled')}
+                      </span>
+                    )}
+                    {plugin.status === 'blocked' && (
+                      <span class="admin-badge admin-badge--warning admin-badge--spaced">
+                        {ctx.i18n.t('admin.plugin.blocked', {}, 'Blocked')}
+                      </span>
+                    )}
+                    {plugin.status === 'initialization-failed' && (
+                      <span class="admin-badge admin-badge--warning admin-badge--spaced">
+                        {ctx.i18n.t('admin.plugin.initializationFailedShort', {}, 'Initialization failed')}
                       </span>
                     )}
                     <br />
@@ -185,6 +199,25 @@ const pluginDescription = (plugin: typeof plugins[number]): string => plugin.isA
                     <span class="description">
                       {pluginDescription(plugin) || ctx.i18n.t('admin.status.noDescription', {}, 'No description')}
                     </span>
+                    {plugin.status === 'blocked' && (
+                      <div class="admin-meta">
+                        {(plugin.dependencyIssues || []).map(issue => (
+                          <div>{issue.message}</div>
+                        ))}
+                        {(plugin.dependencyIssues || []).length === 0 && (
+                          <div>{ctx.i18n.t('admin.plugin.blockedDescription', {}, 'A required dependency is unavailable or failed to initialize.')}</div>
+                        )}
+                      </div>
+                    )}
+                    {plugin.status !== 'blocked' && (plugin.dependencyIssues || []).some(issue => issue.code === 'unverifiable-dependency-range') && (
+                      <div class="admin-meta">
+                        {(plugin.dependencyIssues || [])
+                          .filter(issue => issue.code === 'unverifiable-dependency-range')
+                          .map(issue => (
+                            <div>{issue.message}</div>
+                          ))}
+                      </div>
+                    )}
                   </td>
                   <td>
                     {plugin.manifest.version || '-'}

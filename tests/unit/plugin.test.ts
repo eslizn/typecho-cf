@@ -75,4 +75,52 @@ describe('parsePluginConfigFormData()', () => {
       mounts: [{ mount: 'media' }],
     });
   });
+
+  it('parses nested repeatables and option checkboxes recursively', () => {
+    const configDef: Record<string, PluginConfigField> = {
+      providers: {
+        type: 'repeatable',
+        label: 'Providers',
+        itemFields: {
+          name: { type: 'text', label: 'Name' },
+          models: {
+            type: 'repeatable',
+            label: 'Models',
+            itemFields: {
+              model: { type: 'text', label: 'Model' },
+              capabilities: {
+                type: 'checkbox',
+                label: 'Capabilities',
+                options: { chat: 'Chat', embed: 'Embeddings' },
+              },
+            },
+          },
+        },
+      },
+    };
+    const formData = new FormData();
+    formData.set('providers[0][name]', 'primary');
+    formData.set('providers[0][models][0][model]', 'gpt-test');
+    formData.append('providers[0][models][0][capabilities]', 'chat');
+    formData.append('providers[0][models][0][capabilities]', 'embed');
+    formData.set('providers[0][models][1][model]', 'fallback');
+    formData.set('providers[1][name]', 'secondary');
+    formData.set('providers[1][models][0][model]', 'other');
+
+    expect(parsePluginConfigFormData(configDef, formData)).toEqual({
+      providers: [
+        {
+          name: 'primary',
+          models: [
+            { model: 'gpt-test', capabilities: ['chat', 'embed'] },
+            { model: 'fallback', capabilities: [] },
+          ],
+        },
+        {
+          name: 'secondary',
+          models: [{ model: 'other', capabilities: [] }],
+        },
+      ],
+    });
+  });
 });

@@ -111,10 +111,10 @@ const isMarkdown = !post || (post.text && post.text.indexOf('<!--markdown-->') >
 
 // Build preview URL using permalink pattern
 const previewUrl = isEdit && post ? buildPermalink(post, urls.siteUrl, options.permalinkPattern) : '';
-const writePostHookExtra = { options, post, user, isEdit, i18n: ctx.i18n };
+const writePostHookExtra = { options, post, user, isEdit, i18n: ctx.i18n, capabilityRuntime: ctx.capabilityRuntime };
 const writePostOptionHtml = await applyFilterSafely(ctx, 'admin:writePost:option', '', writePostHookExtra);
 const writePostAdvanceOptionHtml = await applyFilterSafely(ctx, 'admin:writePost:advanceOption', '', writePostHookExtra);
-const writePostBottomHtml = await applyFilterSafely(ctx, 'admin:writePost:bottom', '', { options, post, user, isEdit, i18n: ctx.i18n });
+const writePostBottomHtml = await applyFilterSafely(ctx, 'admin:writePost:bottom', '', writePostHookExtra);
 const t = ctx.i18n.t.bind(ctx.i18n);
 const tPlural = ctx.i18n.tPlural.bind(ctx.i18n);
 const formatAttachmentSize = (size: number): string => {

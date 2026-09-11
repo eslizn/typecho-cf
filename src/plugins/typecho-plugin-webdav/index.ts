@@ -1,4 +1,4 @@
-import { hasPermission, registerPluginAdminPath, safeJsonForScript } from 'typecho/plugin-sdk';
+import { hasPermission, safeJsonForScript } from 'typecho/plugin-sdk';
 import type {
   I18n,
   PluginInitContext,
@@ -398,11 +398,11 @@ LD("");
 
 // --- Default Export (Plugin Entry) ---
 
-export default function init({ addHook, pluginId, registerTranslations, registerRouteResolver }: PluginInitContext): void {
+export default function init({ addHook, pluginId, registerTranslations, registerRouteResolver, registerAdminPath }: PluginInitContext): void {
   registerTranslations?.('en', en);
   registerTranslations?.('zh-CN', zhCN);
 
-  registerPluginAdminPath(ADMIN_API_ROUTE);
+  registerAdminPath(ADMIN_API_ROUTE);
   registerRouteResolver(({ config }: PluginRouteResolverContext) => resolveWebDavRouteClaims(config));
 
   addHook(

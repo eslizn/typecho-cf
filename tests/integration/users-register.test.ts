@@ -19,7 +19,7 @@ vi.mock('@/db', async () => {
 });
 
 import { POST } from '@/pages/api/users/register';
-import { addHook, removePluginHooks } from '@/lib/plugin';
+import { addHook, registerPlugin, removePluginHooks } from '@/lib/plugin';
 
 const SITE_URL = 'https://example.com';
 
@@ -107,6 +107,7 @@ describe('users/register endpoint (G1-5)', () => {
 
   it('runs register before/after hooks without exposing the password', async () => {
     const pluginId = 'register-hooks-test';
+    registerPlugin(pluginId, { id: pluginId, name: pluginId });
     const events: string[] = [];
     let beforeData: Record<string, unknown> | undefined;
     let afterUser: Record<string, unknown> | undefined;

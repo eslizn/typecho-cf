@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro';
 import { isAdminActionResponse, jsonAdminActionError, requireAdminAction } from '@/lib/admin-auth';
-import { applyFilter, parseActivatedPlugins } from '@/lib/plugin';
+import { applyFilter } from '@/lib/plugin';
 import { hasPermission } from '@/lib/auth';
 import { withTimeout } from '@/lib/timeout';
 import { REQUEST_BODY_LIMITS } from '@/lib/constants';
@@ -46,8 +46,7 @@ export const POST: APIRoute = async ({ request }) => {
   }
 
   const pluginCtx = auth.pluginCtx;
-  const activatedIds = parseActivatedPlugins(auth.options.activatedPlugins as string | undefined);
-  if (!activatedIds.includes(pluginId)) {
+  if (!auth.pluginCtx.activatedPlugins.has(pluginId)) {
     return jsonError(403, i18nMessage('admin.plugin.inactive', 'The plugin is not enabled.'), undefined, auth.i18n);
   }
 
@@ -62,6 +61,7 @@ export const POST: APIRoute = async ({ request }) => {
       payload: body.payload || {},
       user: auth.user,
       i18n: auth.i18n,
+      capabilityRuntime: auth.pluginCtx.capabilityRuntime,
     });
     if (typeof declared === 'string' && declared) requiredGroup = declared;
   } catch {
@@ -81,6 +81,7 @@ export const POST: APIRoute = async ({ request }) => {
         user: auth.user,
         request,
         i18n: auth.i18n,
+        capabilityRuntime: auth.pluginCtx.capabilityRuntime,
       }),
       PLUGIN_ACTION_TIMEOUT_MS,
       auth.i18n.t('admin.plugin.actionTimeout', {}, 'The plugin action timed out. Try again later.'),

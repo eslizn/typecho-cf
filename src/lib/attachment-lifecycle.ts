@@ -81,6 +81,7 @@ export async function deleteAttachments(
       request: context.request,
       options: context.options,
       user: context.actor.user,
+      capabilityRuntime: context.pluginCtx.capabilityRuntime,
     });
   }
 

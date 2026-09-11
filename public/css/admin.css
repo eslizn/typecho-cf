@@ -1137,3 +1137,35 @@ div.token-input-dropdown ul li.token-input-selected-dropdown-item { background-c
 
 /* Hide visually and from screenreaders, but maintain layout */
 .invisible { visibility: hidden; }
+
+/* ── Configuration forms (plugins / themes) ──────────────────────────── */
+
+.typecho-repeatable { margin: 0 0 18px; }
+.typecho-repeatable-items > .typecho-repeatable-item { margin: 0 0 14px; }
+.typecho-repeatable-item { box-sizing: border-box; padding: 14px 16px 6px; border: 1px solid var(--admin-border-soft); border-radius: var(--admin-radius); background: var(--admin-surface); }
+.typecho-repeatable-header { display: flex; align-items: center; gap: 10px; padding: 0 6px; color: var(--admin-text); font-weight: 700; }
+.typecho-repeatable-toggle { display: inline-flex; align-items: center; gap: 6px; padding: 0; border: 0; background: none; color: inherit; font: inherit; font-weight: 700; cursor: pointer; }
+.typecho-repeatable-toggle::before { content: '\25BE'; color: var(--admin-muted); font-size: 11px; transition: transform .15s ease; }
+.typecho-repeatable-item.is-collapsed .typecho-repeatable-toggle::before { transform: rotate(-90deg); }
+.typecho-repeatable-item.is-collapsed > .typecho-repeatable-body { display: none; }
+.typecho-repeatable-summary { flex: 1; min-width: 0; overflow: hidden; color: var(--admin-muted); font-size: .92857em; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+.typecho-repeatable-badges { display: inline-flex; flex: none; gap: 6px; align-items: center; }
+.typecho-repeatable-remove { flex: none; }
+.typecho-repeatable-body { margin-top: 12px; }
+.typecho-repeatable-add { margin: 0 0 16px; }
+/* Single (non-repeatable) field groups stay flat like the rest of the form;
+   the bordered card treatment is reserved for repeatable rows. */
+.typecho-config-group { margin: 0 0 22px; padding: 0; border: 0; background: none; }
+.typecho-config-group > legend { margin: 0 0 12px; padding: 0; color: var(--admin-text); font-size: 1em; font-weight: 700; }
+.typecho-repeatable-field { margin-bottom: 10px; }
+
+.typecho-token-list { margin: 0 0 8px; }
+.typecho-token-items { display: flex; flex-direction: column; gap: 8px; margin: 0 0 10px; }
+.typecho-token-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--admin-border-soft); border-radius: var(--admin-radius); background: var(--admin-bg); }
+.typecho-token-value { flex: 1; min-width: 0; color: var(--admin-text); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .92857em; word-break: break-all; }
+
+.typecho-token-actions { display: inline-flex; flex: none; gap: 6px; }
+.typecho-token-empty { margin: 0 0 10px; color: var(--admin-muted); }
+
+/* Status badges that trail a name or title (plugin list etc.). */
+.admin-badge--spaced { margin-left: 6px; }

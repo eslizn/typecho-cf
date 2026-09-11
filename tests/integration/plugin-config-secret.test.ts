@@ -40,6 +40,7 @@ vi.mock('@/lib/plugin', async () => {
               internal: { type: 'hidden', label: 'Internal', default: 'hidden-default' },
             },
           },
+          accessTokens: { type: 'tokens', label: 'Access tokens', default: [] },
         },
       },
     } : undefined,
@@ -49,7 +50,7 @@ vi.mock('@/lib/plugin', async () => {
       try { return JSON.parse(options['plugin:plugin-secret-fixture'] || '{}'); }
       catch { return {}; }
     },
-    getPluginConfigDefaults: () => ({ token: 'manifest-secret', public: '', credentials: [] }),
+    getPluginConfigDefaults: () => ({ token: 'manifest-secret', public: '', credentials: [], accessTokens: [] }),
     applyFilter: async (_ctx: any, _hook: string, value: any) => value,
   };
 });
@@ -252,6 +253,115 @@ describe('plugin-config secret masking (G3-2)', () => {
       { provider: 'second', password: 'second-password', internal: 'second-hidden' },
       { provider: 'first', password: 'first-password', internal: 'first-hidden' },
     ]);
+  });
+
+  it('persists the tokens the form submitted and drops rows without a value', async () => {
+    await setUp({
+      token: 'top-secret',
+      public: 'visible',
+      credentials: [],
+      accessTokens: [{ id: 't1', token: 'kept-token-0123456789' }],
+    });
+    const cookie = await adminCookie();
+    const csrf = await csrfToken();
+    const form = new URLSearchParams({
+      _: csrf,
+      plugin: 'plugin-secret-fixture',
+      token: '__PLUGIN_CONFIG_SECRET__',
+      public: 'visible',
+      'accessTokens[0][id]': 't1',
+      'accessTokens[0][token]': 'kept-token-0123456789',
+      'accessTokens[1][id]': 't2',
+      'accessTokens[1][token]': '',
+      'accessTokens[2][id]': 't3',
+      'accessTokens[2][token]': 'client-generated-token-0123456789',
+      'credentials[0][provider]': 'r2',
+      'credentials[0][password]': '__PLUGIN_CONFIG_SECRET__',
+      'credentials[0][internal]': '__PLUGIN_CONFIG_SECRET__',
+    });
+
+    const response = await POST({
+      request: new Request(`${SITE}/api/admin/plugin-config`, {
+        method: 'POST',
+        headers: { cookie, origin: SITE, 'content-type': 'application/x-www-form-urlencoded' },
+        body: form,
+      }),
+      locals: {},
+    } as any);
+
+    expect(response.status).toBe(303);
+    const stored = await testDb.query.options.findFirst({ where: (o, { eq }) => eq(o.name, 'plugin:plugin-secret-fixture') });
+    const tokens = JSON.parse(stored!.value!).accessTokens as Array<{ id: string; token: string }>;
+    expect(tokens).toEqual([
+      { id: 't1', token: 'kept-token-0123456789' },
+      { id: 't3', token: 'client-generated-token-0123456789' },
+    ]);
+  });
+
+  it('rejects a token list over the cap instead of saving a trimmed one', async () => {
+    await setUp({ token: 'top-secret', public: 'visible', credentials: [], accessTokens: [] });
+    const cookie = await adminCookie();
+    const csrf = await csrfToken();
+    const form = new URLSearchParams({
+      _: csrf,
+      plugin: 'plugin-secret-fixture',
+      token: '__PLUGIN_CONFIG_SECRET__',
+      public: 'visible',
+      'credentials[0][provider]': 'r2',
+      'credentials[0][password]': '__PLUGIN_CONFIG_SECRET__',
+      'credentials[0][internal]': '__PLUGIN_CONFIG_SECRET__',
+    });
+    for (let index = 0; index < 21; index += 1) {
+      form.set(`accessTokens[${index}][id]`, `t${index}`);
+      form.set(`accessTokens[${index}][token]`, `token-${index}-0123456789`);
+    }
+
+    const response = await POST({
+      request: new Request(`${SITE}/api/admin/plugin-config`, {
+        method: 'POST',
+        headers: { cookie, origin: SITE, 'content-type': 'application/x-www-form-urlencoded' },
+        body: form,
+      }),
+      locals: {},
+    } as any);
+
+    expect(response.status).toBe(400);
+    expect(await response.text()).toContain('20');
+    const stored = await testDb.query.options.findFirst({ where: (o, { eq }) => eq(o.name, 'plugin:plugin-secret-fixture') });
+    expect(JSON.parse(stored!.value!).accessTokens).toEqual([]);
+  });
+
+  it('stores an empty token list when every row is deleted', async () => {
+    await setUp({
+      token: 'top-secret',
+      public: 'visible',
+      credentials: [],
+      accessTokens: [{ id: 't1', token: 'kept-token-0123456789' }],
+    });
+    const cookie = await adminCookie();
+    const csrf = await csrfToken();
+    const form = new URLSearchParams({
+      _: csrf,
+      plugin: 'plugin-secret-fixture',
+      token: '__PLUGIN_CONFIG_SECRET__',
+      public: 'visible',
+      'credentials[0][provider]': 'r2',
+      'credentials[0][password]': '__PLUGIN_CONFIG_SECRET__',
+      'credentials[0][internal]': '__PLUGIN_CONFIG_SECRET__',
+    });
+
+    const response = await POST({
+      request: new Request(`${SITE}/api/admin/plugin-config`, {
+        method: 'POST',
+        headers: { cookie, origin: SITE, 'content-type': 'application/x-www-form-urlencoded' },
+        body: form,
+      }),
+      locals: {},
+    } as any);
+
+    expect(response.status).toBe(303);
+    const stored = await testDb.query.options.findFirst({ where: (o, { eq }) => eq(o.name, 'plugin:plugin-secret-fixture') });
+    expect(JSON.parse(stored!.value!).accessTokens).toEqual([]);
   });
 
   it('form submissions use the same save path and redirect without exposing secrets', async () => {

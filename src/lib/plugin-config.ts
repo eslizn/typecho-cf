@@ -15,6 +15,7 @@ import {
 import { withTimeout } from '@/lib/timeout';
 import {
   allowlistConfigSettings as allowlistSettings,
+  findTokenLimitOverflow,
   isRecord,
   maskConfigDefinition as maskFieldDefinition,
   maskConfigDefinitions as maskedDefinitions,
@@ -23,6 +24,7 @@ import {
   restoreConfigSecrets as restoreSecrets,
   restoreConfigValue as restoreValue,
   sanitizeConfigValue as sanitizeValue,
+  stripConfigRowIds,
 } from '@/lib/config';
 
 export { CONFIG_SECRET_PLACEHOLDER as PLUGIN_CONFIG_SECRET_PLACEHOLDER } from '@/lib/config';
@@ -57,6 +59,22 @@ export interface PluginConfigurationSaveResult {
   message: string;
   plugin: string;
   settings: Record<string, unknown>;
+}
+
+function assertTokenLimits(
+  fields: Record<string, PluginConfigField>,
+  submitted: Record<string, unknown>,
+  auth: AdminActionContext,
+): void {
+  const overflow = findTokenLimitOverflow(fields, submitted);
+  if (!overflow) return;
+  // `validation_failed` is the code whose message the API surfaces to the
+  // admin; `invalid` is replaced by a generic notice.
+  throw new PluginConfigurationError('validation_failed', auth.i18n.t(
+    'admin.config.tokenLimitReached',
+    { max: overflow.max },
+    `At most ${overflow.max} tokens are allowed.`,
+  ));
 }
 
 function getDefinition(pluginId: string) {
@@ -98,6 +116,7 @@ export async function savePluginConfiguration(
   if (!isRecord(submitted)) {
     throw new PluginConfigurationError('invalid', '请提供配置数据');
   }
+  assertTokenLimits(fields, submitted, auth);
 
   const defaults = getPluginConfigDefaults(pluginId);
   const previous = loadPluginConfig(auth.options, pluginId);
@@ -123,6 +142,7 @@ export async function savePluginConfiguration(
         user: auth.user,
         request: input.request,
         i18n: auth.i18n,
+        capabilityRuntime: auth.pluginCtx.capabilityRuntime,
       }),
       PLUGIN_CONFIG_TIMEOUT_MS,
       auth.i18n.t(
@@ -147,7 +167,7 @@ export async function savePluginConfiguration(
 
   const validatedInput = isRecord(validation.settings) ? validation.settings : restored;
   const finalAllowed = allowlistSettings(fields, validatedInput, restored);
-  const finalSettings = restoreSecrets(fields, finalAllowed, previous);
+  const finalSettings = stripConfigRowIds(fields, restoreSecrets(fields, finalAllowed, previous)) as Record<string, unknown>;
   await setOption(auth.db, `plugin:${pluginId}`, JSON.stringify(finalSettings));
 
   return {

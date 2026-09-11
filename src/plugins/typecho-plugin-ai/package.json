@@ -1,0 +1,120 @@
+{
+  "name": "typecho-plugin-ai",
+  "version": "1.0.0",
+  "description": "Provide OpenAI-compatible AI capabilities to Typecho-CF plugins.",
+  "keywords": ["typecho", "plugin", "ai", "openai", "multimodal", "tools"],
+  "author": "eslizn",
+  "license": "MIT",
+  "type": "module",
+  "main": "index.ts",
+  "typecho": {
+    "plugin": {
+      "id": "typecho-plugin-ai",
+      "name": "AI",
+      "description": "为 Typecho-CF 提供基于 OpenAI-compatible 接口的多 Provider AI 能力和可选 HTTP 兼容入口",
+      "author": "eslizn",
+      "authorUrl": "https://eslizn.com",
+      "version": "1.0.0",
+      "homepage": "https://github.com/eslizn/typecho-cf/tree/master/src/plugins/typecho-plugin-ai",
+      "license": "MIT",
+      "tags": ["ai", "openai", "multimodal", "tools", "capability"],
+      "config": {
+        "http": {
+          "type": "object",
+          "label": "HTTP compatibility endpoint",
+          "itemFields": {
+            "enabled": {
+              "type": "select",
+              "label": "Enabled",
+              "default": "false",
+              "options": { "true": "Enabled", "false": "Disabled" }
+            },
+            "basePath": {
+              "type": "text",
+              "label": "Base path",
+              "default": "/ai",
+              "description": "Site-relative path. The endpoint is exposed below this path under /v1."
+            },
+            "tokens": {
+              "type": "tokens",
+              "label": "Access tokens",
+              "default": [],
+              "description": "Bearer tokens allowed to call the endpoint. Delete every token to make the endpoint unreachable."
+            }
+          }
+        },
+        "providers": {
+          "type": "repeatable",
+          "label": "Providers",
+          "default": [],
+          "description": "Configure one or more OpenAI-compatible upstream providers and their models.",
+          "collapsible": true,
+          "summaryFields": ["name", "baseUrl"],
+          "itemFields": {
+            "name": { "type": "text", "label": "Provider name", "default": "" },
+            "baseUrl": {
+              "type": "text",
+              "label": "Base URL",
+              "default": "",
+              "description": "Complete public HTTPS API root, for example https://api.openai.com/v1."
+            },
+            "apiKey": { "type": "password", "label": "API key", "default": "" },
+            "models": {
+              "type": "repeatable",
+              "label": "Models",
+              "default": [],
+              "collapsible": true,
+              "summaryFields": ["model", "alias"],
+              "statusField": "enabled",
+              "itemFields": {
+                "model": { "type": "text", "label": "Upstream model", "default": "" },
+                "alias": {
+                  "type": "text",
+                  "label": "Alias",
+                  "default": "",
+                  "description": "Optional public model name. When set, the upstream name is not accepted as an alias."
+                },
+                "enabled": {
+                  "type": "select",
+                  "label": "Enabled",
+                  "default": "true",
+                  "options": { "true": "Enabled", "false": "Disabled" }
+                },
+                "capabilities": {
+                  "type": "checkbox",
+                  "label": "Capabilities",
+                  "default": ["ai.chat.generate"],
+                  "options": {
+                    "ai.chat.generate": "Chat generation",
+                    "ai.image.generate": "Image generation",
+                    "ai.audio.speech.generate": "Audio speech generation",
+                    "ai.audio.transcribe": "Audio transcription",
+                    "ai.embeddings.create": "Embeddings"
+                  },
+                  "optionDisabled": [
+                    "ai.image.generate",
+                    "ai.audio.speech.generate",
+                    "ai.audio.transcribe",
+                    "ai.embeddings.create"
+                  ]
+                },
+                "modalities": {
+                  "type": "checkbox",
+                  "label": "Modalities",
+                  "default": ["text"],
+                  "options": {
+                    "text": "Text",
+                    "image": "Image input",
+                    "audio_input": "Audio input",
+                    "audio_output": "Audio output"
+                  }
+                }
+              }
+            }
+          }
+        }
+
+      }
+    }
+  }
+}

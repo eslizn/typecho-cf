@@ -132,7 +132,10 @@ export async function applyCommentAction(
     if (oldStatus === 'approved') {
       await decrementCommentCount(db, comment.cid || 0);
     }
-    await doHook(ctx, 'comment:action', comment, { action, oldStatus, newStatus: 'deleted', options });
+    await doHook(ctx, 'comment:action', comment, {
+      action, oldStatus, newStatus: 'deleted', options,
+      capabilityRuntime: ctx.capabilityRuntime,
+    });
     return;
   }
 
@@ -147,7 +150,10 @@ export async function applyCommentAction(
     await decrementCommentCount(db, comment.cid || 0);
   }
 
-  await doHook(ctx, 'comment:action', comment, { action, oldStatus, newStatus: nextStatus, options });
+  await doHook(ctx, 'comment:action', comment, {
+    action, oldStatus, newStatus: nextStatus, options,
+    capabilityRuntime: ctx.capabilityRuntime,
+  });
 }
 
 /** Apply a validated selection in one D1 batch and fire hooks in input order. */
@@ -204,7 +210,10 @@ export async function applyCommentActions(
   for (const comment of comments) {
     const oldStatus = comment.status;
     const newStatus = action === 'delete' ? 'deleted' : action === 'approved' ? 'approved' : action;
-    await doHook(ctx, 'comment:action', comment, { action, oldStatus, newStatus, options });
+    await doHook(ctx, 'comment:action', comment, {
+      action, oldStatus, newStatus, options,
+      capabilityRuntime: ctx.capabilityRuntime,
+    });
   }
 }
 

@@ -3,9 +3,17 @@
  * POST: Activate/deactivate a plugin
  */
 import type { APIRoute } from 'astro';
-import { setOption, deleteOption } from '@/lib/options';
+import { setOption } from '@/lib/options';
 import { isAdminActionResponse, jsonAdminActionError, requireAdminAction } from '@/lib/admin-auth';
-import { pluginExists, parseActivatedPlugins, setActivatedPlugins, getAvailablePlugins, pluginHasConfig, getPluginConfigDefaults } from '@/lib/plugin';
+import {
+  pluginExists,
+  parseActivatedPlugins,
+  setActivatedPlugins,
+  getAvailablePlugins,
+  pluginHasConfig,
+  getPluginConfigDefaults,
+  getPluginActivationActionPlan,
+} from '@/lib/plugin';
 import { jsonError, jsonOk } from '@/lib/http';
 import { REQUEST_BODY_LIMITS } from '@/lib/constants';
 import { readBoundedJson } from '@/lib/input';
@@ -34,12 +42,18 @@ export const POST: APIRoute = async ({ request, locals }) => {
       return jsonError(404, i18nMessage('admin.api.pluginNotFound', 'Plugin "{id}" does not exist. Install it with npm first.', { id: pluginId }), undefined, auth.i18n);
     }
 
-    // Get current activated list
+    // Build the same dependency-aware action plan used by the admin page.
     const currentIds = parseActivatedPlugins(auth.options.activatedPlugins as string | undefined);
-    const idSet = new Set(currentIds);
+    const activationPlan = getPluginActivationActionPlan(currentIds, pluginId, action);
+    if (!activationPlan.ok) {
+      const details = activationPlan.diagnostics
+        .filter(issue => issue.pluginId === pluginId || issue.dependencyId === pluginId)
+        .map(issue => issue.message)
+        .join(' ');
+      return jsonError(400, details || 'Plugin dependencies are not satisfied.', undefined, auth.i18n);
+    }
 
     if (action === 'activate') {
-      idSet.add(pluginId);
 
       // Save default config on activation (like PHP Typecho)
       if (pluginHasConfig(pluginId)) {
@@ -51,15 +65,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
           }
         }
       }
-    } else {
-      idSet.delete(pluginId);
-
-      // Delete plugin config on deactivation
-      await deleteOption(auth.db, `plugin:${pluginId}`);
     }
 
     // Save to DB and update runtime state
-    const newIds = Array.from(idSet);
+    const newIds = activationPlan.effective;
     await setActivatedPlugins(auth.pluginCtx, newIds);
     await setOption(auth.db, 'activatedPlugins', JSON.stringify(newIds));
 
@@ -74,6 +83,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
       plugin: pluginId,
       action,
       activatedPlugins: newIds,
+      cascadedDependents: activationPlan.cascadedDependents,
+      diagnostics: activationPlan.diagnostics,
+      cleanedPlugins: currentIds.filter(id => !newIds.includes(id)),
     });
   } catch (err) {
     return jsonError(400, i18nMessage('admin.error.invalidRequest', 'Invalid request.'), undefined, auth.i18n);
@@ -89,7 +101,14 @@ export const GET: APIRoute = async ({ request, locals }) => {
     return jsonAdminActionError(request, auth);
   }
 
-  const activatedIds = parseActivatedPlugins(auth.options.activatedPlugins as string | undefined);
+  // `activatedPlugins` is the effective, request-local set after dependency
+  // filtering. Keep the persisted administrator intent separate so an
+  // invalid legacy entry cannot be reported as active merely because it is
+  // still present in D1.
+  const activatedIds = [...auth.pluginCtx.activatedPlugins];
+  const requestedIds = auth.pluginCtx.requestedPlugins
+    ? [...auth.pluginCtx.requestedPlugins]
+    : parseActivatedPlugins(auth.options.activatedPlugins as string | undefined);
   const plugins = getAvailablePlugins(auth.pluginCtx);
 
   return jsonOk({
@@ -103,8 +122,13 @@ export const GET: APIRoute = async ({ request, locals }) => {
       version: p.manifest.version,
       homepage: p.manifest.homepage,
       isActive: p.isActive,
+      status: p.status,
       packageName: p.packageName,
+      dependencies: p.dependencies ?? [],
+      dependencyIssues: p.dependencyIssues ?? [],
     })),
     activatedPlugins: activatedIds,
+    requestedPlugins: requestedIds,
+    diagnostics: auth.pluginCtx.activationDiagnostics ?? [],
   });
 };

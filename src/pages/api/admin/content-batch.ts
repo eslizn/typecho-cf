@@ -65,7 +65,9 @@ async function handler({ request, locals, url }: { request: Request; locals: App
     // ordering and on the row still being present).
     for (const content of allowedContents) {
       const isPage = content.type?.startsWith('page');
-      await doHook(pluginCtx, isPage ? 'page:beforeDelete' : 'post:beforeDelete', content);
+      await doHook(pluginCtx, isPage ? 'page:beforeDelete' : 'post:beforeDelete', content, {
+        capabilityRuntime: pluginCtx.capabilityRuntime,
+      });
     }
 
     // Decrement meta counts in one pass: collect all (cid -> [mid]) and
@@ -107,7 +109,9 @@ async function handler({ request, locals, url }: { request: Request; locals: App
     // Post-delete hooks
     for (const content of allowedContents) {
       const isPage = content.type?.startsWith('page');
-      await doHook(pluginCtx, isPage ? 'page:afterDelete' : 'post:afterDelete', content);
+      await doHook(pluginCtx, isPage ? 'page:afterDelete' : 'post:afterDelete', content, {
+        capabilityRuntime: pluginCtx.capabilityRuntime,
+      });
     }
   } else if (action === 'mark' && markStatus) {
     if (!isEditor) {

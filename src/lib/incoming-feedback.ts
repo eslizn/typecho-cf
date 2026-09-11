@@ -69,7 +69,7 @@ export async function saveIncomingFeedback(
     pluginCtx,
     input.type === 'trackback' ? 'feedback:trackback:before' : 'feedback:pingback:before',
     baseline,
-    { db, options, content },
+    { db, options, content, capabilityRuntime: pluginCtx.capabilityRuntime },
   );
   const value = { ...baseline, ...(filtered as Record<string, unknown>) };
   const status = normalizeFeedbackStatus(value.status);
@@ -93,6 +93,7 @@ export async function saveIncomingFeedback(
     pluginCtx,
     input.type === 'trackback' ? 'feedback:trackback:after' : 'feedback:pingback:after',
     row,
+    { capabilityRuntime: pluginCtx.capabilityRuntime },
   );
   return inserted[0]?.coid || 0;
 }

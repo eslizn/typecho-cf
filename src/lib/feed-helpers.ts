@@ -12,6 +12,7 @@ import { renderContent } from '@/lib/markdown';
 import {
   applyFilterSafely,
   parseActivatedPlugins,
+  loadPluginConfig,
   setActivatedPlugins,
   type HookContext,
 } from '@/lib/plugin';
@@ -19,6 +20,7 @@ import { getDb } from '@/db';
 import { computeUrls, loadOptions } from '@/lib/options';
 import { getRequestCoreContextFromLocals } from '@/lib/context';
 import { env } from 'cloudflare:workers';
+import { createCapabilityRuntimeContext } from '@/lib/capability';
 
 export const FEED_ITEMS_DEFAULT = 10;
 export const FEED_ITEMS_MIN = 5;
@@ -34,13 +36,22 @@ export async function getFeedRuntime(locals: App.Locals, request?: Request) {
   const db = core?.db ?? getDb(env.DB);
   const options = core?.options ?? await loadOptions(db);
   const pluginCtx: HookContext = core?.pluginCtx ?? { activatedPlugins: new Set<string>() };
+  const urls = computeUrls(options);
   if (!core) {
     await setActivatedPlugins(
       pluginCtx,
       parseActivatedPlugins(options.activatedPlugins as string | undefined),
     );
+    pluginCtx.capabilityRuntime = createCapabilityRuntimeContext({
+      request: request || new Request(urls.feedUrl || 'http://localhost/feed'),
+      db,
+      options,
+      env: env as unknown as Record<string, unknown>,
+      activatedPlugins: pluginCtx.activatedPlugins,
+      activationGeneration: pluginCtx.activationGeneration,
+      getPluginConfig: pluginId => loadPluginConfig(options, pluginId),
+    });
   }
-  const urls = computeUrls(options);
   const runtime = core?.i18n && core.resolvedLocale
     ? { i18n: core.i18n, resolvedLocale: core.resolvedLocale, autoLocale: core.autoLocale }
     : createRequestI18n(
@@ -71,7 +82,7 @@ export async function buildFeedItem(
     date: new Date((post.created || 0) * 1000),
   };
 
-  item = await applyFilterSafely(pluginCtx, 'feed:item', item, { i18n });
+  item = await applyFilterSafely(pluginCtx, 'feed:item', item, { i18n, capabilityRuntime: pluginCtx.capabilityRuntime });
   return item;
 }
 
@@ -86,7 +97,10 @@ export async function renderFeedResponse(
   contentType: string,
   extra: Record<string, unknown>,
 ): Promise<Response> {
-  const filteredXml = await applyFilterSafely(pluginCtx, 'feed:render', xml, extra);
+  const filteredXml = await applyFilterSafely(pluginCtx, 'feed:render', xml, {
+    ...extra,
+    capabilityRuntime: extra.capabilityRuntime ?? pluginCtx.capabilityRuntime,
+  });
   const response = xmlResponse(typeof filteredXml === 'string' ? filteredXml : xml, contentType);
   if (extra.autoLocale === true) response.headers.set('Vary', 'Accept-Language');
   return response;

@@ -7,7 +7,7 @@ import { createTestDb, type TestDatabase } from '../helpers';
 import { hashPassword, PBKDF2_ITERATIONS } from '@/lib/auth';
 import { schema } from '@/db';
 import { eq } from 'drizzle-orm';
-import { addHook, removePluginHooks } from '@/lib/plugin';
+import { addHook, registerPlugin, removePluginHooks } from '@/lib/plugin';
 
 let testDb: TestDatabase;
 
@@ -203,6 +203,7 @@ describe('login security', () => {
 
   it('runs login before/success/failure hooks with sanitized payloads', async () => {
     const pluginId = 'login-hooks-test';
+    registerPlugin(pluginId, { id: pluginId, name: pluginId });
     const events: string[] = [];
     let beforeFormData: FormData | undefined;
     let successPayload: Record<string, unknown> | undefined;

@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createCapabilityRuntimeContext } from '@/lib/capability';
+import {
+  createCapabilityRuntimeContext,
+  registerCapability,
+  resetCapabilityRegistry,
+  setCapabilityActivation,
+} from '@/lib/capability';
 import init, {
   AI_CAPABILITIES,
   AI_CONFIG_FIELDS,
@@ -119,20 +124,76 @@ describe('typecho-plugin-ai', () => {
             apiKey: 'key',
             models: [
               { model: 'glm-4.7-flash', alias: 'chat', enabled: true, capabilities: ['ai.chat.generate'], modalities: ['text'] },
-              { model: 'disabled-model', enabled: false, capabilities: ['ai.chat.generate'], modalities: ['text'] },
+              { model: 'glm-4.7-air', enabled: true, capabilities: ['ai.chat.generate'], modalities: ['text'] },
+              { model: 'disabled-model', alias: 'off', enabled: false, capabilities: ['ai.chat.generate'], modalities: ['text'] },
             ],
           },
-          { name: 'broken', baseUrl: 'http://localhost/v1', apiKey: 'key', models: [{ model: 'local', enabled: true, capabilities: ['ai.chat.generate'], modalities: ['text'] }] },
+          {
+            name: 'broken',
+            baseUrl: 'http://localhost/v1',
+            apiKey: 'key',
+            models: [{ model: 'local', alias: 'local', enabled: true, capabilities: ['ai.chat.generate'], modalities: ['text'] }],
+          },
         ],
         http: { enabled: false, basePath: '/ai', tokens: [] },
       }),
     });
 
-    // Only enabled chat models behind a public HTTPS base URL are published,
-    // and the label carries the provider name for the admin dropdown.
-    expect(service.listOptions()).toEqual([{ value: 'chat', label: 'chat · 智谱' }]);
+    // Only aliases are published: an enabled model without an alias, a model
+    // behind a non-public base URL, and a disabled model all stay private.
+    expect(service.listOptions()).toEqual([{ value: 'chat', label: 'chat' }]);
   });
 
+  it('reports the capability failure to authenticated callers only', async () => {
+    const { context, hooks } = initContext();
+    init(context);
+    const routeHook = hooks.get('request:route')!;
+    const options = {
+      'plugin:typecho-plugin-ai': JSON.stringify(config({
+        http: { enabled: true, basePath: '/ai', tokens: [{ id: 't1', token: 'access-secret-token-1234' }] },
+      })),
+    };
+
+    // A registered capability whose factory throws resolves as factory-failed.
+    resetCapabilityRegistry();
+    registerCapability('typecho-plugin-ai', {
+      capability: AI_CAPABILITIES.chatGenerate,
+      version: 1,
+      factory: () => { throw new Error('boom'); },
+    });
+    setCapabilityActivation(new Set(['typecho-plugin-ai']), 1);
+    const runtime = createCapabilityRuntimeContext({
+      request: new Request('https://example.com/ai/v1/models'),
+      db: {} as never,
+      env: {},
+      options: {},
+      activatedPlugins: new Set(['typecho-plugin-ai']),
+      activationGeneration: 1,
+    });
+
+    const anonymous = await routeHook({ handled: false }, {
+      request: new Request('https://example.com/ai/v1/models'),
+      path: '/ai/v1/models',
+      options,
+      capabilityRuntime: runtime,
+    });
+    expect(anonymous.handled).toBe(true);
+    expect(anonymous.response.status).toBe(503);
+    expect((await anonymous.response.json()).error.code).toBe('no-available-model');
+
+    const authorized = await routeHook({ handled: false }, {
+      request: new Request('https://example.com/ai/v1/models', {
+        headers: { authorization: 'Bearer access-secret-token-1234' },
+      }),
+      path: '/ai/v1/models',
+      options,
+      capabilityRuntime: runtime,
+    });
+    expect(authorized.response.status).toBe(503);
+    expect((await authorized.response.json()).error.code).toBe('factory-failed');
+
+    resetCapabilityRegistry();
+  });
 
   it('disables the reserved capability options instead of labeling them', () => {
     const capabilities = AI_CONFIG_FIELDS.providers.itemFields?.models.itemFields?.capabilities;

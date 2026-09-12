@@ -243,6 +243,7 @@ export default function init({ addHook, pluginId, registerAdminPath }: PluginIni
 - 前台自定义路由（如 WebDAV 入口）必须在插件 `init()` 中通过 `PluginInitContext.registerRouteResolver(resolver)` 声明 owner-scoped 路由：resolver 根据当前配置返回该插件当前有效的路径 claim；插件停用、初始化失败或配置变化时，核心替换或注销该 owner 的旧 claim。中间件据此（1）豁免内容路径废弃检查；（2）禁止插件路径进入边缘缓存（插件自带鉴权，缓存会绕过）。路由优先级保持为：系统固定 > 系统路由表 > 插件路由表
 - route resolver 只负责声明和生命周期管理，不负责处理请求；实际请求仍由 `request:route` hook 分发。核心必须在缓存决策和 `request:route` 分发前同步当前 claim；不同插件的冲突 claim 必须 fail-closed（相关 owner 均不可用），WebDAV 保留历史兼容路径 `/dav` 的匹配行为
 - 插件路由声明按 owner 管理，插件只能替换或注销自己的 claim；插件停用后不得残留旧路径。旧的全局 `registerPluginAdminPath(path)` 已从 SDK 移除，管理/API 路径统一改用 `PluginInitContext.registerAdminPath(path)`
+- **行为变更（相对早期实现）**：`request:route` 现在对保留核心路径（`/install`、`/api/install`、`/admin/**`、`/api/admin/**`、`/api/users/login|logout|register`）**提前短路，不再调用插件 hook**；早期实现是「先调用、命中保留路径再丢弃响应并打印 warn 日志」。因此依赖「先收到请求、再判断是否处理」的插件必须改为在 `init()` 中用 `registerAdminPath()` 声明管理/API 路径、用 `registerRouteResolver()` 声明前台路由，否则不会再收到这些请求
 
 ### 6.4 插件专属管理页面
 
@@ -276,7 +277,7 @@ WebDAV 插件的文件管理器是完整参考实现：`admin:page` 返回包含
 - 插件在 `init()` 中通过 `PluginInitContext.registerCapability({ capability, version, factory })` 注册实现；owner 自动绑定当前 `pluginId`，初始化失败或停用后旧注册不可解析
 - Consumer 从请求 Hook extra 的 `capabilityRuntime` 取得上下文，通过 SDK `resolveCapability(runtime, { capability, minVersion?, ownerPluginId? })` 解析；未指定 owner 时多个实现返回 `ambiguous`，不得静默按注册顺序选择
 - Consumer 必须处理 `unavailable`、`ambiguous`、`version-mismatch`、`factory-failed` 和能力调用错误，并自行实现可选功能降级；Capability 不执行 Consumer 提供的工具/函数
-- 当前 AI 能力目录由 `typecho-plugin-ai` 提供：`ai.chat.generate` 负责对话生成，`ai.models.list` 发布「已启用 + 支持文本对话」的模型清单（供其他插件的配置下拉与保存前校验使用，服务需实现 `listOptions()`）；Scribe 通过这两个能力消费 AI 插件，不再自带 endpoint / apiKey。`ai.image.generate`、`ai.audio.speech.generate`、`ai.audio.transcribe`、`ai.embeddings.create` 是预留 ID，不代表已有实现
+- 当前 AI 能力目录由 `typecho-plugin-ai` 提供：`ai.chat.generate` 负责对话生成，`ai.models.list` 发布模型清单——只发布设置了 `alias` 且已启用、支持文本对话的模型，按别名跨 Provider 合并去重（供其他插件的配置下拉与保存前校验使用，服务需实现 `listOptions()`）；Scribe 通过这两个能力消费 AI 插件，不再自带 endpoint / apiKey。`ai.image.generate`、`ai.audio.speech.generate`、`ai.audio.transcribe`、`ai.embeddings.create` 是预留 ID，不代表已有实现
 
 ### 6.6 Hook 触发点
 
@@ -379,6 +380,7 @@ WebDAV 插件的文件管理器是完整参考实现：`admin:page` 返回包含
   - `loginFailBanMaxFailures`（默认 5）
   - `loginFailBanSeconds`（默认 900）
 - 上传端点 `src/pages/api/admin/upload.ts` 复用 `trackSlidingWindow` 工具做按用户滑动窗口限流（内存级，仅本 isolate）
+- 插件自带的 HTTP 面（如 `typecho-plugin-ai` 的 `{basePath}/v1/*`）的失败鉴权限流与并发上限是**内存级、按 isolate**，不跨 PoP 共享：Bearer token 熵足够高（16–128 位随机串，最多 20 个），这类计数只用于抬高爆破成本与保护单个 isolate 的上游预算，不作为强安全边界；需要跨 PoP 共享的限流一律走 D1（见上一条）
 
 ### 8.5 安全响应头
 

@@ -27,7 +27,7 @@
             "capability": "ai.models.list",
             "ownerPluginId": "typecho-plugin-ai"
           },
-          "description": "下拉选项来自 AI 插件（typecho-plugin-ai）中已启用且支持文本对话的模型；Provider、模型与 API Key 都在 AI 插件里维护"
+          "description": "下拉选项来自 AI 插件（typecho-plugin-ai）中已设置 Alias 的对话模型，跨 Provider 合并去重；Provider、模型与 API Key 都在 AI 插件里维护"
         },
         "temperature": {
           "type": "text",

@@ -100,6 +100,8 @@ export function refreshPluginRoutes(
     }
   }
 
+  // Resolvers are one per plugin and this runs once per request bootstrap, so
+  // the pairwise owner comparison stays cheap at the current plugin scale.
   const conflictedOwners = new Set<string>();
   const candidateEntries = [...candidates.entries()];
   for (let leftIndex = 0; leftIndex < candidateEntries.length; leftIndex += 1) {

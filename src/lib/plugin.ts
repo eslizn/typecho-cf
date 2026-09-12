@@ -156,9 +156,9 @@ export type PluginRuntimeStatus =
  * - CallHandler: Receives context, no return value expected
  * - FilterHandler: Receives value + context, must return the (possibly modified) value
  */
+
 export type CallHandler = (...args: any[]) => void | Promise<void>;
 export type FilterHandler = (value: any, ...args: any[]) => any | Promise<any>;
-
 export interface HookContext {
   activatedPlugins: Set<string>;
   /** Request-scoped generic capability context, when bootstrapped by the host. */
@@ -413,7 +413,6 @@ const hookRegistry = new Map<string, HookRegistration[]>();
 // `registerPluginLoaders` call. Initialisation and module evaluation are
 // deferred to `setActivatedPlugins`, so disabled plugins stay out of the
 // isolate startup path.
-
 type PluginInitFn = (ctx: PluginInitContext) => void | Promise<void>;
 type PluginInitLoader = () => PluginInitFn | Promise<PluginInitFn>;
 const pluginInitLoaders = new Map<string, PluginInitLoader>();

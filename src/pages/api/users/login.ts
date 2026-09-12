@@ -10,7 +10,7 @@ import {
   passwordHashNeedsRehash,
 } from '@/lib/auth';
 import { LOGIN_ERROR_FLASH_COOKIE, createFlashRedirectHeaders } from '@/lib/flash';
-import { applyFilter, doHook, loadPluginConfig, setActivatedPlugins, parseActivatedPlugins, type HookContext } from '@/lib/plugin';
+import { applyFilter, doHook, setActivatedPlugins, parseActivatedPlugins, type HookContext } from '@/lib/plugin';
 import {
   clearLoginFailures,
   loginLockedUntil,
@@ -25,7 +25,7 @@ import { REQUEST_BODY_LIMITS } from '@/lib/constants';
 import { InputError, inputErrorMessage, readBoundedFormData } from '@/lib/input';
 import { i18nMessage, type I18nMessage } from '@/lib/i18n';
 import { textError } from '@/lib/http';
-import { createCapabilityRuntimeContext } from '@/lib/capability';
+import { createRequestCapabilityRuntime } from '@/lib/request-capability';
 
 const LOGIN_URL = '/admin/login';
 
@@ -80,14 +80,12 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const activatedIds = parseActivatedPlugins(options.activatedPlugins as string | undefined);
     await setActivatedPlugins(pluginCtx, activatedIds);
     i18n = getRequestI18n(request, options, pluginCtx.activatedPlugins);
-    pluginCtx.capabilityRuntime = createCapabilityRuntimeContext({
+    pluginCtx.capabilityRuntime = createRequestCapabilityRuntime({
       request,
       db,
       options,
-      env: env as unknown as Record<string, unknown>,
       activatedPlugins: pluginCtx.activatedPlugins,
       activationGeneration: pluginCtx.activationGeneration,
-      getPluginConfig: pluginId => loadPluginConfig(options, pluginId),
     });
   }
   pluginCtx.i18n = i18n;

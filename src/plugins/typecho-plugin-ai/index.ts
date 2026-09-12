@@ -89,16 +89,22 @@ function configValidationError(error: unknown, i18n?: I18n): string {
   return 'AI configuration validation failed.';
 }
 
-function runtimeService(
+interface AiServiceResolution {
+  service: ReturnType<typeof createAiChatService> | null;
+  /** Why the capability could not be resolved; reported to authenticated callers. */
+  reason: string;
+}
+
+function resolveRuntimeService(
   runtime: CapabilityRuntimeContext | undefined,
   pluginId: string,
-): ReturnType<typeof createAiChatService> | null {
-  if (!runtime) return null;
+): AiServiceResolution {
+  if (!runtime) return { service: null, reason: 'unavailable' };
   const resolved = resolveCapability<ReturnType<typeof createAiChatService>>(runtime, {
     capability: AI_CAPABILITIES.chatGenerate,
     ownerPluginId: pluginId,
   });
-  return resolved.ok ? resolved.value : null;
+  return resolved.ok ? { service: resolved.value, reason: 'ok' } : { service: null, reason: resolved.reason };
 }
 
 function routeConfig(options: Record<string, unknown> | undefined, pluginId: string): AiConfig {
@@ -174,13 +180,18 @@ export default function init({
       // the capability and answer with a plugin response.
       if (!isAiHttpEndpointPath(config, extra.path)) return result;
 
-      const service = runtimeService(extra.capabilityRuntime, pluginId);
+      const { service, reason } = resolveRuntimeService(extra.capabilityRuntime, pluginId);
       if (!service) {
+        console.error({ event: 'ai_http_capability_unavailable', reason, path: extra.path });
+        // An authenticated caller gets the concrete resolution failure so the
+        // surface is diagnosable; an anonymous probe only learns that the
+        // endpoint cannot answer.
+        const authorized = extra.request.headers.has('authorization');
         const response = new Response(JSON.stringify({
           error: {
             message: 'The AI capability is unavailable.',
             type: 'server_error',
-            code: AI_ERROR_CODES.noAvailableModel,
+            code: authorized ? reason : AI_ERROR_CODES.noAvailableModel,
           },
         }), {
           status: 503,
@@ -188,7 +199,6 @@ export default function init({
         });
         return { handled: true, response };
       }
-
       const response = await handleAiHttpRequest({
         request: extra.request,
         path: extra.path,

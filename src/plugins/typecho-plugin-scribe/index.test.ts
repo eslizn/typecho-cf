@@ -157,6 +157,43 @@ describe('typecho-plugin-scribe', () => {
 
     expect(result).toMatchObject({ success: false, error: '模型不存在：glm-4.7-flash' });
   });
+  it('explains the 1.1.0 migration when the stored config still has an endpoint', async () => {
+    const hooks = collectHooks();
+    const validate = hooks.get('plugin:config:beforeSave')![0];
+
+    const result = await validate({ success: true, settings: {} }, {
+      pluginId: 'typecho-plugin-scribe',
+      capabilityRuntime: aiRuntime(vi.fn()),
+      options: {
+        'plugin:typecho-plugin-scribe': JSON.stringify({
+          endpoint: 'https://open.bigmodel.cn/api/paas/v4/',
+          apiKey: 'legacy-key',
+          model: '',
+        }),
+      },
+      settings: { model: '' },
+    });
+
+    expect(result.success).toBe(false);
+    expect(String(result.error)).toContain('1.1.0');
+  });
+
+  it('reports an empty AI model catalog separately from a missing model', async () => {
+    const hooks = collectHooks();
+    const validate = hooks.get('plugin:config:beforeSave')![0];
+
+    const result = await validate({ success: true, settings: {} }, {
+      pluginId: 'typecho-plugin-scribe',
+      capabilityRuntime: aiRuntime(vi.fn(), []),
+      settings: { model: 'glm-4.7-flash' },
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      error: 'AI 插件中没有启用的对话模型，请先在 AI 插件中配置模型',
+    });
+  });
+
 
   it('accepts a save when the catalog publishes the selected model', async () => {
     const hooks = collectHooks();

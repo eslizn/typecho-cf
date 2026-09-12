@@ -10,6 +10,7 @@ import {
   type AiAccessToken,
   type AiProviderConfig,
 } from './types';
+import { readBoundedBytes } from './io';
 
 export interface AiValidationLimits {
   concurrency: number;
@@ -216,9 +217,12 @@ export interface AiModelOption {
 }
 
 /**
- * Public chat model catalog: the logical names an admin can pick, together
- * with the provider they belong to. Only models that are enabled, routed
- * through a usable public HTTPS base URL, and support text chat are listed.
+ * Public chat model catalog: the aliases an admin can pick, merged and deduped
+ * across every provider.
+ *
+ * Only the alias is published. The upstream model name is an internal detail of
+ * the provider entry, so a model without an alias stays private and cannot be
+ * selected by other plugins or through the HTTP surface.
  */
 export function listChatModelOptions(config: AiConfig): AiModelOption[] {
   const options: AiModelOption[] = [];
@@ -226,13 +230,13 @@ export function listChatModelOptions(config: AiConfig): AiModelOption[] {
   for (const provider of config.providers) {
     if (!normalizeBaseUrl(provider.baseUrl)) continue;
     for (const model of provider.models) {
-      if (!model.enabled || !model.model || !model.capabilities.includes(AI_CAPABILITIES.chatGenerate)) continue;
+      const alias = model.alias?.trim() || '';
+      if (!alias || !model.enabled || !model.model) continue;
+      if (!model.capabilities.includes(AI_CAPABILITIES.chatGenerate)) continue;
       if (!model.modalities.includes(AI_MODALITIES.text)) continue;
-      const value = logicalModelName(model);
-      if (seen.has(value)) continue;
-      seen.add(value);
-      const providerName = provider.name.trim();
-      options.push({ value, label: providerName ? `${value} · ${providerName}` : value });
+      if (seen.has(alias)) continue;
+      seen.add(alias);
+      options.push({ value: alias, label: alias });
     }
   }
   return options;
@@ -418,61 +422,20 @@ async function readJsonBounded(
   signal: AbortSignal,
   deadline: number,
 ): Promise<unknown> {
-  const declared = response.headers.get('content-length');
-  if (declared && /^\d+$/.test(declared) && Number(declared) > maxBytes) {
-    throw new AiConfigValidationError('Upstream response body is too large.');
-  }
-  if (!response.body) return null;
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  try {
-    while (true) {
-      const { done, value } = await readWithDeadline(reader, deadline, signal);
-      if (done) break;
-      total += value.byteLength;
-      if (total > maxBytes) {
-        await reader.cancel();
-        throw new AiConfigValidationError('Upstream response body is too large.');
-      }
-      chunks.push(value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-  const text = new TextDecoder().decode(bytes);
-  try { return text ? JSON.parse(text) : null; } catch { throw new AiConfigValidationError('Upstream returned malformed JSON.'); }
-}
-
-async function readWithDeadline<T>(
-  reader: ReadableStreamDefaultReader<T>,
-  deadline: number,
-  signal: AbortSignal,
-): Promise<ReadableStreamReadResult<T>> {
-  const remaining = deadline - Date.now();
-  if (remaining <= 0 || signal.aborted) {
-    try { await reader.cancel(); } catch { /* preserve the validation error */ }
-    throw new AiConfigValidationError('Upstream model validation timed out.');
-  }
-
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let fail: (() => void) | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    fail = () => {
-      void reader.cancel().catch(() => {});
-      reject(new AiConfigValidationError('Upstream model validation timed out.'));
-    };
-    timer = setTimeout(fail, remaining);
-    signal.addEventListener('abort', fail, { once: true });
+  const bytes = await readBoundedBytes(response.body, {
+    maxBytes,
+    signal,
+    deadline,
+    declaredLength: response.headers.get('content-length'),
+    tooLarge: () => new AiConfigValidationError('Upstream response body is too large.'),
+    onTimeout: () => new AiConfigValidationError('Upstream model validation timed out.'),
   });
+  if (!bytes) return null;
+  const text = new TextDecoder().decode(bytes);
   try {
-    return await Promise.race([reader.read(), timeout]);
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
-    if (fail) signal.removeEventListener('abort', fail);
+    return text ? JSON.parse(text) : null;
+  } catch {
+    throw new AiConfigValidationError('Upstream returned malformed JSON.');
   }
 }
 

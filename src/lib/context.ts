@@ -6,13 +6,14 @@
 import { getDb, type Database } from '@/db';
 import { loadOptions, type SiteOptions, computeUrls } from '@/lib/options';
 import { getAuthCookies, validateAuthToken, hasPermission, generateSecurityToken } from '@/lib/auth';
-import { setActivatedPlugins, parseActivatedPlugins, doHook, loadPluginConfig, type HookContext } from '@/lib/plugin';
+import { setActivatedPlugins, parseActivatedPlugins, doHook, type HookContext } from '@/lib/plugin';
 import { getThemePreviewId, THEME_PREVIEW_OPTION } from '@/lib/theme-preview';
 import { schema } from '@/db';
 import { env } from 'cloudflare:workers';
 import { createRequestI18n, type RequestI18nRuntime } from '@/lib/i18n-runtime';
 import type { I18n, ResolvedLocale } from '@/lib/i18n';
-import { createCapabilityRuntimeContext } from '@/lib/capability';
+import type { CapabilityRuntimeContext } from '@/lib/capability';
+import { createRequestCapabilityRuntime } from '@/lib/request-capability';
 export { getClientIp } from '@/lib/client-ip';
 
 /** Drizzle-inferred user row type */
@@ -37,7 +38,7 @@ export interface RequestCoreContext {
   i18n: I18n;
   resolvedLocale: ResolvedLocale;
   autoLocale: boolean;
-  capabilityRuntime?: ReturnType<typeof createCapabilityRuntimeContext>;
+  capabilityRuntime?: CapabilityRuntimeContext;
 }
 
 type InternalLocals = App.Locals & {
@@ -160,14 +161,12 @@ async function buildContext(locals: InternalLocals, request: Request): Promise<R
     ctx.autoLocale = runtime.autoLocale;
   }
 
-  ctx.capabilityRuntime = core?.capabilityRuntime ?? createCapabilityRuntimeContext({
+  ctx.capabilityRuntime = core?.capabilityRuntime ?? createRequestCapabilityRuntime({
     request,
     db,
     options,
-    env: env as unknown as Record<string, unknown>,
     activatedPlugins: ctx.activatedPlugins,
     activationGeneration: ctx.activationGeneration,
-    getPluginConfig: pluginId => loadPluginConfig(options, pluginId),
   });
 
   // Check auth

@@ -1,5 +1,6 @@
 import { getClientIp, timeSafeEqual } from 'typecho/plugin-sdk';
 import { AI_ERROR_CODES, AiCapabilityError, isAiCapabilityError } from './errors';
+import { encodeBase64, isRecord, readBoundedBytes } from './io';
 import {
   AI_REQUEST_LIMITS,
   listChatModels,
@@ -19,6 +20,10 @@ import type {
   AiConfig,
 } from './types';
 
+// Failure limiting and the concurrency cap below are intentionally
+    // isolate-local and never shared across PoPs: bearer tokens carry 16-128
+    // random characters, so these counters only raise the cost of abuse and
+    // protect this isolate's upstream budget. Shared limits (login) live in D1.
 const AUTH_FAILURE_WINDOW_MS = 60_000;
 const AUTH_FAILURE_LIMIT = 20;
 const AUTH_FAILURE_MAX_KEYS = 1_024;
@@ -484,37 +489,22 @@ async function readBoundedJson(
   signal: AbortSignal,
   deadline: number,
 ): Promise<unknown> {
+  const timeout = {
+    message: 'The AI request timed out.',
+    retryable: false,
+  };
   if (signal.aborted) {
-    throw new AiCapabilityError(AI_ERROR_CODES.upstreamTimeout, 'The AI request timed out.', 504, false);
+    throw new AiCapabilityError(AI_ERROR_CODES.upstreamTimeout, timeout.message, 504, timeout.retryable);
   }
-  const contentLength = request.headers.get('content-length');
-  if (contentLength && /^\d+$/.test(contentLength) && Number(contentLength) > maxBytes) {
-    throw new AiCapabilityError(AI_ERROR_CODES.invalidRequest, 'The request body is too large.', 413, false);
-  }
-  if (!request.body) return {};
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  try {
-    while (true) {
-      const next = await readWithDeadline(reader, deadline, signal);
-      if (next.done) break;
-      total += next.value.byteLength;
-      if (total > maxBytes) {
-        await reader.cancel();
-        throw new AiCapabilityError(AI_ERROR_CODES.invalidRequest, 'The request body is too large.', 413, false);
-      }
-      chunks.push(next.value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
+  const bytes = await readBoundedBytes(request.body, {
+    maxBytes,
+    signal,
+    deadline,
+    declaredLength: request.headers.get('content-length'),
+    tooLarge: () => new AiCapabilityError(AI_ERROR_CODES.invalidRequest, 'The request body is too large.', 413, false),
+    onTimeout: () => new AiCapabilityError(AI_ERROR_CODES.upstreamTimeout, timeout.message, 504, timeout.retryable),
+  });
+  if (!bytes) return {};
   try {
     return JSON.parse(new TextDecoder().decode(bytes));
   } catch {
@@ -522,47 +512,6 @@ async function readBoundedJson(
   }
 }
 
-async function readWithDeadline<T>(
-  reader: ReadableStreamDefaultReader<T>,
-  deadline: number,
-  signal: AbortSignal,
-): Promise<ReadableStreamReadResult<T>> {
-  const remaining = deadline - Date.now();
-  if (remaining <= 0 || signal.aborted) {
-    try { await reader.cancel(); } catch { /* preserve the timeout error */ }
-    throw new AiCapabilityError(AI_ERROR_CODES.upstreamTimeout, 'The AI request timed out.', 504, false);
-  }
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let fail: (() => void) | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    fail = () => {
-      void reader.cancel().catch(() => {});
-      reject(new AiCapabilityError(AI_ERROR_CODES.upstreamTimeout, 'The AI request timed out.', 504, false));
-    };
-    timer = setTimeout(fail, remaining);
-    signal.addEventListener('abort', fail, { once: true });
-  });
-  try {
-    return await Promise.race([reader.read(), timeout]);
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
-    if (fail) signal.removeEventListener('abort', fail);
-  }
-}
-
 function isReadableStream(value: AiChatResult): value is ReadableStream<AiChatStreamChunk> {
   return !!value && typeof (value as ReadableStream<AiChatStreamChunk>).getReader === 'function';
-}
-
-function encodeBase64(bytes: Uint8Array): string {
-  let binary = '';
-  const chunkSize = 0x8000;
-  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length)));
-  }
-  return btoa(binary);
-}
-
-function isRecord(value: unknown): value is Record<string, any> {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
 }

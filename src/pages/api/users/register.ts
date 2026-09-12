@@ -8,13 +8,13 @@ import { REGISTER_NOTICE_FLASH_COOKIE, createFlashRedirectHeaders } from '@/lib/
 import { eq } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 import { getRequestCoreContextFromLocals, getRequestI18n } from '@/lib/context';
-import { applyFilter, doHook, loadPluginConfig, parseActivatedPlugins, setActivatedPlugins, type HookContext } from '@/lib/plugin';
+import { applyFilter, doHook, parseActivatedPlugins, setActivatedPlugins, type HookContext } from '@/lib/plugin';
 import { i18nMessage } from '@/lib/i18n';
 import { textError } from '@/lib/http';
 // Same-origin enforcement lives in one place (src/lib/admin-auth.ts) so a
 // future tightening of the check cannot miss this public endpoint.
 import { isSameOriginRequest } from '@/lib/admin-auth';
-import { createCapabilityRuntimeContext } from '@/lib/capability';
+import { createRequestCapabilityRuntime } from '@/lib/request-capability';
 
 export const POST: APIRoute = async ({ request, locals }) => {
   const core = getRequestCoreContextFromLocals(locals);
@@ -25,14 +25,12 @@ export const POST: APIRoute = async ({ request, locals }) => {
   if (!core) {
     await setActivatedPlugins(pluginCtx, parseActivatedPlugins(options.activatedPlugins as string | undefined));
     i18n = getRequestI18n(request, options, pluginCtx.activatedPlugins);
-    pluginCtx.capabilityRuntime = createCapabilityRuntimeContext({
+    pluginCtx.capabilityRuntime = createRequestCapabilityRuntime({
       request,
       db,
       options,
-      env: env as unknown as Record<string, unknown>,
       activatedPlugins: pluginCtx.activatedPlugins,
       activationGeneration: pluginCtx.activationGeneration,
-      getPluginConfig: pluginId => loadPluginConfig(options, pluginId),
     });
   }
   pluginCtx.i18n = i18n;

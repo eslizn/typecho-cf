@@ -75,6 +75,7 @@ type UserContentPart =
   | { type: 'text'; text: string }
   | { type: 'image_url'; image_url: { url: string } };
 
+
 const PLUGIN_ID = 'typecho-plugin-scribe';
 
 const DEFAULTS: ScribeConfig = {
@@ -373,14 +374,35 @@ function chatErrorMessage(error: unknown, i18n: I18n | undefined, model: string)
   }
 }
 
+/**
+ * Detect a configuration saved by 1.0.0, which kept its own endpoint and API
+ * key. Those fields stop being used once the model moves to the AI plugin, so
+ * the save prompt explains the migration instead of only asking for a model.
+ */
+function hasLegacyGatewayConfig(options?: Record<string, unknown>): boolean {
+  const stored = parsePluginOption(options?.[`plugin:${PLUGIN_ID}`]);
+  if (!stored || typeof stored !== 'object') return false;
+  const record = stored as Record<string, unknown>;
+  const endpoint = typeof record.endpoint === 'string' ? record.endpoint.trim() : '';
+  const apiKey = typeof record.apiKey === 'string' ? record.apiKey.trim() : '';
+  return !!endpoint || !!apiKey;
+}
+
 async function validateConfig(
   settings: Record<string, unknown> | undefined,
   i18n: I18n | undefined,
   capabilityRuntime: CapabilityRuntimeContext | undefined,
+  legacyGatewayConfig = false,
 ): Promise<ScribeConfig> {
   const config = normalizeConfig(settings);
   if (!config.model) {
-    throw new Error(translate(i18n, 'plugin.typecho-plugin-scribe.message.modelRequired', '请选择 AI 插件中可用的模型'));
+    throw new Error(legacyGatewayConfig
+      ? translate(
+        i18n,
+        'plugin.typecho-plugin-scribe.message.migrationRequired',
+        '1.1.0 起 Scribe 的模型由 AI 插件提供，原有的接口地址与 API Key 已不再使用；请先在 AI 插件中配置可用模型，然后在这里选择模型',
+      )
+      : translate(i18n, 'plugin.typecho-plugin-scribe.message.modelRequired', '请选择 AI 插件中可用的模型'));
   }
 
   const catalog = resolveModelCatalog(capabilityRuntime);
@@ -390,6 +412,9 @@ async function validateConfig(
       'plugin.typecho-plugin-scribe.message.aiPluginUnavailable',
       '未检测到 AI 插件（typecho-plugin-ai）的模型清单，请先启用该插件并配置可用模型',
     ));
+  }
+  if (catalog.length === 0) {
+    throw new Error(translate(i18n, 'plugin.typecho-plugin-scribe.message.noAvailableModel', 'AI 插件中没有启用的对话模型，请先在 AI 插件中配置模型'));
   }
   if (!catalog.includes(config.model)) {
     throw new Error(translate(i18n, 'plugin.typecho-plugin-scribe.message.modelMissing', `模型不存在：${config.model}`, { model: config.model }));
@@ -1371,7 +1396,6 @@ function editorHtml(contentType: ContentType, i18n?: I18n): string {
 })();
 </script>`;
 }
-
 export default function init({ addHook, pluginId, registerTranslations }: PluginInitContext): void {
   registerTranslations?.('en', en);
   registerTranslations?.('zh-CN', zhCN);
@@ -1387,6 +1411,7 @@ export default function init({ addHook, pluginId, registerTranslations }: Plugin
       extra?: {
         pluginId?: string;
         settings?: Record<string, unknown>;
+        options?: Record<string, unknown>;
         capabilityRuntime?: CapabilityRuntimeContext;
         i18n?: I18n;
       },
@@ -1394,7 +1419,12 @@ export default function init({ addHook, pluginId, registerTranslations }: Plugin
       if (extra?.pluginId !== pluginId) return result;
 
       try {
-        const settings = await validateConfig(extra.settings || {}, extra.i18n, extra.capabilityRuntime);
+        const settings = await validateConfig(
+          extra.settings || {},
+          extra.i18n,
+          extra.capabilityRuntime,
+          hasLegacyGatewayConfig(extra.options),
+        );
         return { success: true, settings };
       } catch (error) {
         return {

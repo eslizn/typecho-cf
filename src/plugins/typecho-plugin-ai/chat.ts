@@ -6,6 +6,7 @@ import {
   type AiModelCandidate,
 } from './provider';
 import { AiCapabilityError, AI_ERROR_CODES } from './errors';
+import { aiTimeoutError, decodeBase64, encodeBase64, isRecord, readBoundedBytes, readWithDeadline } from './io';
 import type {
   AiAudioOutput,
   AiBinary,
@@ -471,7 +472,6 @@ function normalizeAudio(value: Record<string, unknown>, maxMediaBytes: number): 
     transcript: typeof value.transcript === 'string' ? value.transcript : undefined,
   };
 }
-
 function createChatStream(
   body: ReadableStream<Uint8Array>,
   candidate: AiModelCandidate,
@@ -514,7 +514,7 @@ function createChatStream(
             controller.enqueue(chunk);
             return;
           }
-          const next = await readWithDeadline(reader, deadline, signal);
+          const next = await readWithDeadline(reader, deadline, signal, aiTimeoutError());
           if (next.done) {
             buffer += decoder.decode().replace(/\r\n/g, '\n');
             if (new TextEncoder().encode(buffer).byteLength > maxOutputBytes) {
@@ -601,7 +601,6 @@ function chunkOutputBytes(chunk: AiChatStreamChunk): number {
   }
   return bytes;
 }
-
 function validateMessage(message: AiChatMessage, maxTextBytes: number): void {
   if (!isRecord(message) || !['developer', 'system', 'user', 'assistant', 'tool'].includes(String(message.role))) {
     throw new AiCapabilityError(AI_ERROR_CODES.invalidRequest, 'Unsupported message role.');
@@ -725,7 +724,7 @@ async function binaryDataUrl(
   return `data:${mimeType};base64,${await binaryBase64(data, maxBytes, signal, deadline)}`;
 }
 
-async function binaryBase64(
+export async function binaryBase64(
   data: AiBinary,
   maxBytes: number,
   signal: AbortSignal,
@@ -735,7 +734,7 @@ async function binaryBase64(
   return encodeBase64(bytes);
 }
 
-async function readBinary(
+export async function readBinary(
   data: AiBinary,
   maxBytes: number,
   signal: AbortSignal,
@@ -754,7 +753,7 @@ async function readBinary(
   let total = 0;
   try {
     while (true) {
-      const { done, value } = await readWithDeadline(reader, deadline, signal);
+      const { done, value } = await readWithDeadline(reader, deadline, signal, aiTimeoutError());
       if (done) break;
       total += value.byteLength;
       if (total > maxBytes) {
@@ -771,92 +770,24 @@ async function readBinary(
   for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
   return bytes;
 }
-
-function encodeBase64(bytes: Uint8Array): string {
-  let binary = '';
-  const chunkSize = 0x8000;
-  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length)));
-  }
-  return btoa(binary);
-}
-
-function decodeBase64(value: string, maxBytes: number): Uint8Array {
-  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(value) || value.length % 4 === 1) {
-    throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream returned invalid audio data.');
-  }
-  try {
-    const binary = atob(value);
-    if (binary.length > maxBytes) throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream audio output is too large.');
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    return bytes;
-  } catch (error) {
-    if (error instanceof AiCapabilityError) throw error;
-    throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream returned invalid audio data.');
-  }
-}
-
 async function readJsonBounded(
   response: Response,
   maxBytes: number,
   signal: AbortSignal,
   timeoutMs: number,
 ): Promise<unknown> {
-  const declared = response.headers.get('content-length');
-  if (declared && /^\d+$/.test(declared) && Number(declared) > maxBytes) {
-    throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream response is too large.');
-  }
-  if (!response.body) return null;
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  const deadline = Date.now() + timeoutMs;
-  try {
-    while (true) {
-      const { done, value } = await readWithDeadline(reader, deadline, signal);
-      if (done) break;
-      total += value.byteLength;
-      if (total > maxBytes) {
-        await reader.cancel();
-        throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream response is too large.');
-      }
-      chunks.push(value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-  try { return JSON.parse(new TextDecoder().decode(bytes)); } catch { throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream returned malformed JSON.'); }
-}
-
-async function readWithDeadline<T>(
-  reader: ReadableStreamDefaultReader<T>,
-  deadline: number,
-  signal: AbortSignal,
-): Promise<ReadableStreamReadResult<T>> {
-  const remaining = deadline - Date.now();
-  if (remaining <= 0 || signal.aborted) {
-    try { await reader.cancel(); } catch { /* preserve the timeout error */ }
-    throw new AiCapabilityError(AI_ERROR_CODES.upstreamTimeout, 'The upstream request timed out.');
-  }
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let fail: (() => void) | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    fail = () => {
-      void reader.cancel().catch(() => {});
-      reject(new AiCapabilityError(AI_ERROR_CODES.upstreamTimeout, 'The upstream request timed out.'));
-    };
-    timer = setTimeout(fail, remaining);
-    signal.addEventListener('abort', fail, { once: true });
+  const bytes = await readBoundedBytes(response.body, {
+    maxBytes,
+    signal,
+    deadline: Date.now() + timeoutMs,
+    declaredLength: response.headers.get('content-length'),
+    tooLarge: () => new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream response is too large.'),
   });
+  if (!bytes) return null;
   try {
-    return await Promise.race([reader.read(), timeout]);
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
-    if (fail) signal.removeEventListener('abort', fail);
+    return JSON.parse(new TextDecoder().decode(bytes));
+  } catch {
+    throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream returned malformed JSON.');
   }
 }
 
@@ -872,7 +803,6 @@ function sseData(event: string): string {
     .join('\n')
     .trim();
 }
-
 function numberOr(fallback: number, value: unknown): number {
   return Number.isSafeInteger(value) ? value as number : fallback;
 }
@@ -880,17 +810,16 @@ function numberOr(fallback: number, value: unknown): number {
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
-
-function isStringOrStringArray(value: unknown): value is string | string[] {
-  return typeof value === 'string' || (Array.isArray(value) && value.every(item => typeof item === 'string'));
-}
-
 function isStringOrBinary(value: unknown): value is string | AiBinary {
   return typeof value === 'string'
     || value instanceof Uint8Array
     || value instanceof ArrayBuffer
     || (!!value && typeof value === 'object' && typeof (value as ReadableStream<Uint8Array>).getReader === 'function');
 }
+export function isStringOrStringArray(value: unknown): value is string | string[] {
+  return typeof value === 'string' || (Array.isArray(value) && value.every(item => typeof item === 'string'));
+}
+
 
 function jsonByteLength(value: unknown): number {
   try {
@@ -898,8 +827,4 @@ function jsonByteLength(value: unknown): number {
   } catch {
     throw new AiCapabilityError(AI_ERROR_CODES.invalidRequest, 'Request contains a non-serializable value.');
   }
-}
-
-function isRecord(value: unknown): value is Record<string, any> {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
 }

@@ -16,7 +16,7 @@ import {
 import { applySecurityHeaders } from '@/lib/security-headers';
 import { createCoreRequestI18n, createRequestI18n } from '@/lib/i18n-runtime';
 import type { I18n, ResolvedLocale } from '@/lib/i18n';
-import { createCapabilityRuntimeContext } from '@/lib/capability';
+import { createRequestCapabilityRuntime } from '@/lib/request-capability';
 
 export interface RequestTarget {
   originalUrl: URL;
@@ -79,12 +79,6 @@ export function resolveRequestTarget(request: Request, locals: App.Locals): Requ
 }
 
 export interface BootstrapOptions {
-  /**
-   * When false, skip lazy plugin init so middleware can attempt an edge-cache
-   * hit before paying plugin import cost. Callers must activate plugins later
-   * when the cache misses (or when activated plugins are non-empty).
-   */
-  plugins?: boolean;
   executionContext?: { waitUntil(promise: Promise<unknown>): void } | null;
 }
 
@@ -117,13 +111,15 @@ export async function bootstrapRequestCore(
       options = await loadOptions(db);
     }
 
+    // Plugins are always activated before the route, cache, and capability
+    // decisions below: the request-local route claims and the capability
+    // runtime both derive from the activation set, and skipping activation
+    // would let plugin-owned paths enter the edge cache.
     const pluginCtx: HookContext = { activatedPlugins: new Set<string>() };
-    if (bootstrapOptions.plugins !== false) {
-      await setActivatedPlugins(
-        pluginCtx,
-        parseActivatedPlugins(options.activatedPlugins as string | undefined),
-      );
-    }
+    await setActivatedPlugins(
+      pluginCtx,
+      parseActivatedPlugins(options.activatedPlugins as string | undefined),
+    );
     pluginCtx.routeResolverFailures = refreshPluginRoutes(
       pluginCtx.activatedPlugins,
       pluginId => loadPluginConfig(options, pluginId),
@@ -136,14 +132,12 @@ export async function bootstrapRequestCore(
     );
     pluginCtx.i18n = runtime.i18n;
     pluginCtx.resolvedLocale = runtime.resolvedLocale;
-    const capabilityRuntime = createCapabilityRuntimeContext({
+    const capabilityRuntime = createRequestCapabilityRuntime({
       request,
       db,
       options,
-      env: env as unknown as Record<string, unknown>,
       activatedPlugins: pluginCtx.activatedPlugins,
       activationGeneration: pluginCtx.activationGeneration,
-      getPluginConfig: pluginId => loadPluginConfig(options, pluginId),
     });
     pluginCtx.capabilityRuntime = capabilityRuntime;
     const core = {

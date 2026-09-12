@@ -13,10 +13,7 @@
 /.cursor
 /.env
 /.pnpm-store
-/.codex-node_modules
-/.codex-pnpm
 /docs
 /specs
 CONTEXT.md
 worker-configuration.d.ts
-/.superpowers

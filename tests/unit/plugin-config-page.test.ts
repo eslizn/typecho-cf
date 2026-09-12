@@ -16,8 +16,10 @@ describe('admin plugin config page', () => {
       join(process.cwd(), 'src/middleware.ts'),
       'utf-8',
     );
+    // Hook registration and dispatch moved to lib/hooks.ts; keep the
+    // lazy-init safety net assertion pointed at its current home.
     const pluginSource = readFileSync(
-      join(process.cwd(), 'src/lib/plugin.ts'),
+      join(process.cwd(), 'src/lib/hooks.ts'),
       'utf-8',
     );
 

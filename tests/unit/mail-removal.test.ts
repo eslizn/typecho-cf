@@ -18,7 +18,9 @@ describe('core mail removal', () => {
   });
 
   it('does not expose core mail delivery or forgot-password entry points', () => {
+    // Hook points and dispatch live in lib/hooks.ts; the removal must hold there too.
     expect(readProjectFile('src/lib/plugin.ts')).not.toContain("'mail:send'");
+    expect(readProjectFile('src/lib/hooks.ts')).not.toContain("'mail:send'");
     expect(readProjectFile('src/pages/admin/login.astro')).not.toContain('/admin/forgot-password');
     expect(existsSync(join(projectRoot, 'src/lib/mail.ts'))).toBe(false);
     expect(existsSync(join(projectRoot, 'src/lib/comment-email.ts'))).toBe(false);

@@ -7,6 +7,15 @@ import {
 } from './provider';
 import { AiCapabilityError, AI_ERROR_CODES } from './errors';
 import { aiTimeoutError, decodeBase64, encodeBase64, isRecord, readBoundedBytes, readWithDeadline } from './io';
+import { binaryBase64, binaryDataUrl, isStringOrBinary, readBinary } from './chat-binary';
+import {
+  createChatStream,
+  normalizeAudio,
+  normalizeToolCalls,
+  isFiniteNumber,
+  normalizeUsage,
+  numberOr,
+} from './chat-stream';
 import type {
   AiAudioOutput,
   AiBinary,
@@ -422,185 +431,6 @@ function normalizeAssistantMessage(message: Record<string, unknown>, maxMediaByt
   return normalized;
 }
 
-function normalizeToolCalls(value: unknown): AiToolCall[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter(isRecord).map((call, index) => {
-    const fn = isRecord(call.function) ? call.function : {};
-    return {
-      id: typeof call.id === 'string' ? call.id : `call_${index}`,
-      type: 'function' as const,
-      function: {
-        name: typeof fn.name === 'string' ? fn.name : '',
-        arguments: typeof fn.arguments === 'string' ? fn.arguments : JSON.stringify(fn.arguments ?? {}),
-      },
-    };
-  }).filter(call => call.function.name.length > 0);
-}
-
-/** Preserve argument-only fragments in streaming tool calls. */
-function normalizeStreamToolCalls(value: unknown): AiToolCall[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter(isRecord).map((call, index) => {
-    const fn = isRecord(call.function) ? call.function : {};
-    return {
-      id: typeof call.id === 'string' ? call.id : `call_${index}`,
-      type: 'function' as const,
-      function: {
-        name: typeof fn.name === 'string' ? fn.name : '',
-        arguments: typeof fn.arguments === 'string' ? fn.arguments : '',
-      },
-    };
-  }).filter(call => call.function.name.length > 0 || call.function.arguments.length > 0);
-}
-
-function normalizeUsage(value: unknown): AiUsage | undefined {
-  if (!isRecord(value)) return undefined;
-  const usage: AiUsage = {};
-  for (const key of ['prompt_tokens', 'completion_tokens', 'total_tokens'] as const) {
-    if (Number.isSafeInteger(value[key])) usage[key] = value[key] as number;
-  }
-  return Object.keys(usage).length > 0 ? usage : undefined;
-}
-
-function normalizeAudio(value: Record<string, unknown>, maxMediaBytes: number): AiAudioOutput {
-  const data = typeof value.data === 'string' ? decodeBase64(value.data, maxMediaBytes) : new Uint8Array();
-  return {
-    data,
-    id: typeof value.id === 'string' ? value.id : undefined,
-    format: typeof value.format === 'string' ? value.format : undefined,
-    expires_at: Number.isSafeInteger(value.expires_at) ? value.expires_at as number : undefined,
-    transcript: typeof value.transcript === 'string' ? value.transcript : undefined,
-  };
-}
-function createChatStream(
-  body: ReadableStream<Uint8Array>,
-  candidate: AiModelCandidate,
-  maxOutputBytes: number,
-  maxMediaBytes: number,
-  signal: AbortSignal,
-  deadline: number,
-): ReadableStream<AiChatStreamChunk> {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let outputBytes = 0;
-  let wireBytes = 0;
-  let done = false;
-
-  return new ReadableStream<AiChatStreamChunk>({
-    async pull(controller) {
-      if (done) {
-        controller.close();
-        return;
-      }
-      try {
-        while (true) {
-          buffer = buffer.replace(/\r\n/g, '\n');
-          const eventEnd = findSseEventEnd(buffer);
-          if (eventEnd >= 0) {
-            const event = buffer.slice(0, eventEnd);
-            buffer = buffer.slice(eventEnd + 2);
-            const data = sseData(event);
-            if (!data) continue;
-            if (data === '[DONE]') {
-              done = true;
-              controller.close();
-              return;
-            }
-            const parsed = JSON.parse(data) as unknown;
-            const chunk = normalizeStreamChunk(parsed, candidate, maxMediaBytes);
-            outputBytes += chunkOutputBytes(chunk);
-            if (outputBytes > maxOutputBytes) throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream stream is too large.');
-            controller.enqueue(chunk);
-            return;
-          }
-          const next = await readWithDeadline(reader, deadline, signal, aiTimeoutError());
-          if (next.done) {
-            buffer += decoder.decode().replace(/\r\n/g, '\n');
-            if (new TextEncoder().encode(buffer).byteLength > maxOutputBytes) {
-              throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream stream is too large.');
-            }
-            const data = sseData(buffer);
-            buffer = '';
-            done = true;
-            if (data && data !== '[DONE]') {
-              const chunk = normalizeStreamChunk(JSON.parse(data) as unknown, candidate, maxMediaBytes);
-              outputBytes += chunkOutputBytes(chunk);
-              if (outputBytes > maxOutputBytes) throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream stream is too large.');
-              controller.enqueue(chunk);
-            }
-            controller.close();
-            return;
-          }
-          wireBytes += next.value.byteLength;
-          if (wireBytes > maxOutputBytes) {
-            throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream stream is too large.');
-          }
-          buffer += decoder.decode(next.value, { stream: true }).replace(/\r\n/g, '\n');
-          if (new TextEncoder().encode(buffer).byteLength > maxOutputBytes) {
-            throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream stream is too large.');
-          }
-        }
-      } catch (error) {
-        done = true;
-        void reader.cancel().catch(() => {});
-        controller.error(error instanceof AiCapabilityError ? error : new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream stream is invalid.'));
-      }
-    },
-    cancel() {
-      done = true;
-      void reader.cancel().catch(() => {});
-    },
-  });
-}
-
-function normalizeStreamChunk(body: unknown, candidate: AiModelCandidate, maxMediaBytes: number): AiChatStreamChunk {
-  if (!isRecord(body)) throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream returned an invalid stream chunk.');
-  const choices = Array.isArray(body.choices) ? body.choices.map((choice, index) => {
-    const raw = isRecord(choice) ? choice : {};
-    const delta = isRecord(raw.delta) ? raw.delta : {};
-    const normalizedDelta: AiChatStreamChunk['choices'][number]['delta'] = {};
-    if (delta.role === 'assistant') normalizedDelta.role = 'assistant';
-    if (typeof delta.content === 'string' || delta.content === null) normalizedDelta.content = delta.content;
-    const calls = normalizeStreamToolCalls(delta.tool_calls);
-    if (calls.length > 0) normalizedDelta.tool_calls = calls;
-    if (isRecord(delta.function_call)) {
-      const legacy = {
-        id: 'call_legacy_0',
-        type: 'function' as const,
-        function: {
-          name: typeof delta.function_call.name === 'string' ? delta.function_call.name : '',
-          arguments: typeof delta.function_call.arguments === 'string' ? delta.function_call.arguments : '',
-        },
-      };
-      normalizedDelta.tool_calls = [...(normalizedDelta.tool_calls ?? []), legacy];
-    }
-    if (isRecord(delta.audio) && typeof delta.audio.data === 'string') normalizedDelta.audio = normalizeAudio(delta.audio, maxMediaBytes);
-    return {
-      index: numberOr(index, raw.index),
-      delta: normalizedDelta,
-      finish_reason: typeof raw.finish_reason === 'string' || raw.finish_reason === null ? raw.finish_reason : undefined,
-    };
-  }) : [];
-  return {
-    id: typeof body.id === 'string' ? body.id : crypto.randomUUID(),
-    object: 'chat.completion.chunk',
-    created: numberOr(Math.floor(Date.now() / 1000), body.created),
-    model: candidate.logicalModel,
-    choices,
-    usage: normalizeUsage(body.usage),
-  };
-}
-
-function chunkOutputBytes(chunk: AiChatStreamChunk): number {
-  let bytes = 0;
-  for (const choice of chunk.choices) {
-    if (choice.delta.content) bytes += new TextEncoder().encode(choice.delta.content).byteLength;
-    if (choice.delta.audio?.data) bytes += choice.delta.audio.data.byteLength;
-    for (const call of choice.delta.tool_calls ?? []) bytes += new TextEncoder().encode(call.function.arguments).byteLength;
-  }
-  return bytes;
-}
 function validateMessage(message: AiChatMessage, maxTextBytes: number): void {
   if (!isRecord(message) || !['developer', 'system', 'user', 'assistant', 'tool'].includes(String(message.role))) {
     throw new AiCapabilityError(AI_ERROR_CODES.invalidRequest, 'Unsupported message role.');
@@ -714,62 +544,6 @@ function isValidFunctionCallChoice(value: unknown): value is AiChatRequest['func
     && value.name.length <= 256;
 }
 
-async function binaryDataUrl(
-  data: AiBinary,
-  mimeType: string,
-  maxBytes: number,
-  signal: AbortSignal,
-  deadline: number,
-): Promise<string> {
-  return `data:${mimeType};base64,${await binaryBase64(data, maxBytes, signal, deadline)}`;
-}
-
-export async function binaryBase64(
-  data: AiBinary,
-  maxBytes: number,
-  signal: AbortSignal,
-  deadline: number,
-): Promise<string> {
-  const bytes = await readBinary(data, maxBytes, signal, deadline);
-  return encodeBase64(bytes);
-}
-
-export async function readBinary(
-  data: AiBinary,
-  maxBytes: number,
-  signal: AbortSignal,
-  deadline: number,
-): Promise<Uint8Array> {
-  if (data instanceof Uint8Array) {
-    if (data.byteLength > maxBytes) throw new AiCapabilityError(AI_ERROR_CODES.invalidRequest, 'Media input is too large.');
-    return data;
-  }
-  if (data instanceof ArrayBuffer) {
-    if (data.byteLength > maxBytes) throw new AiCapabilityError(AI_ERROR_CODES.invalidRequest, 'Media input is too large.');
-    return new Uint8Array(data);
-  }
-  const reader = data.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  try {
-    while (true) {
-      const { done, value } = await readWithDeadline(reader, deadline, signal, aiTimeoutError());
-      if (done) break;
-      total += value.byteLength;
-      if (total > maxBytes) {
-        await reader.cancel();
-        throw new AiCapabilityError(AI_ERROR_CODES.invalidRequest, 'Media input is too large.');
-      }
-      chunks.push(value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-  return bytes;
-}
 async function readJsonBounded(
   response: Response,
   maxBytes: number,
@@ -791,32 +565,7 @@ async function readJsonBounded(
   }
 }
 
-function findSseEventEnd(value: string): number {
-  const lf = value.indexOf('\n\n');
-  return lf;
-}
-
-function sseData(event: string): string {
-  return event.split('\n')
-    .filter(line => line.startsWith('data:'))
-    .map(line => line.slice(5).trimStart())
-    .join('\n')
-    .trim();
-}
-function numberOr(fallback: number, value: unknown): number {
-  return Number.isSafeInteger(value) ? value as number : fallback;
-}
-
-function isFiniteNumber(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value);
-}
-function isStringOrBinary(value: unknown): value is string | AiBinary {
-  return typeof value === 'string'
-    || value instanceof Uint8Array
-    || value instanceof ArrayBuffer
-    || (!!value && typeof value === 'object' && typeof (value as ReadableStream<Uint8Array>).getReader === 'function');
-}
-export function isStringOrStringArray(value: unknown): value is string | string[] {
+function isStringOrStringArray(value: unknown): value is string | string[] {
   return typeof value === 'string' || (Array.isArray(value) && value.every(item => typeof item === 'string'));
 }
 

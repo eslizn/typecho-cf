@@ -46,7 +46,7 @@ describe('admin dismissible notices', () => {
   });
 
   it('uses the same dismissible structure for AI writer notices', () => {
-    const source = readProjectFile('src/plugins/typecho-plugin-scribe/index.ts');
+    const source = readProjectFile('src/plugins/typecho-plugin-scribe/editor-ui.ts');
 
     expect(source).toContain('notice typecho-dismissible');
     expect(source).toContain("closeButton.className = 'typecho-notice-close'");

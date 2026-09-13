@@ -21,9 +21,9 @@ import type {
 } from './types';
 
 // Failure limiting and the concurrency cap below are intentionally
-    // isolate-local and never shared across PoPs: bearer tokens carry 16-128
-    // random characters, so these counters only raise the cost of abuse and
-    // protect this isolate's upstream budget. Shared limits (login) live in D1.
+// isolate-local and never shared across PoPs: bearer tokens carry 16-128
+// random characters, so these counters only raise the cost of abuse and
+// protect this isolate's upstream budget. Shared limits (login) live in D1.
 const AUTH_FAILURE_WINDOW_MS = 60_000;
 const AUTH_FAILURE_LIMIT = 20;
 const AUTH_FAILURE_MAX_KEYS = 1_024;
@@ -35,25 +35,26 @@ export interface AiHttpHandlerOptions {
   request: Request;
   path: string;
   config: AiConfig;
-  service: AiChatGenerationService;
+  service?: AiChatGenerationService;
 }
 
 /**
  * Serve the optional OpenAI-compatible HTTP surface.
  *
- * Returning null means the request is outside the configured endpoint. The
+ * Returning null means the request is outside the configured base path. The
  * caller can then leave it to the normal plugin route chain. Once a request
- * is inside the endpoint, authentication happens before method handling.
+ * is inside the base path, authentication happens before method or endpoint
+ * handling.
  */
-/**
- * True when the path is one of the two OpenAI-compatible endpoints.
- *
- * Callers check this before resolving the capability, so paths that merely sit
- * under the configured base path prefix still fall through to the normal plugin
- * route chain instead of answering with an AI-specific error.
- */
+export function isAiHttpRoutePath(config: AiConfig, path: string): boolean {
+  if (!config.http.enabled || !path) return false;
+  const basePath = config.http.basePath;
+  return path === basePath || path.startsWith(`${basePath}/`);
+}
+
+/** True when the path is one of the supported OpenAI-compatible endpoints. */
 export function isAiHttpEndpointPath(config: AiConfig, path: string): boolean {
-  if (!config.http.enabled) return false;
+  if (!isAiHttpRoutePath(config, path)) return false;
   return path === `${config.http.basePath}/v1/models`
     || path === `${config.http.basePath}/v1/chat/completions`;
 }
@@ -62,7 +63,7 @@ export async function handleAiHttpRequest(
   options: AiHttpHandlerOptions,
 ): Promise<Response | null> {
   const { request, path, config, service } = options;
-  if (!isAiHttpEndpointPath(config, path)) return null;
+  if (!isAiHttpRoutePath(config, path)) return null;
 
   const modelsPath = `${config.http.basePath}/v1/models`;
   const completionsPath = `${config.http.basePath}/v1/chat/completions`;
@@ -83,16 +84,29 @@ export async function handleAiHttpRequest(
     });
   }
 
+  if (path !== completionsPath) {
+    return endpointNotFound();
+  }
+
   if (request.method !== 'POST') return methodNotAllowed('POST');
 
+  if (!service) {
+    return openAiErrorResponse(
+      'The AI capability is unavailable.',
+      'server_error',
+      AI_ERROR_CODES.noAvailableModel,
+      503,
+    );
+  }
+
   if (activeGenerations >= HTTP_MAX_CONCURRENT_GENERATIONS) {
-    return jsonResponse({
-      error: {
-        message: 'Too many AI requests are in progress. Try again later.',
-        type: 'server_error',
-        code: 'rate_limited',
-      },
-    }, 429, { 'Retry-After': '1' });
+    return openAiErrorResponse(
+      'Too many AI requests are in progress. Try again later.',
+      'rate_limit_error',
+      'rate_limit_exceeded',
+      429,
+      { 'Retry-After': '1' },
+    );
   }
 
   activeGenerations += 1;
@@ -312,8 +326,9 @@ function authenticateBearer(request: Request, tokens: ReadonlyArray<string>): Re
     return new Response(JSON.stringify({
       error: {
         message: 'Too many invalid bearer token attempts. Try again later.',
-        type: 'authentication_error',
-        code: 'rate_limited',
+        type: 'rate_limit_error',
+        param: null,
+        code: 'rate_limit_exceeded',
       },
     }), {
       status: 429,
@@ -335,30 +350,33 @@ function authenticateBearer(request: Request, tokens: ReadonlyArray<string>): Re
     }
   }
   {
-    return new Response(JSON.stringify({
-      error: {
-        message: 'Invalid or missing bearer token.',
-        type: 'authentication_error',
-        code: 'invalid_api_key',
-      },
-    }), {
-      status: 401,
-      headers: {
-        'Content-Type': 'application/json; charset=utf-8',
-        'Cache-Control': 'no-store',
-        'WWW-Authenticate': 'Bearer',
-      },
-    });
+    return openAiErrorResponse(
+      'Invalid or missing bearer token.',
+      'authentication_error',
+      'invalid_api_key',
+      401,
+      { 'WWW-Authenticate': 'Bearer' },
+    );
   }
 }
 
 function methodNotAllowed(method: string): Response {
-  return new Response(JSON.stringify({
-    error: { message: `Method not allowed. Use ${method}.`, type: 'invalid_request_error', code: 'method_not_allowed' },
-  }), {
-    status: 405,
-    headers: { 'Content-Type': 'application/json; charset=utf-8', 'Allow': method, 'Cache-Control': 'no-store' },
-  });
+  return openAiErrorResponse(
+    `Method not allowed. Use ${method}.`,
+    'invalid_request_error',
+    'method_not_allowed',
+    405,
+    { 'Allow': method },
+  );
+}
+
+function endpointNotFound(): Response {
+  return openAiErrorResponse(
+    'The requested endpoint was not found.',
+    'invalid_request_error',
+    'endpoint_not_found',
+    404,
+  );
 }
 
 function jsonResponse(body: unknown, status = 200, extraHeaders: Record<string, string> = {}): Response {
@@ -370,6 +388,26 @@ function jsonResponse(body: unknown, status = 200, extraHeaders: Record<string, 
       ...extraHeaders,
     },
   });
+}
+
+function openAiErrorBody(
+  message: string,
+  type: string,
+  code: string | null,
+): { error: { message: string; type: string; param: null; code: string | null } } {
+  return {
+    error: { message, type, param: null, code },
+  };
+}
+
+export function openAiErrorResponse(
+  message: string,
+  type: string,
+  code: string | null,
+  status: number,
+  extraHeaders: Record<string, string> = {},
+): Response {
+  return jsonResponse(openAiErrorBody(message, type, code), status, extraHeaders);
 }
 
 function aiErrorResponse(error: unknown): Response {
@@ -384,13 +422,7 @@ function aiErrorResponse(error: unknown): Response {
     : aiError.code === AI_ERROR_CODES.upstreamClientError
       ? 'upstream_error'
       : 'server_error';
-  return jsonResponse({
-    error: {
-      message: aiError.message,
-      type,
-      code: aiError.code,
-    },
-  }, aiError.status);
+  return openAiErrorResponse(aiError.message, type, aiError.code, aiError.status);
 }
 
 function toPublicChatResponse(response: AiChatResponse): Record<string, unknown> {
@@ -441,7 +473,7 @@ function streamResponse(
             : new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'AI stream failed.');
           try {
             controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-              error: { message: failure.message, type: 'server_error', code: failure.code },
+              error: { message: failure.message, type: 'server_error', param: null, code: failure.code },
             })}\n\ndata: [DONE]\n\n`));
           } catch {
             // The client may have cancelled the response while the upstream

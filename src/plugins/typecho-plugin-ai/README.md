@@ -32,8 +32,8 @@ Typecho-CF 的 AI 能力插件：把多个 OpenAI 兼容 Provider/模型收敛�
 - 鉴权：`Authorization: Bearer <token>`，token 在插件配置页生成（16–128 位 `A-Za-z0-9_-`，最多 20 个）
 - **token 列表为空时端点一律不可达**（返回 401）：删除全部 token 即关闭外部访问
 - 签名比较使用常量时间实现，并遍历完全部 token 后才给出结果，不泄漏匹配位置
-- 路径必须精确匹配；同一 basePath 下的其他路径会交回核心路由（不会回 `AI` 专属错误）
-- 路径带尾斜杠**不匹配**
+- 配置的 `basePath` 本身及其所有子路径都由 AI 插件接管；目前只有上表两个成功接口，其他路径返回 OpenAI 风格 JSON 404，不会落到核心 HTML 404
+- 成功接口路径带尾斜杠仍不匹配；例如 `/v1/models/` 会由插件返回 `endpoint_not_found`
 - 中间件对携带 `Authorization` 的请求禁用边缘缓存（读与写都跳过），避免缓存绕过 Bearer 鉴权
 - capability 解析失败时返回 503：带 `Authorization` 的调用方会拿到具体原因（`unavailable` / `ambiguous` / `version-mismatch` / `factory-failed`），匿名探测只拿到笼统错误码；同时输出 `ai_http_capability_unavailable` 结构化日志
 

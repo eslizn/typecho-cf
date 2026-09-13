@@ -11,6 +11,7 @@ import init, {
   AI_MODEL_CATALOG_CAPABILITY,
   createAiChatService,
   handleAiHttpRequest,
+  isAiHttpRoutePath,
   isValidHttpBasePath,
   normalizeBaseUrl,
   parseChatRequest,
@@ -438,6 +439,63 @@ describe('typecho-plugin-ai', () => {
     });
     expect(completion?.status).toBe(200);
     expect(service.generate).toHaveBeenCalledOnce();
+  });
+
+  it('owns the configured base path and returns OpenAI-compatible errors', async () => {
+    const httpConfig = config({ http: { enabled: true, basePath: '/ai', tokens: [{ id: 't1', token: 'access-secret-token-1234' }] } });
+    const service = { generate: vi.fn() };
+    expect(isAiHttpRoutePath(httpConfig, '/ai')).toBe(true);
+    expect(isAiHttpRoutePath(httpConfig, '/ai/v1')).toBe(true);
+    expect(isAiHttpRoutePath(httpConfig, '/aimer')).toBe(false);
+
+    for (const path of ['/ai', '/ai/v1', '/ai/v1/models/']) {
+      const response = await handleAiHttpRequest({
+        request: new Request(`https://example.com${path}`, {
+          headers: { authorization: 'Bearer access-secret-token-1234' },
+        }),
+        path,
+        config: httpConfig,
+      });
+      expect(response?.status).toBe(404);
+      expect(response?.headers.get('content-type')).toContain('application/json');
+      expect(await response?.json()).toEqual({
+        error: {
+          message: 'The requested endpoint was not found.',
+          type: 'invalid_request_error',
+          param: null,
+          code: 'endpoint_not_found',
+        },
+      });
+    }
+
+    const unauthorized = await handleAiHttpRequest({
+      request: new Request('https://example.com/ai/unknown'),
+      path: '/ai/unknown',
+      config: httpConfig,
+    });
+    expect(unauthorized?.status).toBe(401);
+    expect((await unauthorized?.json() as { error: Record<string, unknown> }).error).toMatchObject({
+      type: 'authentication_error',
+      param: null,
+      code: 'invalid_api_key',
+    });
+
+    const wrongMethod = await handleAiHttpRequest({
+      request: new Request('https://example.com/ai/v1/models', {
+        method: 'POST',
+        headers: { authorization: 'Bearer access-secret-token-1234' },
+      }),
+      path: '/ai/v1/models',
+      config: httpConfig,
+      service,
+    });
+    expect(wrongMethod?.status).toBe(405);
+    expect(wrongMethod?.headers.get('allow')).toBe('GET');
+    expect((await wrongMethod?.json() as { error: Record<string, unknown> }).error).toMatchObject({
+      type: 'invalid_request_error',
+      param: null,
+      code: 'method_not_allowed',
+    });
   });
 
   it('returns standard SSE and base64 encodes internal audio bytes', async () => {

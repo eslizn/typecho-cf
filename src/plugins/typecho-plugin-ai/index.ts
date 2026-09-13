@@ -11,7 +11,12 @@ import type {
 } from 'typecho/plugin-sdk';
 import { AI_ERROR_CODES } from './errors';
 import { createAiChatService } from './chat';
-import { handleAiHttpRequest, isAiHttpEndpointPath } from './http';
+import {
+  handleAiHttpRequest,
+  isAiHttpEndpointPath,
+  isAiHttpRoutePath,
+  openAiErrorResponse,
+} from './http';
 import {
   AiConfigValidationError,
   isValidHttpBasePath,
@@ -32,7 +37,13 @@ import en from './locales/en.json';
 import zhCN from './locales/zh-CN.json';
 
 export { createAiChatService, validateChatRequest } from './chat';
-export { handleAiHttpRequest, isAiHttpEndpointPath, parseChatRequest } from './http';
+export {
+  handleAiHttpRequest,
+  isAiHttpEndpointPath,
+  isAiHttpRoutePath,
+  openAiErrorResponse,
+  parseChatRequest,
+} from './http';
 export {
   AI_REQUEST_LIMITS,
   AI_VALIDATION_LIMITS,
@@ -175,10 +186,19 @@ export default function init({
       if (result?.handled || !extra?.request || !extra.path) return result;
       const config = routeConfig(extra.options, pluginId);
       if (!config.http.enabled || !isValidHttpBasePath(config.http.basePath)) return result;
-      // Paths that only share the base path prefix must fall through to the
-      // normal route chain; only the two OpenAI-compatible endpoints resolve
-      // the capability and answer with a plugin response.
-      if (!isAiHttpEndpointPath(config, extra.path)) return result;
+      // The configured base path is an owned HTTP surface. Only supported
+      // endpoints resolve the chat capability; unknown paths are still
+      // answered by the AI handler with an OpenAI-compatible 404.
+      if (!isAiHttpRoutePath(config, extra.path)) return result;
+
+      if (!isAiHttpEndpointPath(config, extra.path)) {
+        const response = await handleAiHttpRequest({
+          request: extra.request,
+          path: extra.path,
+          config,
+        });
+        return response ? { handled: true, response } : result;
+      }
 
       const { service, reason } = resolveRuntimeService(extra.capabilityRuntime, pluginId);
       if (!service) {
@@ -187,16 +207,12 @@ export default function init({
         // surface is diagnosable; an anonymous probe only learns that the
         // endpoint cannot answer.
         const authorized = extra.request.headers.has('authorization');
-        const response = new Response(JSON.stringify({
-          error: {
-            message: 'The AI capability is unavailable.',
-            type: 'server_error',
-            code: authorized ? reason : AI_ERROR_CODES.noAvailableModel,
-          },
-        }), {
-          status: 503,
-          headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' },
-        });
+        const response = openAiErrorResponse(
+          'The AI capability is unavailable.',
+          'server_error',
+          authorized ? reason : AI_ERROR_CODES.noAvailableModel,
+          503,
+        );
         return { handled: true, response };
       }
       const response = await handleAiHttpRequest({

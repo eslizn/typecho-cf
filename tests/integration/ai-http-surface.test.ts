@@ -139,11 +139,30 @@ describe('AI plugin HTTP surface', () => {
     }
   });
 
-  it('leaves unknown paths under the base path to the core router', async () => {
+  it('lets the AI plugin own unknown paths under the base path', async () => {
     const response = await call('/ai/other', {
       headers: { authorization: `Bearer ${ACCESS_TOKEN}` },
     });
 
     expect(response.status).toBe(404);
+    expect(response.headers.get('content-type')).toContain('application/json');
+    expect(await response.json()).toEqual({
+      error: {
+        message: 'The requested endpoint was not found.',
+        type: 'invalid_request_error',
+        param: null,
+        code: 'endpoint_not_found',
+      },
+    });
+  });
+
+  it('lets the AI plugin own the base path itself', async () => {
+    const response = await call('/ai', {
+      headers: { authorization: `Bearer ${ACCESS_TOKEN}` },
+    });
+
+    expect(response.status).toBe(404);
+    expect(response.headers.get('content-type')).toContain('application/json');
+    expect((await response.json() as { error: { code: string } }).error.code).toBe('endpoint_not_found');
   });
 });

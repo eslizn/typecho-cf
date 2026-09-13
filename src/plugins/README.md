@@ -393,7 +393,7 @@ AI 插件完全独立于 Scribe。需要 AI 的插件应在自身 `package.json`
 
 ### 可选 AI HTTP 兼容接口
 
-AI 插件配置页可以开启 OpenAI 兼容 HTTP 入口并自定义站点相对路径（默认 `/ai`）。接口为 `{basePath}/v1/models` 和 `{basePath}/v1/chat/completions`；只要开启，所有请求都必须携带 `Authorization: Bearer <token>`，绝不允许匿名访问。Token 是 `tokens` 字段的多值列表：页面用「生成 Token」在前端生成、随配置一起保存，每行可复制或删除；不再自动补 Token，全部删空后任何请求都会得到 401（接口不可访问）。鉴权时会对所有 Token 做常量时间比较、不做提前返回，也不为每次鉴权查询 D1。第一版不提供 `/responses`、Embedding、独立图片或独立音频路由。
+AI 插件配置页可以开启 OpenAI 兼容 HTTP 入口并自定义站点相对路径（默认 `/ai`）。成功接口为 `{basePath}/v1/models` 和 `{basePath}/v1/chat/completions`；配置的 `basePath` 本身及其所有子路径均由 AI 插件接管，未支持的路径返回 OpenAI 风格 JSON 404，不再落到核心 HTML 404。只要开启，所有请求都必须携带 `Authorization: Bearer <token>`，绝不允许匿名访问。Token 是 `tokens` 字段的多值列表：页面用「生成 Token」在前端生成、随配置一起保存，每行可复制或删除；不再自动补 Token，全部删空后任何请求都会得到 401（接口不可访问）。鉴权时会对所有 Token 做常量时间比较、不做提前返回，也不为每次鉴权查询 D1。第一版不提供 `/responses`、Embedding、独立图片或独立音频路由。
 
 ---
 

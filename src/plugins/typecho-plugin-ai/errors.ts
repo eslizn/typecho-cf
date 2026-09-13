@@ -18,7 +18,7 @@ export class AiCapabilityError extends Error {
     public readonly code: AiErrorCode,
     message: string,
     public readonly status = statusForAiError(code),
-    public readonly retryable = code === AI_ERROR_CODES.upstreamTimeout || code === AI_ERROR_CODES.upstreamServerError,
+    public readonly retryable = code === AI_ERROR_CODES.upstreamTimeout,
     options?: ErrorOptions,
   ) {
     super(message, options);

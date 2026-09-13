@@ -224,7 +224,7 @@ data: {"phase":"completed","usage":...,"elapsedMs":...}
 - 不新增用量 D1 表、日志字段、localStorage 或跨请求缓存；
 - 逻辑模型 alias 可以用于展示，Provider URL、API Key 和上游模型名不能进入浏览器遥测；
 - 所有模型输出继续按不可信文本处理，不进入 `innerHTML`、`eval`、SQL、Shell 或文件路径；
-- 既有 action 权限、CSRF、Origin 同源检查、请求体/超时/并发上限保持不变；
+- 既有 action 权限、CSRF、Origin 同源检查、请求体和并发上限保持不变；AI 上游响应头/流式首 chunk 的单次尝试预算为 3 秒，流开始后的持续生成仍受 120 秒总时限约束；
 - Scribe SSE 设置 `no-store`，避免编辑器内容或 usage 被缓存；
 - 进度事件缺失、格式错误或观察器抛错只影响展示，不改变 AI 主请求的成功/失败。
 

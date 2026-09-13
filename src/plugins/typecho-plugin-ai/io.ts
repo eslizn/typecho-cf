@@ -113,17 +113,17 @@ export function encodeBase64(bytes: Uint8Array): string {
 
 export function decodeBase64(value: string, maxBytes: number): Uint8Array {
   if (!/^[A-Za-z0-9+/]*={0,2}$/.test(value) || value.length % 4 === 1) {
-    throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream returned invalid audio data.');
+    throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream returned invalid audio data.', 502, false);
   }
   try {
     const binary = atob(value);
-    if (binary.length > maxBytes) throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream audio output is too large.');
+    if (binary.length > maxBytes) throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream audio output is too large.', 502, false);
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
     return bytes;
   } catch (error) {
     if (error instanceof AiCapabilityError) throw error;
-    throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream returned invalid audio data.');
+    throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream returned invalid audio data.', 502, false);
   }
 }
 

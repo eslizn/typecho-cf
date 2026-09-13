@@ -120,6 +120,7 @@ export function createChatStream(
   let outputBytes = 0;
   let wireBytes = 0;
   let done = false;
+  let cancelled = false;
   let lastUsage: AiUsage | undefined;
 
   function notify(callback: (() => void) | undefined): void {
@@ -132,6 +133,7 @@ export function createChatStream(
 
   return new ReadableStream<AiChatStreamChunk>({
     async pull(controller) {
+      if (cancelled) return;
       if (done) {
         controller.close();
         return;
@@ -151,29 +153,30 @@ export function createChatStream(
               controller.close();
               return;
             }
-            const parsed = JSON.parse(data) as unknown;
+            const parsed = parseStreamJson(data);
             const chunk = normalizeStreamChunk(parsed, candidate, maxMediaBytes);
             if (chunk.usage) lastUsage = mergeUsage(lastUsage, chunk.usage);
             outputBytes += chunkOutputBytes(chunk);
-            if (outputBytes > maxOutputBytes) throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream stream is too large.');
+            if (outputBytes > maxOutputBytes) throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream stream is too large.', 502, false);
             notify(() => callbacks.onChunk?.(chunk));
             controller.enqueue(chunk);
             return;
           }
           const next = await readWithDeadline(reader, deadline, signal, aiTimeoutError());
           if (next.done) {
+            if (cancelled) return;
             buffer += decoder.decode().replace(/\r\n/g, '\n');
             if (new TextEncoder().encode(buffer).byteLength > maxOutputBytes) {
-              throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream stream is too large.');
+              throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream stream is too large.', 502, false);
             }
             const data = sseData(buffer);
             buffer = '';
             done = true;
             if (data && data !== '[DONE]') {
-              const chunk = normalizeStreamChunk(JSON.parse(data) as unknown, candidate, maxMediaBytes);
+              const chunk = normalizeStreamChunk(parseStreamJson(data), candidate, maxMediaBytes);
               if (chunk.usage) lastUsage = mergeUsage(lastUsage, chunk.usage);
               outputBytes += chunkOutputBytes(chunk);
-              if (outputBytes > maxOutputBytes) throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream stream is too large.');
+              if (outputBytes > maxOutputBytes) throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream stream is too large.', 502, false);
               notify(() => callbacks.onChunk?.(chunk));
               controller.enqueue(chunk);
             }
@@ -183,21 +186,22 @@ export function createChatStream(
           }
           wireBytes += next.value.byteLength;
           if (wireBytes > maxOutputBytes) {
-            throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream stream is too large.');
+            throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream stream is too large.', 502, false);
           }
           buffer += decoder.decode(next.value, { stream: true }).replace(/\r\n/g, '\n');
           if (new TextEncoder().encode(buffer).byteLength > maxOutputBytes) {
-            throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream stream is too large.');
+            throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream stream is too large.', 502, false);
           }
         }
       } catch (error) {
         done = true;
         void reader.cancel().catch(() => {});
         notify(callbacks.onError);
-        controller.error(error instanceof AiCapabilityError ? error : new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream stream is invalid.'));
+        controller.error(error instanceof AiCapabilityError ? error : new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream stream is invalid.', 502, true));
       }
     },
     cancel() {
+      cancelled = true;
       done = true;
       void reader.cancel().catch(() => {});
     },
@@ -211,7 +215,7 @@ export interface AiChatStreamCallbacks {
 }
 
 export function normalizeStreamChunk(body: unknown, candidate: AiModelCandidate, maxMediaBytes: number): AiChatStreamChunk {
-  if (!isRecord(body)) throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream returned an invalid stream chunk.');
+  if (!isRecord(body)) throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream returned an invalid stream chunk.', 502, false);
   const choices = Array.isArray(body.choices) ? body.choices.map((choice, index) => {
     const raw = isRecord(choice) ? choice : {};
     const delta = isRecord(raw.delta) ? raw.delta : {};
@@ -268,4 +272,12 @@ export function sseData(event: string): string {
     .map(line => line.slice(5).trimStart())
     .join('\n')
     .trim();
+}
+
+function parseStreamJson(data: string): unknown {
+  try {
+    return JSON.parse(data);
+  } catch {
+    throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream returned malformed stream data.', 502, false);
+  }
 }

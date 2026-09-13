@@ -30,7 +30,10 @@ export const AI_VALIDATION_LIMITS = {
 } as const satisfies AiValidationLimits;
 
 export interface AiRequestLimits {
+  /** Total generation budget for a stream after it has started producing data. */
   timeoutMs: number;
+  /** Per-attempt budget for upstream response headers or the first stream chunk. */
+  initialTimeoutMs?: number;
   requestBodyBytes: number;
   responseBodyBytes: number;
   maxMessages: number;
@@ -41,7 +44,11 @@ export interface AiRequestLimits {
 }
 
 export const AI_REQUEST_LIMITS = {
+  // Keep the long-lived stream budget separate from the short first-response
+  // budget. The latter lets callers fail over quickly without cutting off a
+  // stream that has already started producing useful output.
   timeoutMs: 120_000,
+  initialTimeoutMs: 3_000,
   requestBodyBytes: 2 * 1024 * 1024,
   responseBodyBytes: 8 * 1024 * 1024,
   maxMessages: 100,

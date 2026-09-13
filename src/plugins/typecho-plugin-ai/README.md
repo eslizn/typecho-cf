@@ -48,7 +48,7 @@ Typecho-CF 的 AI 能力插件：把多个 OpenAI 兼容 Provider/模型收敛�
 |------|------|
 | `index.ts` | 插件入口：注册 capability、路由声明、`plugin:config:beforeSave`、`request:route` |
 | `provider.ts` | 配置归一化/校验、模型选举（`selectAiModel`）、模型目录（`listChatModelOptions`） |
-| `chat.ts` | `ai.chat.generate` 实现：请求转换、上游调用、流式解析与 usage/progress 遥测 |
+| `chat.ts` | `ai.chat.generate` 实现：请求转换、上游调用、流式解析、有限重试与 usage/progress 遥测 |
 | `http.ts` | 可选的 OpenAI 兼容 HTTP 端点 |
 | `io.ts` | 有界读取 / 超时竞态 / base64 等共享工具 |
 | `types.ts` | 能力契约与配置字段定义 |
@@ -68,3 +68,5 @@ service.generate(request, {
 ```
 
 流式 Chat 请求会尽量请求 OpenAI 兼容的 `stream_options.include_usage`。Provider 明确拒绝该选项时，AI 插件会移除该选项重试一次；即使没有精确 usage，正文流也会继续，并保留估算标记。
+
+上游请求等待响应头或流式首个 chunk 的单次尝试预算为 3 秒；发生超时、网络错误、429 或 5xx 时最多自动重试 3 次，并使用短暂退避。流式请求一旦已经向消费者交付 chunk，不再重试，以避免重复内容和重复计费。流开始后的持续生成仍受原有 120 秒总时限约束。

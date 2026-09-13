@@ -8,6 +8,7 @@ import {
 import init, {
   AI_CAPABILITIES,
   AI_CONFIG_FIELDS,
+  AI_REQUEST_LIMITS,
   AI_MODEL_CATALOG_CAPABILITY,
   createAiChatService,
   handleAiHttpRequest,
@@ -67,9 +68,9 @@ function initContext(overrides: Partial<PluginInitContext> = {}): {
   return { context, hooks, translations };
 }
 
-function runtime() {
+function runtime(signal?: AbortSignal) {
   return createCapabilityRuntimeContext({
-    request: new Request('https://example.com/'),
+    request: new Request('https://example.com/', { signal }),
     db: {} as any,
     env: {},
     options: {},
@@ -105,6 +106,11 @@ describe('typecho-plugin-ai', () => {
     expect(AI_CONFIG_FIELDS.providers.itemFields?.enabled).toBeUndefined();
     expect(AI_CONFIG_FIELDS.providers.statusField).toBeUndefined();
     expect(AI_CONFIG_FIELDS.providers.itemFields?.models.itemFields?.enabled.type).toBe('select');
+  });
+
+  it('uses a short first-response budget without shortening the stream budget', () => {
+    expect(AI_REQUEST_LIMITS.initialTimeoutMs).toBe(3_000);
+    expect(AI_REQUEST_LIMITS.timeoutMs).toBe(120_000);
   });
   it('publishes the chat model catalog capability for other plugins', () => {
     const { context } = initContext();
@@ -325,7 +331,7 @@ describe('typecho-plugin-ai', () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
-  it('supports audio output and keeps upstream errors single-attempt', async () => {
+  it('supports audio output, retries transient upstream errors, and keeps client errors single-attempt', async () => {
     const fetcher = vi.fn(async () => upstreamJson({
       id: 'audio-1',
       choices: [{
@@ -347,10 +353,22 @@ describe('typecho-plugin-ai', () => {
     expect((result as AiChatResponse).choices[0].message.audio?.data).toEqual(new Uint8Array([1, 2]));
 
     const failingFetcher = vi.fn(async () => upstreamJson({}, 503)) as unknown as typeof fetch;
-    const failingService = createAiChatService(runtime(), config(), { fetcher: failingFetcher });
+    const failingService = createAiChatService(runtime(), config(), {
+      fetcher: failingFetcher,
+      retryBackoffMs: [0, 0, 0],
+    });
     await expect(failingService.generate({ model: 'chat', messages: [{ role: 'user', content: 'x' }] }))
       .rejects.toMatchObject({ code: 'upstream-server-error' });
-    expect(failingFetcher).toHaveBeenCalledTimes(1);
+    expect(failingFetcher).toHaveBeenCalledTimes(4);
+
+    const clientErrorFetcher = vi.fn(async () => upstreamJson({ error: { message: 'bad request' } }, 400)) as unknown as typeof fetch;
+    const clientErrorService = createAiChatService(runtime(), config(), {
+      fetcher: clientErrorFetcher,
+      retryBackoffMs: [0, 0, 0],
+    });
+    await expect(clientErrorService.generate({ model: 'chat', messages: [{ role: 'user', content: 'x' }] }))
+      .rejects.toMatchObject({ code: 'upstream-client-error' });
+    expect(clientErrorFetcher).toHaveBeenCalledTimes(1);
   });
 
   it('aborts a hanging upstream fetch within the single request deadline', async () => {
@@ -361,6 +379,7 @@ describe('typecho-plugin-ai', () => {
     }) as unknown as typeof fetch;
     const service = createAiChatService(runtime(), config(), {
       fetcher,
+      retryBackoffMs: [0, 0, 0],
       limits: {
         timeoutMs: 20,
         requestBodyBytes: 1024,
@@ -376,6 +395,45 @@ describe('typecho-plugin-ai', () => {
     await expect(service.generate({ model: 'chat', messages: [{ role: 'user', content: 'x' }] }))
       .rejects.toMatchObject({ code: 'upstream-timeout' });
     expect(aborted).toBe(true);
+    expect(fetcher).toHaveBeenCalledTimes(4);
+  });
+
+  it('retries a transient response read failure', async () => {
+    let call = 0;
+    const fetcher = vi.fn(async () => {
+      call += 1;
+      if (call === 1) {
+        return new Response(new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.error(new Error('connection reset'));
+          },
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return upstreamJson({
+        id: 'retry-1',
+        choices: [{ message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+      });
+    }) as unknown as typeof fetch;
+    const service = createAiChatService(runtime(), config(), {
+      fetcher,
+      retryBackoffMs: [0, 0, 0],
+      limits: {
+        timeoutMs: 100,
+        initialTimeoutMs: 20,
+        requestBodyBytes: 1024,
+        responseBodyBytes: 1024,
+        maxMessages: 10,
+        maxTools: 4,
+        maxToolSchemaBytes: 1024,
+        maxTextBytes: 1024,
+        maxMediaBytes: 1024,
+      },
+    });
+
+    const result = await service.generate({ model: 'chat', messages: [{ role: 'user', content: 'x' }] });
+
+    expect((result as AiChatResponse).choices[0].message.content).toBe('ok');
+    expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
   it('normalizes streaming tool-call fragments through the same capability', async () => {
@@ -430,6 +488,115 @@ describe('typecho-plugin-ai', () => {
     }));
     const sentBody = JSON.parse(String((fetcher as any).mock.calls[0][1].body));
     expect(sentBody.stream_options).toEqual({ include_usage: true });
+  });
+
+  it('retries a stream timeout before the first chunk', async () => {
+    const encoder = new TextEncoder();
+    let call = 0;
+    const fetcher = vi.fn(async () => {
+      call += 1;
+      if (call === 1) {
+        return new Response(new ReadableStream<Uint8Array>({
+          pull() {
+            return new Promise<never>(() => {});
+          },
+        }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+      }
+      return new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n'));
+          controller.close();
+        },
+      }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+    }) as unknown as typeof fetch;
+    const service = createAiChatService(runtime(), config(), {
+      fetcher,
+      retryBackoffMs: [0, 0, 0],
+      limits: {
+        timeoutMs: 100,
+        initialTimeoutMs: 10,
+        requestBodyBytes: 1024,
+        responseBodyBytes: 1024,
+        maxMessages: 10,
+        maxTools: 4,
+        maxToolSchemaBytes: 1024,
+        maxTextBytes: 1024,
+        maxMediaBytes: 1024,
+      },
+    });
+
+    const progress = vi.fn();
+    const result = await service.generate(
+      { model: 'chat', messages: [{ role: 'user', content: 'x' }], stream: true },
+      { onProgress: progress },
+    );
+    const chunks = await readStream(result as ReadableStream<any>);
+
+    expect(chunks[0].choices[0].delta.content).toBe('ok');
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    const completed = progress.mock.calls.filter(([event]) => event.phase === 'completed');
+    expect(completed).toHaveLength(1);
+    expect(completed[0][0]).toEqual(expect.objectContaining({ timeToFirstTokenMs: expect.any(Number) }));
+  });
+
+  it('does not retry a stream after delivering the first chunk', async () => {
+    const encoder = new TextEncoder();
+    const fetcher = vi.fn(async () => new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"partial"}}]}\n\n'));
+      },
+      pull() {
+        return new Promise<never>(() => {});
+      },
+    }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })) as unknown as typeof fetch;
+    const service = createAiChatService(runtime(), config(), {
+      fetcher,
+      retryBackoffMs: [0, 0, 0],
+      limits: {
+        timeoutMs: 20,
+        initialTimeoutMs: 10,
+        requestBodyBytes: 1024,
+        responseBodyBytes: 1024,
+        maxMessages: 10,
+        maxTools: 4,
+        maxToolSchemaBytes: 1024,
+        maxTextBytes: 1024,
+        maxMediaBytes: 1024,
+      },
+    });
+
+    const result = await service.generate({ model: 'chat', messages: [{ role: 'user', content: 'x' }], stream: true });
+    const reader = (result as ReadableStream<any>).getReader();
+    const first = await reader.read();
+    expect(first.value.choices[0].delta.content).toBe('partial');
+    await expect(reader.read()).rejects.toMatchObject({ code: 'upstream-timeout' });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not retry after the caller aborts the request', async () => {
+    const abortController = new AbortController();
+    const fetcher = vi.fn(async () => new Promise<Response>(() => {})) as unknown as typeof fetch;
+    const service = createAiChatService(runtime(abortController.signal), config(), {
+      fetcher,
+      retryBackoffMs: [0, 0, 0],
+      limits: {
+        timeoutMs: 100,
+        initialTimeoutMs: 20,
+        requestBodyBytes: 1024,
+        responseBodyBytes: 1024,
+        maxMessages: 10,
+        maxTools: 4,
+        maxToolSchemaBytes: 1024,
+        maxTextBytes: 1024,
+        maxMediaBytes: 1024,
+      },
+    });
+
+    const pending = service.generate({ model: 'chat', messages: [{ role: 'user', content: 'x' }] });
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+    abortController.abort();
+    await expect(pending).rejects.toMatchObject({ code: 'upstream-timeout' });
+    expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
   it('retries a stream once without include_usage when the provider rejects that option', async () => {

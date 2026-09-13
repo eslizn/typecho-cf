@@ -37,9 +37,15 @@ import type {
 } from './types';
 import type { AiConfig } from './types';
 
+const MAX_UPSTREAM_RETRIES = 3;
+const DEFAULT_RETRY_BACKOFF_MS = [100, 200, 400] as const;
+const MAX_RETRY_BACKOFF_MS = 1_000;
+
 export interface AiChatServiceOptions {
   fetcher?: typeof fetch;
   limits?: AiRequestLimits;
+  /** Internal test seam; production uses the bounded defaults above. */
+  retryBackoffMs?: readonly number[];
 }
 
 export function createAiChatService(
@@ -49,6 +55,8 @@ export function createAiChatService(
 ): AiChatGenerationService {
   const fetcher = options.fetcher ?? fetch;
   const limits = options.limits ?? AI_REQUEST_LIMITS;
+  const initialTimeoutMs = limits.initialTimeoutMs ?? limits.timeoutMs;
+  const retryBackoffMs = options.retryBackoffMs ?? DEFAULT_RETRY_BACKOFF_MS;
 
   return {
     async generate(request: AiChatRequest, options?: AiGenerationOptions): Promise<AiChatResult> {
@@ -74,56 +82,201 @@ export function createAiChatService(
         }
 
         const candidate = selection.candidate;
-        const deadline = Date.now() + limits.timeoutMs;
-        const upstreamMessages = await convertMessages(request.messages, limits.maxMediaBytes, runtime.signal, deadline);
+        const preparationDeadline = Date.now() + initialTimeoutMs;
+        const upstreamMessages = await convertMessages(request.messages, limits.maxMediaBytes, runtime.signal, preparationDeadline);
         const upstreamRequest = withDefaultStreamUsage(request);
         const encodedBody = encodeRequestBody(upstreamRequest, candidate, upstreamMessages, limits.requestBodyBytes);
 
-        let response = await fetchUpstream(
-          candidate,
-          encodedBody,
-          request.stream === true,
-          runtime,
-          fetcher,
-          deadline,
-        );
-        if (
-          !response.ok
-          && request.stream === true
-          && upstreamRequest.stream_options?.include_usage === true
-          && await providerRejectedStreamUsage(response, runtime, deadline)
-        ) {
-          const fallbackRequest = withoutStreamUsage(upstreamRequest);
-          const fallbackBody = encodeRequestBody(fallbackRequest, candidate, upstreamMessages, limits.requestBodyBytes);
-          response = await fetchUpstream(candidate, fallbackBody, true, runtime, fetcher, deadline);
-        }
-        if (!response.ok) throw await upstreamError(response);
         if (request.stream === true) {
-          if (!response.body) throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream returned an empty stream.');
-          return createChatStream(
-            response.body,
-            candidate,
-            limits.responseBodyBytes,
-            limits.maxMediaBytes,
-            runtime.signal,
-            deadline,
-            {
-              onChunk: reporter.reportChunk,
-              onComplete: reporter.complete,
-              onError: reporter.fail,
+          return createRetryingChatStream(
+            async retryCount => {
+              if (retryCount > 0) reporter.reportPhase('requesting');
+              const attemptStartedAt = Date.now();
+              const responseDeadline = attemptStartedAt + initialTimeoutMs;
+              const streamDeadline = attemptStartedAt + limits.timeoutMs;
+              const response = await openUpstreamResponse(
+                candidate,
+                upstreamRequest,
+                upstreamMessages,
+                encodedBody,
+                true,
+                runtime,
+                fetcher,
+                responseDeadline,
+                limits.requestBodyBytes,
+              );
+              if (!response.body) {
+                throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream returned an empty stream.');
+              }
+              return createChatStream(
+                response.body,
+                candidate,
+                limits.responseBodyBytes,
+                limits.maxMediaBytes,
+                runtime.signal,
+                streamDeadline,
+                {
+                  onChunk: reporter.reportChunk,
+                  onComplete: reporter.complete,
+                },
+              );
             },
+            runtime.signal,
+            initialTimeoutMs,
+            retryBackoffMs,
+            () => reporter.fail(),
           );
         }
-        const upstream = await readJsonBounded(response, limits.responseBodyBytes, runtime.signal, deadline);
-        const normalized = normalizeChatResponse(upstream, candidate, limits.maxMediaBytes);
-        reporter.complete(normalized.usage);
-        return normalized;
+
+        let retryCount = 0;
+        while (true) {
+          try {
+            if (retryCount > 0) reporter.reportPhase('requesting');
+            const deadline = Date.now() + initialTimeoutMs;
+            const response = await openUpstreamResponse(
+              candidate,
+              upstreamRequest,
+              upstreamMessages,
+              encodedBody,
+              false,
+              runtime,
+              fetcher,
+              deadline,
+              limits.requestBodyBytes,
+            );
+            const upstream = await readJsonBounded(response, limits.responseBodyBytes, runtime.signal, deadline);
+            const normalized = normalizeChatResponse(upstream, candidate, limits.maxMediaBytes);
+            reporter.complete(normalized.usage);
+            return normalized;
+          } catch (error) {
+            if (!canRetry(error, runtime.signal, retryCount)) throw error;
+            const delayMs = retryDelayMs(retryBackoffMs, retryCount);
+            retryCount += 1;
+            await waitBeforeRetry(delayMs, runtime.signal);
+            if (runtime.signal.aborted) throw error;
+          }
+        }
       } catch (error) {
         reporter.fail();
         throw error;
       }
     },
   };
+}
+
+async function openUpstreamResponse(
+  candidate: AiModelCandidate,
+  request: AiChatRequest,
+  messages: AiChatMessage[],
+  body: string,
+  stream: boolean,
+  runtime: AiRuntimeContext,
+  fetcher: typeof fetch,
+  deadline: number,
+  maxRequestBodyBytes: number,
+): Promise<Response> {
+  let response = await fetchUpstream(candidate, body, stream, runtime, fetcher, deadline);
+  if (
+    !response.ok
+    && stream
+    && request.stream_options?.include_usage === true
+    && await providerRejectedStreamUsage(response, runtime, deadline)
+  ) {
+    const fallbackRequest = withoutStreamUsage(request);
+    const fallbackBody = encodeRequestBody(fallbackRequest, candidate, messages, maxRequestBodyBytes);
+    response = await fetchUpstream(candidate, fallbackBody, true, runtime, fetcher, deadline);
+  }
+  if (!response.ok) throw await upstreamError(response);
+  return response;
+}
+
+function canRetry(error: unknown, signal: AbortSignal, retryCount: number): boolean {
+  return retryCount < MAX_UPSTREAM_RETRIES
+    && !signal.aborted
+    && error instanceof AiCapabilityError
+    && error.retryable;
+}
+
+function retryDelayMs(delays: readonly number[], retryCount: number): number {
+  if (delays.length === 0) return 0;
+  const configured = delays[Math.min(retryCount, delays.length - 1)];
+  if (typeof configured !== 'number' || !Number.isFinite(configured) || configured <= 0) return 0;
+  return Math.min(configured, MAX_RETRY_BACKOFF_MS);
+}
+
+async function waitBeforeRetry(delayMs: number, signal: AbortSignal): Promise<void> {
+  if (delayMs <= 0 || signal.aborted) return;
+  await new Promise<void>(resolve => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const finish = () => {
+      if (timer !== undefined) clearTimeout(timer);
+      signal.removeEventListener('abort', finish);
+      resolve();
+    };
+    timer = setTimeout(finish, delayMs);
+    signal.addEventListener('abort', finish, { once: true });
+  });
+}
+
+function createRetryingChatStream(
+  open: (retryCount: number) => Promise<ReadableStream<AiChatStreamChunk>>,
+  signal: AbortSignal,
+  firstChunkTimeoutMs: number,
+  retryBackoffMs: readonly number[],
+  onFinalError: () => void,
+): ReadableStream<AiChatStreamChunk> {
+  let cancelled = false;
+  let activeReader: ReadableStreamDefaultReader<AiChatStreamChunk> | undefined;
+
+  return new ReadableStream<AiChatStreamChunk>({
+    async start(controller) {
+      let deliveredChunk = false;
+      for (let retryCount = 0; ; retryCount += 1) {
+        if (cancelled || signal.aborted) return;
+        let reader: ReadableStreamDefaultReader<AiChatStreamChunk> | undefined;
+        try {
+          const stream = await open(retryCount);
+          if (cancelled || signal.aborted) {
+            await stream.cancel();
+            return;
+          }
+          reader = stream.getReader();
+          activeReader = reader;
+          let firstRead = true;
+          while (true) {
+            const next = firstRead
+              ? await readWithDeadline(reader, Date.now() + firstChunkTimeoutMs, signal, aiTimeoutError())
+              : await reader.read();
+            firstRead = false;
+            if (next.done) {
+              if (cancelled || signal.aborted) return;
+              controller.close();
+              return;
+            }
+            deliveredChunk = true;
+            controller.enqueue(next.value);
+          }
+        } catch (error) {
+          if (cancelled || signal.aborted) return;
+          if (!deliveredChunk && canRetry(error, signal, retryCount)) {
+            await waitBeforeRetry(retryDelayMs(retryBackoffMs, retryCount), signal);
+            if (cancelled || signal.aborted) return;
+            continue;
+          }
+          onFinalError();
+          try { controller.error(error); } catch { /* the consumer may have cancelled */ }
+          return;
+        } finally {
+          if (activeReader === reader) activeReader = undefined;
+          try { reader?.releaseLock(); } catch { /* already released */ }
+        }
+      }
+    },
+    cancel() {
+      cancelled = true;
+      void activeReader?.cancel().catch(() => {});
+    },
+  });
 }
 
 export function validateChatRequest(request: AiChatRequest, limits: AiRequestLimits = AI_REQUEST_LIMITS): void {
@@ -440,6 +593,8 @@ async function fetchUpstream(
     throw new AiCapabilityError(
       AI_ERROR_CODES.upstreamServerError,
       error instanceof Error ? `The upstream request failed: ${error.message}` : 'The upstream request failed.',
+      502,
+      true,
     );
   } finally {
     if (timer !== undefined) clearTimeout(timer);
@@ -452,15 +607,15 @@ async function upstreamError(response: Response): Promise<AiCapabilityError> {
   const code = status >= 500 || status === 429
     ? AI_ERROR_CODES.upstreamServerError
     : AI_ERROR_CODES.upstreamClientError;
-  return new AiCapabilityError(code, `The upstream returned HTTP ${status}.`);
+  return new AiCapabilityError(code, `The upstream returned HTTP ${status}.`, 502, code === AI_ERROR_CODES.upstreamServerError);
 }
 
 function normalizeChatResponse(body: unknown, candidate: AiModelCandidate, maxMediaBytes: number): AiChatResponse {
   if (!isRecord(body) || !Array.isArray(body.choices)) {
-    throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream returned an invalid chat response.');
+    throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream returned an invalid chat response.', 502, false);
   }
   const choices = body.choices.map((choice, index) => {
-    if (!isRecord(choice)) throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream returned an invalid choice.');
+    if (!isRecord(choice)) throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream returned an invalid choice.', 502, false);
     const message = isRecord(choice.message) ? choice.message : {};
     return {
       index: numberOr(index, choice.index),
@@ -626,18 +781,24 @@ async function readJsonBounded(
   signal: AbortSignal,
   deadline: number,
 ): Promise<unknown> {
-  const bytes = await readBoundedBytes(response.body, {
-    maxBytes,
-    signal,
-    deadline,
-    declaredLength: response.headers.get('content-length'),
-    tooLarge: () => new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream response is too large.'),
-  });
+  let bytes: Uint8Array | null;
+  try {
+    bytes = await readBoundedBytes(response.body, {
+      maxBytes,
+      signal,
+      deadline,
+      declaredLength: response.headers.get('content-length'),
+      tooLarge: () => new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream response is too large.', 502, false),
+    });
+  } catch (error) {
+    if (error instanceof AiCapabilityError) throw error;
+    throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream response could not be read.', 502, true, { cause: error });
+  }
   if (!bytes) return null;
   try {
     return JSON.parse(new TextDecoder().decode(bytes));
   } catch {
-    throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream returned malformed JSON.');
+    throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream returned malformed JSON.', 502, false);
   }
 }
 

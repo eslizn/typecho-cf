@@ -96,6 +96,14 @@ describe('Admin layout rendering', () => {
     expect(html).toContain('window.history.replaceState');
   });
 
+  it('does not lock the editor form after a new-tab preview submission', async () => {
+    const html = await renderAdmin();
+
+    expect(html).toContain("if (submitter && (submitter.formTarget === '_blank'");
+    expect(html).toContain('document.activeElement.form === this');
+    expect(html).toContain("$(submitter).attr('formtarget') === '_blank'");
+  });
+
   it('marks the active menu entry', async () => {
     const html = await renderAdmin({ activeMenu: 'manage-queues' });
 

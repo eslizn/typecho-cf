@@ -38,7 +38,8 @@ type ContentRow = typeof schema.contents.$inferSelect;
 type CommentRow = typeof schema.comments.$inferSelect;
 type MetaRow = typeof schema.metas.$inferSelect;
 type UserRow = typeof schema.users.$inferSelect;
-type CategoryEntry = { name: string; slug: string; permalink: string };
+export type ContentTermEntry = { name: string; slug: string; permalink: string };
+type CategoryEntry = ContentTermEntry;
 type CategoryMap = Map<number, CategoryEntry[]>;
 type AuthorEntry = { uid: number; name: string | null; screenName: string | null };
 type AuthorMap = Map<number, AuthorEntry>;
@@ -689,12 +690,28 @@ export interface PreparePostResult {
   redirect?: never;
 }
 
+/**
+ * Optional overrides for authenticated single-content previews.
+ *
+ * `allowPreview` is intentionally an explicit opt-in: the normal public
+ * content routes must continue enforcing draft/private visibility. Preview
+ * callers are responsible for authenticating and authorizing the request
+ * before using this flag.
+ */
+export interface SingleContentOptions {
+  allowPreview?: boolean;
+  permalink?: string;
+  categories?: ContentTermEntry[];
+  tags?: ContentTermEntry[];
+}
+
 export async function preparePostData(
   ctx: RequestContext,
   cidNum: number,
   requestUrl: string,
   suppliedPassword: string | null,
   preloadedRow?: ContentRow | null,
+  singleOptions: SingleContentOptions = {},
 ): Promise<ThemePostProps | Response> {
   const { db, options, urls, user, isLoggedIn } = ctx;
 
@@ -706,7 +723,7 @@ export async function preparePostData(
 
   if (!contentRow) return new Response(getRequestI18n(ctx).t('core.error.notFound', {}, 'Not Found'), { status: 404 });
 
-  if (!canViewContent(contentRow, { isLoggedIn, uid: user?.uid })) {
+  if (!singleOptions.allowPreview && !canViewContent(contentRow, { isLoggedIn, uid: user?.uid })) {
     return new Response(getRequestI18n(ctx).t('core.error.notFound', {}, 'Not Found'), { status: 404 });
   }
 
@@ -783,12 +800,12 @@ export async function preparePostData(
   const allComments = commentPage.rows;
 
   type MetaEntry = { name: string | null; slug: string | null; type: string | null };
-  const categories = (relatedMetas as MetaEntry[]).filter(m => m.type === 'category').map(m => ({
+  const categories = singleOptions.categories ?? (relatedMetas as MetaEntry[]).filter(m => m.type === 'category').map(m => ({
     name: m.name || '',
     slug: m.slug || '',
     permalink: buildCategoryLink(m.slug || '', urls.siteUrl, options.categoryPattern as string | undefined),
   }));
-  const tags = (relatedMetas as MetaEntry[]).filter(m => m.type === 'tag').map(m => ({
+  const tags = singleOptions.tags ?? (relatedMetas as MetaEntry[]).filter(m => m.type === 'tag').map(m => ({
     name: m.name || '',
     slug: m.slug || '',
     permalink: buildTagLink(m.slug || '', urls.siteUrl),
@@ -799,7 +816,7 @@ export async function preparePostData(
     ? await buildGravatarMap(allComments, options.commentsAvatarRating || 'G')
     : {};
 
-  const permalink = buildPermalink(
+  const permalink = singleOptions.permalink ?? buildPermalink(
     { cid: contentRow.cid, slug: contentRow.slug, type: contentRow.type, created: contentRow.created, category: categories[0]?.slug },
     urls.siteUrl,
     options.permalinkPattern as string | undefined,
@@ -856,6 +873,7 @@ export async function preparePageData(
   requestUrl: string,
   suppliedPassword: string | null,
   preloadedRow?: ContentRow | null,
+  singleOptions: SingleContentOptions = {},
 ): Promise<ThemePageProps | Response> {
   const { db, options, urls, user, isLoggedIn } = ctx;
 
@@ -867,7 +885,7 @@ export async function preparePageData(
 
   if (!pageRow) return new Response(getRequestI18n(ctx).t('core.error.notFound', {}, 'Not Found'), { status: 404 });
 
-  if (!canViewContent(pageRow, { isLoggedIn, uid: user?.uid })) {
+  if (!singleOptions.allowPreview && !canViewContent(pageRow, { isLoggedIn, uid: user?.uid })) {
     return new Response(getRequestI18n(ctx).t('core.error.notFound', {}, 'Not Found'), { status: 404 });
   }
 
@@ -891,7 +909,7 @@ export async function preparePageData(
     displayPageRow,
   );
 
-  const permalink = buildPermalink(
+  const permalink = singleOptions.permalink ?? buildPermalink(
     { cid: pageRow.cid, slug: pageRow.slug, type: pageRow.type, created: pageRow.created },
     urls.siteUrl,
     undefined,

@@ -215,7 +215,7 @@ const editorMessagesJson = safeJsonForScript({
           <input type="hidden" name="do" value={isEdit ? 'update' : 'create'} />
           <input type="hidden" name="type" value="post" />
           {isEdit && <input type="hidden" name="cid" value={String(post.cid)} />}
-          <button type="button" id="btn-preview" class="btn">{t('admin.action.preview', {}, 'Preview')} {t('admin.field.post', {}, 'post')}</button>
+          <button type="submit" formaction="/admin/content-preview" formmethod="post" formtarget="_blank" id="btn-preview" class="btn">{t('admin.action.preview', {}, 'Preview')}</button>
           <button type="submit" name="status" value="draft" id="btn-save" class="btn">{t('admin.action.saveDraft', {}, 'Save draft')}</button>
           <button type="submit" name="status" value="publish" class="btn primary" id="btn-submit">{t('admin.option.publish', {}, 'Publish')} {t('admin.field.post', {}, 'post')}</button>
           {isMarkdown && <input type="hidden" name="markdown" value="1" />}

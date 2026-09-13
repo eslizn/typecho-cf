@@ -1,0 +1,267 @@
+---
+import { themeTemplates } from 'virtual:theme-templates';
+import { and, eq, inArray } from 'drizzle-orm';
+import { schema } from '@/db';
+import { createContext, requireAuth } from '@/lib/context';
+import { canUseContentEditor, isSameOriginRequest } from '@/lib/admin-auth';
+import { validateSecurityToken } from '@/lib/auth';
+import { buildCategoryLink, buildTagLink } from '@/lib/content';
+import { REQUEST_BODY_LIMITS } from '@/lib/constants';
+import { i18nMessage } from '@/lib/i18n';
+import { normalizeSlug, parsePositiveInteger, readAdminFormOrError } from '@/lib/input';
+import { textError } from '@/lib/http';
+import {
+  preparePageData,
+  preparePostData,
+  type ContentTermEntry,
+  type SingleContentOptions,
+} from '@/lib/page-data';
+import type { ThemePageProps, ThemePostProps } from '@/lib/theme-props';
+
+const ctx = await createContext(Astro.locals, Astro.request);
+const noStoreHeaders = {
+  'Cache-Control': 'no-store, private',
+  'X-Robots-Tag': 'noindex, nofollow, noarchive',
+};
+
+for (const [name, value] of Object.entries(noStoreHeaders)) {
+  Astro.response.headers.set(name, value);
+}
+
+function withPreviewHeaders(response: Response): Response {
+  const headers = new Headers(response.headers);
+  for (const [name, value] of Object.entries(noStoreHeaders)) headers.set(name, value);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+function errorResponse(status: number, key: string, fallback: string): Response {
+  return textError(status, i18nMessage(key, fallback), noStoreHeaders, ctx.i18n);
+}
+
+const authCheck = requireAuth(ctx);
+if (authCheck) return withPreviewHeaders(authCheck);
+
+if (Astro.request.method !== 'POST') {
+  return withPreviewHeaders(new Response('Method Not Allowed', {
+    status: 405,
+    headers: { Allow: 'POST' },
+  }));
+}
+
+if (!ctx.user || !ctx.options.secret || !ctx.user.authCode) {
+  return errorResponse(401, 'core.error.unauthorized', 'Unauthorized');
+}
+
+if (!isSameOriginRequest(Astro.request, ctx.options.siteUrl || '')) {
+  return errorResponse(403, 'core.error.forbidden', 'Forbidden');
+}
+
+const formData = await readAdminFormOrError(
+  Astro.request,
+  REQUEST_BODY_LIMITS.adminForm,
+  ctx.i18n,
+);
+if (formData instanceof Response) return withPreviewHeaders(formData);
+
+const csrfToken = formData.get('_');
+if (typeof csrfToken !== 'string' || !(await validateSecurityToken(
+  csrfToken,
+  ctx.options.secret,
+  ctx.user.authCode,
+  ctx.user.uid,
+))) {
+  return errorResponse(403, 'core.error.csrf', 'CSRF validation failed');
+}
+
+const formString = (name: string): string => {
+  const value = formData.get(name);
+  return typeof value === 'string' ? value : '';
+};
+
+const typeInput = formString('type').trim();
+if (typeInput !== 'post' && typeInput !== 'page') {
+  return errorResponse(400, 'core.error.badRequest', 'Bad Request');
+}
+const type = typeInput;
+const requiredGroup: 'contributor' | 'editor' = type === 'page' ? 'editor' : 'contributor';
+if (!canUseContentEditor(ctx.user, null, requiredGroup)) {
+  return errorResponse(403, 'core.error.forbidden', 'Forbidden');
+}
+
+const rawCid = formString('cid').trim();
+const cid = rawCid ? parsePositiveInteger(rawCid) : null;
+if (rawCid && cid === null) {
+  return errorResponse(400, 'core.error.badRequest', 'Bad Request');
+}
+
+const existing = cid
+  ? await ctx.db.query.contents.findFirst({ where: eq(schema.contents.cid, cid) })
+  : null;
+if (cid && !existing) {
+  return errorResponse(404, 'core.error.notFound', 'Not Found');
+}
+if (existing) {
+  const existingType = existing.type?.startsWith('page')
+    ? 'page'
+    : existing.type?.startsWith('post')
+      ? 'post'
+      : null;
+  if (existingType !== type) {
+    return errorResponse(400, 'core.error.badRequest', 'Bad Request');
+  }
+  if (!canUseContentEditor(ctx.user, existing, requiredGroup)) {
+    return errorResponse(403, 'core.error.forbidden', 'Forbidden');
+  }
+}
+
+const title = formString('title').trim();
+if (title.length > 255) {
+  return errorResponse(400, 'core.error.badRequest', 'Bad Request');
+}
+
+const maxContentLength = 256 * 1024;
+let text = formString('text');
+if (formString('markdown') === '1' && !text.startsWith('<!--markdown-->')) {
+  text = '<!--markdown-->' + text;
+}
+if (text.length > maxContentLength) {
+  return errorResponse(413, 'core.error.requestBodyTooLarge', 'Request body too large');
+}
+
+const slug = normalizeSlug(formString('slug'), existing?.slug || title || 'preview');
+const templateValue = formString('template').trim();
+if (templateValue.length > 255) {
+  return errorResponse(400, 'core.error.badRequest', 'Bad Request');
+}
+const passwordValue = formString('password').trim();
+if (passwordValue.length > 255) {
+  return errorResponse(400, 'core.error.badRequest', 'Bad Request');
+}
+
+const now = Math.floor(Date.now() / 1000);
+const scheduleDate = formString('date').trim();
+let created = now;
+if (scheduleDate) {
+  const parsed = Math.floor(new Date(scheduleDate).getTime() / 1000);
+  if (Number.isFinite(parsed) && parsed > 0) created = Math.min(parsed, 8_640_000_000_000);
+}
+
+const parsedOrder = Number.parseInt(formString('order') || '0', 10);
+const order = Number.isFinite(parsedOrder)
+  ? Math.max(-2_147_483_648, Math.min(2_147_483_647, parsedOrder))
+  : 0;
+
+// Keep the virtual row private to this request. A draft type prevents the
+// preview from being mistaken for public content by hooks, while the explicit
+// page-data preview flag below avoids the normal public visibility gate.
+const previewRow = {
+  cid: 0,
+  title,
+  slug,
+  created,
+  modified: now,
+  text,
+  order,
+  authorId: existing?.authorId ?? ctx.user.uid,
+  template: templateValue || null,
+  type: `${type}_draft`,
+  status: 'draft',
+  password: passwordValue || null,
+  commentsNum: 0,
+  // A preview has no persisted content ID, so it must not expose a comment
+  // form that could submit against an unrelated or synthetic target.
+  allowComment: '0',
+  allowPing: formData.get('allowPing') ? '1' : '0',
+  allowFeed: formData.get('allowFeed') ? '1' : '0',
+  parent: 0,
+} satisfies typeof schema.contents.$inferSelect;
+
+const categoryIds = type === 'post'
+  ? [...new Set(formData.getAll('category[]')
+      .map(value => typeof value === 'string' ? parsePositiveInteger(value) : null)
+      .filter((value): value is number => value !== null))].slice(0, 100)
+  : [];
+
+let categories: ContentTermEntry[] = [];
+if (categoryIds.length > 0) {
+  const categoryRows = await ctx.db
+    .select({ mid: schema.metas.mid, name: schema.metas.name, slug: schema.metas.slug })
+    .from(schema.metas)
+    .where(and(
+      eq(schema.metas.type, 'category'),
+      inArray(schema.metas.mid, categoryIds),
+    ));
+  const categoryById = new Map(categoryRows.map(row => [row.mid, row]));
+  categories = categoryIds
+    .map(mid => categoryById.get(mid))
+    .filter((row): row is (typeof categoryRows)[number] => !!row)
+    .map(row => ({
+      name: row.name || '',
+      slug: row.slug || '',
+      permalink: buildCategoryLink(
+        row.slug || '',
+        ctx.urls.siteUrl,
+        ctx.options.categoryPattern as string | undefined,
+      ),
+    }));
+}
+
+const tagNames = [...new Set(formString('tags')
+  .split(',')
+  .map(value => value.trim().slice(0, 150))
+  .filter(Boolean))].slice(0, 50);
+const tags: ContentTermEntry[] = tagNames.map(name => {
+  const tagSlug = normalizeSlug(name, 'tag');
+  return {
+    name,
+    slug: tagSlug,
+    permalink: buildTagLink(tagSlug, ctx.urls.siteUrl),
+  };
+});
+
+// The unsaved row has no public URL. Keep theme title links on this rendered
+// document instead of pointing them at the POST-only preview endpoint.
+const previewPermalink = '#preview';
+const singleOptions: SingleContentOptions = {
+  allowPreview: true,
+  permalink: previewPermalink,
+  ...(type === 'post' ? { categories, tags } : {}),
+};
+
+let previewResult: ThemePageProps | ThemePostProps;
+let PreviewComponent: any;
+const activeTheme = ctx.options.theme || 'typecho-theme-minimal';
+const templates = themeTemplates[activeTheme] ?? {};
+const defaultTemplates = themeTemplates['typecho-theme-minimal']!;
+
+if (type === 'page') {
+  const prepared = await preparePageData(
+    ctx,
+    slug,
+    Astro.request.url,
+    passwordValue || null,
+    previewRow,
+    singleOptions,
+  );
+  if (prepared instanceof Response) return withPreviewHeaders(prepared);
+  previewResult = prepared;
+  PreviewComponent = templates.Page ?? defaultTemplates.Page!;
+} else {
+  const prepared = await preparePostData(
+    ctx,
+    0,
+    Astro.request.url,
+    passwordValue || null,
+    previewRow,
+    singleOptions,
+  );
+  if (prepared instanceof Response) return withPreviewHeaders(prepared);
+  previewResult = prepared;
+  PreviewComponent = templates.Post ?? defaultTemplates.Post!;
+}
+---
+<PreviewComponent {...previewResult} />

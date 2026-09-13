@@ -36,6 +36,27 @@ describe('admin editor bootstrap', () => {
     expect(contents).not.toContain("t('admin.action.save', {}, 'Save')} {t('admin.option.draft'");
   });
 
+  it.each(PAGES)('%s submits the page preview without saving', (path) => {
+    const contents = source(path);
+    expect(contents).toContain('formaction="/admin/content-preview"');
+    expect(contents).toContain('formmethod="post"');
+    expect(contents).toContain('formtarget="_blank"');
+    expect(contents).toContain("t('admin.action.preview', {}, 'Preview')}</button>");
+    expect(contents).not.toContain("t('admin.action.preview', {}, 'Preview')} {t('admin.field");
+  });
+
+  it('does not keep the old local-preview button handler', () => {
+    const component = source('src/components/admin/EditorScript.astro');
+    expect(component).not.toContain("$('#btn-preview').click");
+    expect(component).toContain("$('#btn-cancel-preview').click");
+  });
+
+  it('keeps the unsaved preview permalink on the preview document', () => {
+    const route = source('src/pages/admin/content-preview.astro');
+    expect(route).toContain("const previewPermalink = '#preview'");
+    expect(route).not.toContain("new URL('#preview', Astro.request.url).toString()");
+  });
+
   it('keeps the bootstrap in the component, parameterised by the message bundle', () => {
     const component = source('src/components/admin/EditorScript.astro');
     expect(component).toContain('<script type="application/json" id="editor-client-messages"');

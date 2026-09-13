@@ -482,7 +482,15 @@ const adminClientMessageJson = safeJsonForScript({
         });
 
         // 表单提交防重复（不 disable 按钮，否则被点击按钮的 name/value 不会随表单提交）
-        $('.main form').submit(function () {
+        // A preview is submitted to a new tab and leaves the editor in place,
+        // so it must not lock the current form as if a save had completed.
+        $('.main form').submit(function (e) {
+          var submitter = e.originalEvent && e.originalEvent.submitter;
+          if (!submitter && document.activeElement && document.activeElement.form === this) {
+            submitter = document.activeElement;
+          }
+          if (submitter && (submitter.formTarget === '_blank'
+            || $(submitter).attr('formtarget') === '_blank')) return;
           if ($(this).data('submitted')) return false;
           $(this).data('submitted', true);
         });

@@ -20,7 +20,7 @@ Chat 结果已经能够携带 `prompt_tokens`、`completion_tokens` 和 `total_t
 1. 为所有长耗时 AI Capability 定义统一、可选、请求级的进度与 usage 契约。
 2. 让 `ai.chat.generate` 在不破坏既有消费者的情况下提供实时遥测：任务阶段、耗时、输入/输出 Token、Token/s 和估算标记。
 3. 让 Scribe 在生成、润色、纠错期间实时展示任务和上行/下行 Token 速率，并在完成后展示最终统计。
-4. 建立清晰的 OpenAI 风格能力目录：已实现能力可解析调用，未来能力可登记为预留但不能伪装成已实现。
+4. 建立基于 OpenAI 基础能力的稳定 Capability ID 目录：已实现能力可解析调用，未来能力可登记为预留但不能伪装成已实现。
 5. 保持 AI 插件与具体消费者解耦，未来插件只依赖 Capability 契约，不读取 AI 配置或导入 AI 实现模块。
 6. 遥测只服务当前请求和当前编辑器会话，不新增 D1 用量表，不记录 Prompt、正文、API Key 或完整上游响应。
 
@@ -40,34 +40,12 @@ Chat 结果已经能够携带 `prompt_tokens`、`completion_tokens` 和 `total_t
 |---|---:|---|---|
 | `ai.chat.generate` | 1 | 已实现 | Chat Completions 语义；支持文本、图片/音频输入、音频输出、tools/function-call 兼容、普通结果和流式结果；增加可选进度观察器 |
 | `ai.models.list` | 1 | 已实现 | 返回公开模型选项；增加可选的完整模型元数据列表，保留 `listOptions()` 兼容现有 Scribe 配置页 |
-| `ai.capabilities.list` | 1 | 已实现 | 发布 AI 能力目录及实现/预留状态，供消费者发现能力；不作为模型配置中的模型能力 |
-
-`ai.capabilities.list` 只描述能力契约本身，不代表当前已经配置了可用模型。`implemented` 表示 AI 插件已注册对应 factory；调用仍可能因为没有可用模型而返回 `no-available-model`。`reserved` 只用于路线图和配置界面发现，不能被解析调用。
-
-```ts
-type AiCapabilityStatus = 'implemented' | 'reserved';
-
-interface AiCapabilityDescriptor {
-  capability: string;
-  version: number;
-  status: AiCapabilityStatus;
-  category: 'generation' | 'embedding' | 'image' | 'audio' | 'moderation' | 'resource';
-  inputModalities: ReadonlyArray<string>;
-  outputModalities: ReadonlyArray<string>;
-}
-
-interface AiCapabilityCatalogService {
-  listCapabilities(): ReadonlyArray<AiCapabilityDescriptor>;
-}
-```
-
-`ai.capabilities.list` 自身不出现在模型的 `capabilities` 多选项中；模型能力只引用具体操作（例如 `ai.chat.generate`）。
 
 `ai.chat.generate` 的进度参数和 `ai.models.list` 的扩展方法均为可选字段，因此 Capability 版本保持为 1。未理解这些可选字段的旧 Consumer/实现仍可完成原有调用。
 
 ### 近期预留能力
 
-这些 ID 纳入 AI 能力目录和模型配置枚举，但在对应工厂实现前保持 disabled，不允许配置成可解析的实现：
+这些 ID 作为 OpenAI 风格能力 ID 纳入插件文档和模型配置枚举，但在对应工厂实现前保持 disabled，不允许配置成可解析的实现：
 
 - `ai.responses.generate`
 - `ai.embeddings.create`
@@ -262,7 +240,7 @@ data: {"phase":"completed","usage":...,"elapsedMs":...}
 - progress phase、TTFT、输入/输出速率和 10 次/秒上限正确；
 - observer 抛错不影响生成；observer 不进入 Provider 请求 body；
 - `stream_options.include_usage` 的兼容转发不阻断不支持该字段的 Provider；
-- 模型目录 `listOptions()` 旧行为、`listModels()` 新元数据和 `ai.capabilities.list` 均不泄露凭据/内部 URL；
+- 模型目录 `listOptions()` 旧行为和 `listModels()` 新元数据均不泄露凭据/内部 URL；
 - 预留 Capability 仍不可解析，已禁用配置选项不会被伪造提交开启。
 
 ### Scribe 单元/渲染测试
@@ -282,7 +260,7 @@ data: {"phase":"completed","usage":...,"elapsedMs":...}
 ## 实施顺序
 
 1. 在 AI 类型和 Chat service 中加入规范化 usage、progress event、observer 安全调用与流式统计。
-2. 实现 `ai.capabilities.list`，扩展模型目录的可选元数据方法，整理完整能力目录和预留项，保持未实现项 disabled。
+2. 扩展模型目录的可选元数据方法，整理基于 OpenAI 基础能力的 ID 目录和预留项，保持未实现项 disabled。
 3. 在 Scribe 中加入 progress consumer、SSE 事件编码与兼容降级。
 4. 更新 Scribe 编辑器状态区、国际化文案和无 usage/估算展示。
 5. 添加单元、Scribe 渲染和 action 集成测试。
@@ -293,6 +271,6 @@ data: {"phase":"completed","usage":...,"elapsedMs":...}
 1. Scribe 的三种 AI 操作均能显示任务、阶段、上行/下行速率和最终 Token 统计。
 2. Provider 有真实 usage 时最终数值准确；无 usage 时明确标记估算或缺失。
 3. `ai.chat.generate` 的旧调用方无需修改即可继续工作。
-4. 消费者可以通过能力目录发现当前/预留能力；未来 AI 能力可复用同一套 usage/progress 契约，且未实现能力不会被错误解析。
+4. 消费者可以依据稳定的 OpenAI 风格 Capability ID、能力解析结果和模型目录判断可用性；未来 AI 能力可复用同一套 usage/progress 契约，且未实现能力不会被错误解析。
 5. 没有新增敏感数据持久化、日志泄露、缓存绕过或权限放宽。
 6. 所有新增测试和项目完整验证命令通过。

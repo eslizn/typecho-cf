@@ -341,9 +341,27 @@ export function editorHtml(contentType: ContentType, i18n?: I18n): string {
   };
   var STATUS_PHASES = ['queued', 'requesting', 'streaming', 'completed', 'failed', 'cancelled'];
   var STATUS_ACTIVITIES = ['preparing', 'requesting', 'streaming', 'finalizing'];
+  var SCRIBE_STATUS_HIDE_DELAY_MS = 3000;
+  var statusHideTimer = null;
 
   function statusElement() {
     return document.querySelector('.typecho-scribe-status');
+  }
+
+  function clearStatusHideTimer() {
+    if (statusHideTimer !== null) {
+      window.clearTimeout(statusHideTimer);
+      statusHideTimer = null;
+    }
+  }
+
+  function scheduleStatusHide() {
+    clearStatusHideTimer();
+    statusHideTimer = window.setTimeout(function() {
+      var root = statusElement();
+      if (root && statusState.phase === 'completed') root.setAttribute('aria-hidden', 'true');
+      statusHideTimer = null;
+    }, SCRIBE_STATUS_HIDE_DELAY_MS);
   }
 
   function safeStatusInteger(value) {
@@ -428,6 +446,7 @@ export function editorHtml(contentType: ContentType, i18n?: I18n): string {
   }
 
   function resetScribeStatus(mode) {
+    clearStatusHideTimer();
     statusState = {
       mode: validStatusMode(mode) ? mode : 'generate',
       phase: 'queued',
@@ -443,7 +462,10 @@ export function editorHtml(contentType: ContentType, i18n?: I18n): string {
   function updateScribeStatus(payload) {
     if (!payload || typeof payload !== 'object') return;
     if (validStatusMode(payload.mode)) statusState.mode = payload.mode;
-    if (STATUS_PHASES.indexOf(payload.phase) >= 0) statusState.phase = payload.phase;
+    if (STATUS_PHASES.indexOf(payload.phase) >= 0) {
+      statusState.phase = payload.phase;
+      if (payload.phase !== 'completed') clearStatusHideTimer();
+    }
     if (STATUS_ACTIVITIES.indexOf(payload.activity) >= 0) statusState.activity = payload.activity;
     else if (STATUS_PHASES.indexOf(payload.phase) >= 0) statusState.activity = statusActivityForPhase(payload.phase);
     if (payload.usage && typeof payload.usage === 'object') statusState.usage = statusUsage(payload.usage);
@@ -454,6 +476,7 @@ export function editorHtml(contentType: ContentType, i18n?: I18n): string {
     if (outputRate !== null) statusState.outputTokensPerSecond = outputRate;
     if (elapsed !== null) statusState.elapsedMs = elapsed;
     renderScribeStatus();
+    if (statusState.phase === 'completed') scheduleStatusHide();
   }
 
   function setBusy(text, button, busy, label) {

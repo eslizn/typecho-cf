@@ -111,6 +111,9 @@ describe('typecho-plugin-scribe', () => {
     expect(postHtml).toContain('下行 Token');
     expect(postHtml).toContain('readScribeEventStream');
     expect(postHtml).toContain('text.value = nextText');
+    expect(postHtml).toContain('SCRIBE_STATUS_HIDE_DELAY_MS = 3000');
+    expect(postHtml).toContain('scheduleStatusHide');
+    expect(postHtml).toContain('clearStatusHideTimer');
   });
 
   it('ignores config validation for other plugins', async () => {

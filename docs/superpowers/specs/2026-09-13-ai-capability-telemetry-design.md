@@ -2,7 +2,7 @@
 
 ## 状态
 
-待用户评审。本文扩展了 Scribe 实时任务与 Token 速率展示需求，目标是把 `typecho-plugin-ai` 建设为可供多个插件消费的站点级 AI 能力层。
+已确认并实施。本文扩展了 Scribe 实时任务与 Token 速率展示需求，目标是把 `typecho-plugin-ai` 建设为可供多个插件消费的站点级 AI 能力层。
 
 ## 背景与问题
 

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { AiChatStreamChunk, AiProgressEvent } from './types';
-import { createAiProgressReporter } from './telemetry';
+import { createAiProgressReporter, estimateChatInputTokens, summarizeAiUsage } from './telemetry';
 
 function chunk(content: string): AiChatStreamChunk {
   return {
@@ -93,5 +93,23 @@ describe('AI progress telemetry', () => {
 
     expect(events.at(-1)).toMatchObject({ phase: 'failed' });
     expect(JSON.stringify(events)).not.toContain('private prompt');
+  });
+
+  it('does not let malformed untrusted request shapes break estimation', () => {
+    expect(() => estimateChatInputTokens({
+      messages: [null, { content: [null, { type: 'text' }] }],
+      tools: [null],
+      functions: [null],
+    } as any)).not.toThrow();
+    expect(() => createAiProgressReporter({ messages: [null] } as any)).not.toThrow();
+  });
+
+  it('ignores negative provider usage values', () => {
+    expect(summarizeAiUsage({
+      prompt_tokens: -1,
+      completion_tokens: -2,
+      total_tokens: -3,
+      prompt_tokens_details: { cached_tokens: -4 },
+    })).toEqual({});
   });
 });

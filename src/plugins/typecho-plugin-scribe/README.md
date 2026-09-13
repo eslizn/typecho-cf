@@ -12,6 +12,7 @@ Scribe 通过 `ai.chat.generate` capability 调用模型，并在配置页用下
 - **风格参考** — 自动采样最近 N 篇已发布文章作为作者风格样本
 - **多语言输出** — 支持中/英/日/韩及自动检测
 - **附件感知** — 可选将正文图片以 `image_url` 发送给视觉模型
+- **实时任务遥测** — 生成、润色、纠错期间显示当前任务、阶段、交互摘要、上行/下行 Token、Token/s、总用量和耗时
 
 ## 依赖
 
@@ -53,8 +54,20 @@ Scribe 通过 `ai.chat.generate` capability 调用模型，并在配置页用下
   → 读取风格样本（最近 N 篇已发布文章）
   → 构建 system prompt（含风格样本、输出语言、目标读者、篇幅、事实策略等）
   → 通过 ai.chat.generate capability 请求 AI 插件（stream 模式）
-  → 把 chat 分片流转换成纯文本流，逐步写入编辑器
+  → 以 text/event-stream 返回 task/text/progress/done 事件
+  → 把 text 分片逐步写入编辑器，同时更新实时任务和 Token 统计
 ```
+
+### 实时状态区
+
+编辑器状态区只展示固定的安全摘要，不回显标题、正文、Prompt、Provider URL 或密钥：
+
+- 任务：AI 生成、AI 润色或 AI 纠错；
+- 交互：整理上下文、向 LLM 请求并等待、接收生成内容、整理结果；
+- 用量：上行/下行 Token、各自速率、总用量和耗时；
+- Provider 返回精确 usage 时覆盖估算值；没有 usage 时显示“估算”，缺失字段显示 `—`。
+
+SSE 连接使用 `Cache-Control: no-store`，异常时恢复操作前的正文。旧版能力实现如果忽略 `onProgress`，Scribe 会基于已收到的文本做受限估算并继续完成操作。
 
 ## 注册的 Hook
 

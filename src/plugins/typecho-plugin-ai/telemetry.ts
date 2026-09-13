@@ -19,7 +19,7 @@ export interface AiProgressReporter {
 }
 
 function safeInteger(value: unknown): number | undefined {
-  return Number.isSafeInteger(value) ? value as number : undefined;
+  return Number.isSafeInteger(value) && (value as number) >= 0 ? value as number : undefined;
 }
 
 function estimateBytes(bytes: number): number {
@@ -31,54 +31,58 @@ export function estimateTextTokens(value: string): number {
 }
 
 function messageTokenEstimate(message: AiChatMessage): number {
-  let total = estimateTextTokens(message.role) + 4;
-  if (message.name) total += estimateTextTokens(message.name);
+  if (!message || typeof message !== 'object') return 0;
+  let total = estimateTextTokens(typeof message.role === 'string' ? message.role : '') + 4;
+  if (typeof message.name === 'string' && message.name) total += estimateTextTokens(message.name);
   if (typeof message.content === 'string') {
     total += estimateTextTokens(message.content);
   } else if (Array.isArray(message.content)) {
     for (const part of message.content) {
-      if (part.type === 'text') total += estimateTextTokens(part.text);
-      if (part.type === 'input_audio') total += estimateTextTokens(part.input_audio.format);
+      if (!part || typeof part !== 'object') continue;
+      if (part.type === 'text' && typeof part.text === 'string') total += estimateTextTokens(part.text);
+      if (part.type === 'input_audio' && part.input_audio && typeof part.input_audio.format === 'string') {
+        total += estimateTextTokens(part.input_audio.format);
+      }
     }
   }
-  for (const call of message.tool_calls ?? []) {
-    total += estimateTextTokens(call.function.name) + estimateTextTokens(call.function.arguments);
+  for (const call of Array.isArray(message.tool_calls) ? message.tool_calls : []) {
+    if (!call || typeof call !== 'object' || !call.function) continue;
+    if (typeof call.function.name === 'string') total += estimateTextTokens(call.function.name);
+    if (typeof call.function.arguments === 'string') total += estimateTextTokens(call.function.arguments);
   }
-  if (message.function_call) {
-    total += estimateTextTokens(message.function_call.name) + estimateTextTokens(message.function_call.arguments);
+  if (message.function_call && typeof message.function_call === 'object') {
+    if (typeof message.function_call.name === 'string') total += estimateTextTokens(message.function_call.name);
+    if (typeof message.function_call.arguments === 'string') total += estimateTextTokens(message.function_call.arguments);
   }
   return total;
 }
 
 export function estimateChatInputTokens(request: AiChatRequest): number {
-  let total = request.messages.reduce((sum, message) => sum + messageTokenEstimate(message), 0);
-  if (request.tools) {
-    for (const tool of request.tools) {
-      total += estimateTextTokens(tool.function.name);
-      if (tool.function.description) total += estimateTextTokens(tool.function.description);
-      if (tool.function.parameters) {
-        try {
-          total += estimateTextTokens(JSON.stringify(tool.function.parameters));
-        } catch {
-          total += 0;
-        }
-      }
-    }
+  let total = (Array.isArray(request?.messages) ? request.messages : [])
+    .reduce((sum, message) => sum + messageTokenEstimate(message), 0);
+  for (const tool of Array.isArray(request?.tools) ? request.tools : []) {
+    if (!tool || typeof tool !== 'object' || !tool.function) continue;
+    if (typeof tool.function.name === 'string') total += estimateTextTokens(tool.function.name);
+    if (typeof tool.function.description === 'string') total += estimateTextTokens(tool.function.description);
+    total += estimateJsonTokens(tool.function.parameters);
   }
-  if (request.functions) {
-    for (const fn of request.functions) {
-      total += estimateTextTokens(fn.name);
-      if (fn.description) total += estimateTextTokens(fn.description);
-      if (fn.parameters) {
-        try {
-          total += estimateTextTokens(JSON.stringify(fn.parameters));
-        } catch {
-          total += 0;
-        }
-      }
-    }
+  for (const fn of Array.isArray(request?.functions) ? request.functions : []) {
+    if (!fn || typeof fn !== 'object') continue;
+    if (typeof fn.name === 'string') total += estimateTextTokens(fn.name);
+    if (typeof fn.description === 'string') total += estimateTextTokens(fn.description);
+    total += estimateJsonTokens(fn.parameters);
   }
   return total;
+}
+
+function estimateJsonTokens(value: unknown): number {
+  if (value === undefined) return 0;
+  try {
+    const encoded = JSON.stringify(value);
+    return typeof encoded === 'string' ? estimateTextTokens(encoded) : 0;
+  } catch {
+    return 0;
+  }
 }
 
 function chunkTokenEstimate(chunk: AiChatStreamChunk): number {

@@ -55,21 +55,44 @@ export function normalizeUsage(value: unknown): AiUsage | undefined {
   if (!isRecord(value)) return undefined;
   const usage: AiUsage = {};
   for (const key of ['prompt_tokens', 'completion_tokens', 'total_tokens', 'input_tokens', 'output_tokens'] as const) {
-    if (Number.isSafeInteger(value[key])) usage[key] = value[key] as number;
+    if (isNonNegativeSafeInteger(value[key])) usage[key] = value[key] as number;
   }
-  if (isRecord(value.prompt_tokens_details) && Number.isSafeInteger(value.prompt_tokens_details.cached_tokens)) {
+  if (isRecord(value.prompt_tokens_details) && isNonNegativeSafeInteger(value.prompt_tokens_details.cached_tokens)) {
     usage.prompt_tokens_details = { cached_tokens: value.prompt_tokens_details.cached_tokens as number };
   }
-  if (isRecord(value.completion_tokens_details) && Number.isSafeInteger(value.completion_tokens_details.reasoning_tokens)) {
+  if (isRecord(value.completion_tokens_details) && isNonNegativeSafeInteger(value.completion_tokens_details.reasoning_tokens)) {
     usage.completion_tokens_details = { reasoning_tokens: value.completion_tokens_details.reasoning_tokens as number };
   }
-  if (isRecord(value.input_tokens_details) && Number.isSafeInteger(value.input_tokens_details.cached_tokens)) {
+  if (isRecord(value.input_tokens_details) && isNonNegativeSafeInteger(value.input_tokens_details.cached_tokens)) {
     usage.input_tokens_details = { cached_tokens: value.input_tokens_details.cached_tokens as number };
   }
-  if (isRecord(value.output_tokens_details) && Number.isSafeInteger(value.output_tokens_details.reasoning_tokens)) {
+  if (isRecord(value.output_tokens_details) && isNonNegativeSafeInteger(value.output_tokens_details.reasoning_tokens)) {
     usage.output_tokens_details = { reasoning_tokens: value.output_tokens_details.reasoning_tokens as number };
   }
   return Object.keys(usage).length > 0 ? usage : undefined;
+}
+
+function isNonNegativeSafeInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 0;
+}
+
+function mergeUsage(previous: AiUsage | undefined, next: AiUsage): AiUsage {
+  return {
+    ...(previous ?? {}),
+    ...next,
+    ...(previous?.prompt_tokens_details || next.prompt_tokens_details
+      ? { prompt_tokens_details: { ...previous?.prompt_tokens_details, ...next.prompt_tokens_details } }
+      : {}),
+    ...(previous?.completion_tokens_details || next.completion_tokens_details
+      ? { completion_tokens_details: { ...previous?.completion_tokens_details, ...next.completion_tokens_details } }
+      : {}),
+    ...(previous?.input_tokens_details || next.input_tokens_details
+      ? { input_tokens_details: { ...previous?.input_tokens_details, ...next.input_tokens_details } }
+      : {}),
+    ...(previous?.output_tokens_details || next.output_tokens_details
+      ? { output_tokens_details: { ...previous?.output_tokens_details, ...next.output_tokens_details } }
+      : {}),
+  };
 }
 
 export function normalizeAudio(value: Record<string, unknown>, maxMediaBytes: number): AiAudioOutput {
@@ -130,7 +153,7 @@ export function createChatStream(
             }
             const parsed = JSON.parse(data) as unknown;
             const chunk = normalizeStreamChunk(parsed, candidate, maxMediaBytes);
-            if (chunk.usage) lastUsage = chunk.usage;
+            if (chunk.usage) lastUsage = mergeUsage(lastUsage, chunk.usage);
             outputBytes += chunkOutputBytes(chunk);
             if (outputBytes > maxOutputBytes) throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream stream is too large.');
             notify(() => callbacks.onChunk?.(chunk));
@@ -148,7 +171,7 @@ export function createChatStream(
             done = true;
             if (data && data !== '[DONE]') {
               const chunk = normalizeStreamChunk(JSON.parse(data) as unknown, candidate, maxMediaBytes);
-              if (chunk.usage) lastUsage = chunk.usage;
+              if (chunk.usage) lastUsage = mergeUsage(lastUsage, chunk.usage);
               outputBytes += chunkOutputBytes(chunk);
               if (outputBytes > maxOutputBytes) throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream stream is too large.');
               notify(() => callbacks.onChunk?.(chunk));

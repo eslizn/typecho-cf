@@ -403,7 +403,8 @@ describe('typecho-plugin-ai', () => {
     const encoder = new TextEncoder();
     const events = [
       { choices: [{ delta: { content: '正文' } }] },
-      { choices: [], usage: { prompt_tokens: 12, completion_tokens: 3, total_tokens: 15 } },
+      { choices: [], usage: { prompt_tokens: 12 } },
+      { choices: [], usage: { completion_tokens: 3, total_tokens: 15 } },
     ].map(item => `data: ${JSON.stringify(item)}\n\n`).join('') + 'data: [DONE]\n\n';
     const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => new Response(
       new ReadableStream<Uint8Array>({
@@ -423,7 +424,10 @@ describe('typecho-plugin-ai', () => {
     );
     await readStream(result as ReadableStream<unknown>);
 
-    expect(progress).toHaveBeenCalledWith(expect.objectContaining({ phase: 'completed' }));
+    expect(progress).toHaveBeenCalledWith(expect.objectContaining({
+      phase: 'completed',
+      usage: { inputTokens: 12, outputTokens: 3, totalTokens: 15 },
+    }));
     const sentBody = JSON.parse(String((fetcher as any).mock.calls[0][1].body));
     expect(sentBody.stream_options).toEqual({ include_usage: true });
   });

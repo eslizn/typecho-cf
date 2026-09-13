@@ -6,7 +6,7 @@ Typecho-CF 的 AI 能力插件：把多个 OpenAI 兼容 Provider/模型收敛�
 
 | Capability | 版本 | 说明 |
 |------------|------|------|
-| `ai.chat.generate` | 1 | 对话生成。请求/响应类型见 `types.ts`，实现由 `createAiChatService()` 提供 |
+| `ai.chat.generate` | 1 | 对话生成。请求/响应类型见 `types.ts`，实现由 `createAiChatService()` 提供；可选 `onProgress` 回调会报告阶段、TTFT、输入/输出 Token、速率和估算标记 |
 | `ai.models.list` | 1 | 发布可选的对话模型清单：**只包含已设置 `alias`**、已启用、支持文本对话且 `baseUrl` 为公网 HTTPS 的模型；按别名跨 Provider 合并去重。服务实现 `listOptions(): Array<{ value, label? }>` |
 
 `ai.image.generate`、`ai.audio.speech.generate`、`ai.audio.transcribe`、`ai.embeddings.create` 是预留 ID，不代表已有实现。
@@ -48,7 +48,23 @@ Typecho-CF 的 AI 能力插件：把多个 OpenAI 兼容 Provider/模型收敛�
 |------|------|
 | `index.ts` | 插件入口：注册 capability、路由声明、`plugin:config:beforeSave`、`request:route` |
 | `provider.ts` | 配置归一化/校验、模型选举（`selectAiModel`）、模型目录（`listChatModelOptions`） |
-| `chat.ts` | `ai.chat.generate` 实现：请求转换、上游调用、流式解析 |
+| `chat.ts` | `ai.chat.generate` 实现：请求转换、上游调用、流式解析与 usage/progress 遥测 |
 | `http.ts` | 可选的 OpenAI 兼容 HTTP 端点 |
 | `io.ts` | 有界读取 / 超时竞态 / base64 等共享工具 |
 | `types.ts` | 能力契约与配置字段定义 |
+
+### Progress observer
+
+消费者可以在请求级传入可选观察器；观察器不会进入 Provider 请求体，异常也不会影响生成结果：
+
+```ts
+service.generate(request, {
+  onProgress: event => {
+    // event.phase: queued/requesting/streaming/completed/failed/cancelled
+    // event.usage: inputTokens/outputTokens/totalTokens
+    // event.*Estimated 表示没有 Provider 精确 usage 时的受限估算
+  },
+});
+```
+
+流式 Chat 请求会尽量请求 OpenAI 兼容的 `stream_options.include_usage`。Provider 明确拒绝该选项时，AI 插件会移除该选项重试一次；即使没有精确 usage，正文流也会继续，并保留估算标记。

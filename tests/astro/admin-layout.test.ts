@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import Admin from '@/layouts/Admin.astro';
+import { createAdminErrorRedirect } from '@/lib/admin-flash';
 import { renderComponent, testI18n } from './helpers';
 
 const OPTIONS = {
@@ -36,11 +37,12 @@ const URLS = {
 interface RenderAdminOptions {
   group?: string;
   activeMenu?: string;
+  request?: Request;
 }
 
-function renderAdmin({ group = 'administrator', activeMenu = 'dashboard' }: RenderAdminOptions = {}) {
+function renderAdmin({ group = 'administrator', activeMenu = 'dashboard', request }: RenderAdminOptions = {}) {
   return renderComponent(Admin, {
-    request: new Request('https://example.com/admin/'),
+    request: request || new Request('https://example.com/admin/'),
     props: {
       title: 'Overview',
       options: OPTIONS,
@@ -87,6 +89,11 @@ describe('Admin layout rendering', () => {
     expect(html).toContain("attr('aria-expanded', open ? 'true' : 'false')");
     expect(html).toContain("closest('.typecho-dismissible').remove()");
     expect(html).toContain("'.typecho-notice-close'");
+    expect(html).toContain('ADMIN_SUCCESS_NOTICE_HIDE_DELAY_MS = 3000');
+    expect(html).toContain("'.admin-notice--success.typecho-dismissible'");
+    expect(html).toContain('new MutationObserver');
+    expect(html).toContain("currentUrl.searchParams.delete('saved')");
+    expect(html).toContain('window.history.replaceState');
   });
 
   it('marks the active menu entry', async () => {
@@ -107,5 +114,30 @@ describe('Admin layout rendering', () => {
     const html = await renderAdmin();
 
     expect(html).toContain('<p id="page-content">page body</p>');
+  });
+
+  it('places layout flash notices at the top of the page block', async () => {
+    const flashResponse = await createAdminErrorRedirect(
+      new Request('https://example.com/api/admin/content', {
+        method: 'POST',
+        headers: { referer: 'https://example.com/admin/write-post' },
+      }),
+      OPTIONS,
+      7,
+      'Save failed',
+      '/admin/write-post',
+    );
+    const setCookie = flashResponse.headers.get('set-cookie') || '';
+    const cookie = setCookie.split(';', 1)[0];
+    const html = await renderAdmin({
+      request: new Request('https://example.com/admin/write-post', { headers: { cookie } }),
+    });
+
+    const pageMainIndex = html.indexOf('class="row typecho-page-main');
+    const noticeIndex = html.indexOf('col-mb-12 admin-notice admin-notice--error');
+    const slotIndex = html.indexOf('<p id="page-content">page body</p>');
+    expect(pageMainIndex).toBeGreaterThanOrEqual(0);
+    expect(noticeIndex).toBeGreaterThan(pageMainIndex);
+    expect(noticeIndex).toBeLessThan(slotIndex);
   });
 });

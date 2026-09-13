@@ -219,13 +219,13 @@ const adminClientMessageJson = safeJsonForScript({
       <div class="typecho-page-title">
         <h2>{title}</h2>
       </div>
-      {flashError && (
-        <div class="admin-notice admin-notice--error typecho-dismissible" role="alert">
-          <p>{flashError}</p>
-          <button type="button" class="typecho-notice-close" aria-label={t('admin.action.closeNotice', {}, 'Close notice')}>&times;</button>
-        </div>
-      )}
       <div class:list={['row', 'typecho-page-main', bodyClass]} role="main">
+        {flashError && (
+          <div class="col-mb-12 admin-notice admin-notice--error typecho-dismissible" role="alert">
+            <p>{flashError}</p>
+            <button type="button" class="typecho-notice-close" aria-label={t('admin.action.closeNotice', {}, 'Close notice')}>&times;</button>
+          </div>
+        )}
         <slot />
       </div>
     </div>
@@ -250,6 +250,66 @@ const adminClientMessageJson = safeJsonForScript({
     const adminClientMessages = JSON.parse(document.getElementById('admin-client-messages')?.textContent || '{}');
     (function () {
       $(document).ready(function() {
+        const ADMIN_SUCCESS_NOTICE_HIDE_DELAY_MS = 3000;
+        const adminNoticeTimers = new WeakMap();
+
+        function scheduleAdminNoticeClose(notice) {
+          if (!(notice instanceof HTMLElement)) return;
+          const isSuccessNotice = notice.classList.contains('admin-notice--success')
+            && notice.classList.contains('typecho-dismissible');
+          const existingTimer = adminNoticeTimers.get(notice);
+          if (!isSuccessNotice) {
+            if (existingTimer !== undefined) {
+              window.clearTimeout(existingTimer);
+              adminNoticeTimers.delete(notice);
+            }
+            return;
+          }
+          if (existingTimer !== undefined) return;
+          const timer = window.setTimeout(function () {
+            if (adminNoticeTimers.get(notice) !== timer) return;
+            adminNoticeTimers.delete(notice);
+            if (notice.parentNode
+              && notice.classList.contains('admin-notice--success')
+              && notice.classList.contains('typecho-dismissible')) {
+              notice.style.display = 'none';
+            }
+          }, ADMIN_SUCCESS_NOTICE_HIDE_DELAY_MS);
+          adminNoticeTimers.set(notice, timer);
+        }
+
+        function scheduleAdminNoticesInNode(node) {
+          if (!(node instanceof HTMLElement)) return;
+          scheduleAdminNoticeClose(node);
+          node.querySelectorAll('.admin-notice--success.typecho-dismissible').forEach(scheduleAdminNoticeClose);
+        }
+
+        document.querySelectorAll('.admin-notice--success.typecho-dismissible').forEach(scheduleAdminNoticeClose);
+        if (window.MutationObserver && document.body) {
+          const adminNoticeObserver = new MutationObserver(function (mutations) {
+            mutations.forEach(function (mutation) {
+              if (mutation.type === 'attributes') scheduleAdminNoticeClose(mutation.target);
+              mutation.addedNodes.forEach(scheduleAdminNoticesInNode);
+            });
+          });
+          adminNoticeObserver.observe(document.body, {
+            attributes: true,
+            attributeFilter: ['class'],
+            childList: true,
+            subtree: true,
+          });
+        }
+
+        if (window.history && window.history.replaceState) {
+          const currentUrl = new URL(window.location.href);
+          if (currentUrl.searchParams.get('saved') === '1') {
+            currentUrl.searchParams.delete('saved');
+            const query = currentUrl.searchParams.toString();
+            window.history.replaceState(window.history.state, document.title,
+              currentUrl.pathname + (query ? '?' + query : '') + currentUrl.hash);
+          }
+        }
+
         // 导航菜单
         const menuBar = $('.menu-bar').click(function () {
           const nav = $(this).next('#typecho-nav-list');

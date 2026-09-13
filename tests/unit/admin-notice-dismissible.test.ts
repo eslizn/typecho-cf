@@ -53,6 +53,34 @@ describe('admin dismissible notices', () => {
     expect(source).toContain("closeButton.setAttribute('aria-label', messages.close || '关闭提示')");
   });
 
+  it('auto-closes successful notices while leaving warnings and errors for manual dismissal', () => {
+    const source = readProjectFile('src/layouts/Admin.astro');
+
+    expect(source).toContain('const ADMIN_SUCCESS_NOTICE_HIDE_DELAY_MS = 3000;');
+    expect(source).toContain('const adminNoticeTimers = new WeakMap();');
+    expect(source).toContain("notice.classList.contains('admin-notice--success')");
+    expect(source).toContain("notice.classList.contains('typecho-dismissible')");
+    expect(source).toContain('adminNoticeTimers.delete(notice)');
+    expect(source).toContain("notice.style.display = 'none'");
+    expect(source).toContain("attributeFilter: ['class']");
+    expect(source).toContain("currentUrl.searchParams.delete('saved')");
+  });
+
+  it('does not auto-close WebDAV warnings or errors', () => {
+    const source = readProjectFile('src/plugins/typecho-plugin-webdav/index.ts');
+
+    expect(source).toContain('if(type==="success")_noticeTimer=setTimeout');
+    expect(source).toContain('},3000)}');
+    expect(source).not.toContain('},5000)}');
+  });
+
+  it('auto-closes the standalone login success notice', () => {
+    const source = readProjectFile('src/pages/admin/login.astro');
+
+    expect(source).toContain("document.querySelector('.admin-notice--success.typecho-dismissible')");
+    expect(source).toContain('}, 3000);');
+  });
+
   it('does not leak Turnstile plugin styles into global admin CSS', () => {
     const css = readProjectFile('public/css/admin.css');
 

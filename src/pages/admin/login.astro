@@ -105,6 +105,13 @@ const refererValue = safeAdminRedirectUrl(refererAbsolute, urls.siteUrl || Astro
     </div>
   </div>
   <script is:inline>
+    var successNotice = document.querySelector('.admin-notice--success.typecho-dismissible');
+    if (successNotice) {
+      window.setTimeout(function () {
+        if (successNotice.parentNode) successNotice.parentNode.removeChild(successNotice);
+      }, 3000);
+    }
+
     document.addEventListener('click', function (event) {
       var target = event.target;
       if (!(target instanceof HTMLElement) || !target.classList.contains('typecho-notice-close')) return;

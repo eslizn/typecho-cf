@@ -191,6 +191,45 @@ export interface AiUsage {
   prompt_tokens?: number;
   completion_tokens?: number;
   total_tokens?: number;
+  input_tokens?: number;
+  output_tokens?: number;
+  prompt_tokens_details?: {
+    cached_tokens?: number;
+  };
+  completion_tokens_details?: {
+    reasoning_tokens?: number;
+  };
+  input_tokens_details?: {
+    cached_tokens?: number;
+  };
+  output_tokens_details?: {
+    reasoning_tokens?: number;
+  };
+}
+
+export interface AiUsageSummary {
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  cachedInputTokens?: number;
+  reasoningOutputTokens?: number;
+  inputTokensEstimated?: boolean;
+  outputTokensEstimated?: boolean;
+}
+
+export type AiTaskPhase = 'queued' | 'requesting' | 'streaming' | 'completed' | 'failed' | 'cancelled';
+
+export interface AiProgressEvent {
+  phase: AiTaskPhase;
+  elapsedMs: number;
+  timeToFirstTokenMs?: number;
+  usage: AiUsageSummary;
+  inputTokensPerSecond?: number;
+  outputTokensPerSecond?: number;
+}
+
+export interface AiGenerationOptions {
+  onProgress?: (event: AiProgressEvent) => void;
 }
 
 export interface AiNormalizedMessage {
@@ -241,7 +280,7 @@ export interface AiChatStreamChunk {
 export type AiChatResult = AiChatResponse | ReadableStream<AiChatStreamChunk>;
 
 export interface AiChatGenerationService {
-  generate(request: AiChatRequest): Promise<AiChatResult>;
+  generate(request: AiChatRequest, options?: AiGenerationOptions): Promise<AiChatResult>;
 }
 
 export type AiChatCapabilityFactory = CapabilityFactory<AiChatGenerationService>;

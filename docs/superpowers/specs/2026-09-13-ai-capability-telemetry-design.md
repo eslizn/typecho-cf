@@ -172,11 +172,14 @@ interface AiModelCatalogService {
 Scribe 调用 `ai.chat.generate` 时传入 `onProgress`，并继续请求流式结果。Scribe 将内部类型化 Chat chunk 和 progress event 转换为仅供编辑器使用的 SSE：
 
 ```text
+event: task
+data: {"mode":"polish","activity":"preparing"}
+
 event: text
 data: {"delta":"..."}
 
 event: progress
-data: {"phase":"streaming","elapsedMs":...,"usage":...,"outputTokensPerSecond":...}
+data: {"phase":"streaming","activity":"streaming","elapsedMs":...,"usage":...,"outputTokensPerSecond":...}
 
 event: done
 data: {"phase":"completed","usage":...,"elapsedMs":...}
@@ -184,8 +187,9 @@ data: {"phase":"completed","usage":...,"elapsedMs":...}
 
 事件约束：
 
+- `task` 只包含 `mode` 和有限的 `activity` 状态键；浏览器据此显示“整理标题/正文/风格要求”“向 LLM 请求并等待响应”“接收生成内容”“整理结果”等大致交互内容，不传递实际标题、正文或 Prompt；
 - `text` 只包含需要写入编辑器的正文增量；
-- `progress` 和 `done` 只包含状态、耗时、usage、速率和估算标记，不包含 Prompt、正文、API Key、原始 Provider 响应或堆栈；
+- `progress` 和 `done` 只包含状态、耗时、usage、速率、估算标记和有限的 `activity` 状态键，不包含 Prompt、正文、API Key、原始 Provider 响应或堆栈；
 - 使用 `text/event-stream`、`Cache-Control: no-store`，不进入边缘缓存；
 - 非流式或旧 Consumer 降级时，Scribe 也可发送单个 `text` 事件和最终 `done` 事件，保持客户端协议一致；
 - 服务端只负责把事件写入当前响应，不落库、不产生日志正文。
@@ -195,6 +199,7 @@ data: {"phase":"completed","usage":...,"elapsedMs":...}
 编辑器状态区至少展示：
 
 - 任务：`AI 生成`、`AI 润色` 或 `AI 纠错`；
+- 交互摘要：正在整理哪些上下文、正在向 LLM 请求并等待响应、正在接收生成内容或正在整理结果；文案由客户端根据有限状态键本地化；
 - 阶段：准备中、请求中、生成中、完成、失败；
 - 上行：输入 Token 数与输入阶段速率；
 - 下行：输出 Token 数与输出速率；
@@ -245,7 +250,7 @@ data: {"phase":"completed","usage":...,"elapsedMs":...}
 
 ### Scribe 单元/渲染测试
 
-- `generate`、`polish`、`correct` 产生正确任务标签和状态；
+- `generate`、`polish`、`correct` 产生正确任务标签、阶段和安全的交互摘要；
 - SSE text/progress/done 事件编码、跨 chunk 解析和异常收尾；
 - 估算值到最终真实 usage 的替换、缺失字段降级和失败恢复；
 - 模型输出中的 HTML/脚本只作为文本写入，不触发 DOM 注入；
@@ -268,7 +273,7 @@ data: {"phase":"completed","usage":...,"elapsedMs":...}
 
 ## 验收标准
 
-1. Scribe 的三种 AI 操作均能显示任务、阶段、上行/下行速率和最终 Token 统计。
+1. Scribe 的三种 AI 操作均能显示任务、阶段、安全的交互摘要、上行/下行速率和最终 Token 统计。
 2. Provider 有真实 usage 时最终数值准确；无 usage 时明确标记估算或缺失。
 3. `ai.chat.generate` 的旧调用方无需修改即可继续工作。
 4. 消费者可以依据稳定的 OpenAI 风格 Capability ID、能力解析结果和模型目录判断可用性；未来 AI 能力可复用同一套 usage/progress 契约，且未实现能力不会被错误解析。

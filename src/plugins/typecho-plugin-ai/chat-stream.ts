@@ -54,8 +54,20 @@ export function normalizeStreamToolCalls(value: unknown): AiToolCall[] {
 export function normalizeUsage(value: unknown): AiUsage | undefined {
   if (!isRecord(value)) return undefined;
   const usage: AiUsage = {};
-  for (const key of ['prompt_tokens', 'completion_tokens', 'total_tokens'] as const) {
+  for (const key of ['prompt_tokens', 'completion_tokens', 'total_tokens', 'input_tokens', 'output_tokens'] as const) {
     if (Number.isSafeInteger(value[key])) usage[key] = value[key] as number;
+  }
+  if (isRecord(value.prompt_tokens_details) && Number.isSafeInteger(value.prompt_tokens_details.cached_tokens)) {
+    usage.prompt_tokens_details = { cached_tokens: value.prompt_tokens_details.cached_tokens as number };
+  }
+  if (isRecord(value.completion_tokens_details) && Number.isSafeInteger(value.completion_tokens_details.reasoning_tokens)) {
+    usage.completion_tokens_details = { reasoning_tokens: value.completion_tokens_details.reasoning_tokens as number };
+  }
+  if (isRecord(value.input_tokens_details) && Number.isSafeInteger(value.input_tokens_details.cached_tokens)) {
+    usage.input_tokens_details = { cached_tokens: value.input_tokens_details.cached_tokens as number };
+  }
+  if (isRecord(value.output_tokens_details) && Number.isSafeInteger(value.output_tokens_details.reasoning_tokens)) {
+    usage.output_tokens_details = { reasoning_tokens: value.output_tokens_details.reasoning_tokens as number };
   }
   return Object.keys(usage).length > 0 ? usage : undefined;
 }
@@ -77,6 +89,7 @@ export function createChatStream(
   maxMediaBytes: number,
   signal: AbortSignal,
   deadline: number,
+  callbacks: AiChatStreamCallbacks = {},
 ): ReadableStream<AiChatStreamChunk> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -84,6 +97,15 @@ export function createChatStream(
   let outputBytes = 0;
   let wireBytes = 0;
   let done = false;
+  let lastUsage: AiUsage | undefined;
+
+  function notify(callback: (() => void) | undefined): void {
+    try {
+      callback?.();
+    } catch {
+      // Stream delivery must not depend on an observer callback.
+    }
+  }
 
   return new ReadableStream<AiChatStreamChunk>({
     async pull(controller) {
@@ -102,13 +124,16 @@ export function createChatStream(
             if (!data) continue;
             if (data === '[DONE]') {
               done = true;
+              notify(() => callbacks.onComplete?.(lastUsage));
               controller.close();
               return;
             }
             const parsed = JSON.parse(data) as unknown;
             const chunk = normalizeStreamChunk(parsed, candidate, maxMediaBytes);
+            if (chunk.usage) lastUsage = chunk.usage;
             outputBytes += chunkOutputBytes(chunk);
             if (outputBytes > maxOutputBytes) throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream stream is too large.');
+            notify(() => callbacks.onChunk?.(chunk));
             controller.enqueue(chunk);
             return;
           }
@@ -123,10 +148,13 @@ export function createChatStream(
             done = true;
             if (data && data !== '[DONE]') {
               const chunk = normalizeStreamChunk(JSON.parse(data) as unknown, candidate, maxMediaBytes);
+              if (chunk.usage) lastUsage = chunk.usage;
               outputBytes += chunkOutputBytes(chunk);
               if (outputBytes > maxOutputBytes) throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream stream is too large.');
+              notify(() => callbacks.onChunk?.(chunk));
               controller.enqueue(chunk);
             }
+            notify(() => callbacks.onComplete?.(lastUsage));
             controller.close();
             return;
           }
@@ -142,6 +170,7 @@ export function createChatStream(
       } catch (error) {
         done = true;
         void reader.cancel().catch(() => {});
+        notify(callbacks.onError);
         controller.error(error instanceof AiCapabilityError ? error : new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream stream is invalid.'));
       }
     },
@@ -150,6 +179,12 @@ export function createChatStream(
       void reader.cancel().catch(() => {});
     },
   });
+}
+
+export interface AiChatStreamCallbacks {
+  onChunk?: (chunk: AiChatStreamChunk) => void;
+  onComplete?: (usage?: AiUsage) => void;
+  onError?: () => void;
 }
 
 export function normalizeStreamChunk(body: unknown, candidate: AiModelCandidate, maxMediaBytes: number): AiChatStreamChunk {

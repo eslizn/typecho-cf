@@ -106,6 +106,11 @@ describe('typecho-plugin-scribe', () => {
     expect(postHtml).toContain('AI 润色');
     expect(postHtml).toContain('AI 纠错');
     expect(pageHtml).toContain('data-content-type="page"');
+    expect(postHtml).toContain('typecho-scribe-status');
+    expect(postHtml).toContain('上行 Token');
+    expect(postHtml).toContain('下行 Token');
+    expect(postHtml).toContain('readScribeEventStream');
+    expect(postHtml).toContain('text.value = nextText');
   });
 
   it('ignores config validation for other plugins', async () => {
@@ -267,6 +272,7 @@ describe('typecho-plugin-scribe', () => {
     expect(result.success).toBe(true);
     expect(result.response).toBeInstanceOf(Response);
     expect(result.response.headers.get('X-Typecho-Plugin-Stream')).toBe('1');
+    expect(result.response.headers.get('Content-Type')).toContain('text/event-stream');
 
     const request = generate.mock.calls[0]?.[0] as any;
     expect(request.model).toBe('glm-4.7-flash');
@@ -281,6 +287,13 @@ describe('typecho-plugin-scribe', () => {
     expect(request.messages[1].content).toContain('<output_contract>');
 
     const text = await result.response.text();
+    expect(text).toContain('event: task');
+    expect(text).toContain('"activity":"preparing"');
+    expect(text).toContain('"activity":"streaming"');
+    expect(text).toContain('event: progress');
+    expect(text).toContain('event: done');
+    expect(text).toContain('"inputTokensEstimated":true');
+    expect(text).toContain('"outputTokensEstimated":true');
     expect(text).toContain('正文');
     expect(text).toContain('内容');
     // The incidental Markdown fence the model added is stripped on both ends.
@@ -301,6 +314,55 @@ describe('typecho-plugin-scribe', () => {
       options: scribeOptions(),
     });
 
-    expect(result).toMatchObject({ handled: true, success: false, error: '模型不存在：glm-4.7-flash' });
+    expect(result).toMatchObject({ handled: true, success: true });
+    const responseText = await result.response.text();
+    expect(responseText).toContain('event: error');
+    expect(responseText).toContain('模型不存在：glm-4.7-flash');
+    expect(responseText).toContain('"phase":"failed"');
+  });
+
+  it('forwards provider progress and keeps exact usage in the final event', async () => {
+    const hooks = collectHooks();
+    const action = hooks.get('plugin:typecho-plugin-scribe:action')![0];
+    const generate = vi.fn(async (_request: any, options: any) => {
+      let sent = false;
+      return new ReadableStream({
+        pull(controller) {
+          if (!sent) {
+            sent = true;
+            options.onProgress({
+              phase: 'streaming',
+              elapsedMs: 50,
+              usage: { inputTokens: 42, outputTokens: 5, totalTokens: 47 },
+              outputTokensPerSecond: 100,
+            });
+            controller.enqueue({ choices: [{ delta: { content: '正文' } }] });
+            return;
+          }
+          options.onProgress({
+            phase: 'completed',
+            elapsedMs: 100,
+            usage: { inputTokens: 42, outputTokens: 5, totalTokens: 47 },
+            outputTokensPerSecond: 100,
+          });
+          controller.close();
+        },
+      });
+    });
+
+    const result = await action({ handled: false }, {
+      action: 'generate',
+      payload: { contentType: 'post', title: 'Test' },
+      capabilityRuntime: aiRuntime(generate),
+      options: scribeOptions(),
+    });
+
+    const responseText = await result.response.text();
+    expect(responseText).toContain('"inputTokens":42');
+    expect(responseText).toContain('"outputTokens":5');
+    expect(responseText).toContain('"totalTokens":47');
+    const doneEvent = responseText.slice(responseText.lastIndexOf('event: done'));
+    expect(doneEvent).not.toContain('"inputTokensEstimated":true');
+    expect(doneEvent).not.toContain('"outputTokensEstimated":true');
   });
 });

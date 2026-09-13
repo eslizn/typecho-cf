@@ -7,8 +7,20 @@ import en from './locales/en.json';
 import zhCN from './locales/zh-CN.json';
 import { editorHtml } from './editor-ui';
 import { PLUGIN_ID, translate, type ContentType } from './shared';
+import {
+  createScribeEventStream,
+  createScribeLocalProgressReporter,
+  donePayload,
+  progressPayload,
+  sanitizeProgressEvent,
+  SCRIBE_STREAM_HEADERS,
+  type ScribeChatStreamChunk,
+  type ScribeMode,
+  type ScribeProgressEvent,
+  type ScribeUsage,
+} from './scribe-stream';
 
-type WriterMode = 'generate' | 'polish' | 'correct';
+type WriterMode = ScribeMode;
 type LengthPreset = 'concise' | 'balanced' | 'detailed';
 type FactPolicy = 'conservative' | 'assumptive';
 
@@ -162,18 +174,21 @@ interface ScribeChatRequest {
   stream?: boolean;
 }
 
-interface ScribeChatChunk {
-  choices?: Array<{ delta?: { content?: string | null } }>;
-}
+type ScribeChatChunk = ScribeChatStreamChunk;
 
 interface ScribeChatCompletion {
   choices?: Array<{ message?: { content?: string | null } }>;
+  usage?: ScribeUsage;
 }
 
 type ScribeChatResult = ScribeChatCompletion | ReadableStream<ScribeChatChunk>;
 
+interface ScribeChatGenerationOptions {
+  onProgress?: (event: ScribeProgressEvent) => void;
+}
+
 interface ScribeChatService {
-  generate(request: ScribeChatRequest): Promise<ScribeChatResult>;
+  generate(request: ScribeChatRequest, options?: ScribeChatGenerationOptions): Promise<ScribeChatResult>;
 }
 
 interface ScribeModelCatalog {
@@ -364,10 +379,17 @@ function chatErrorMessage(error: unknown, i18n: I18n | undefined, model: string)
     case 'upstream-server-error':
       return translate(i18n, 'plugin.typecho-plugin-scribe.message.upstreamServerError', '上游模型服务返回错误，请稍后重试');
     default:
-      return error instanceof Error && error.message
-        ? error.message
-        : translate(i18n, 'plugin.typecho-plugin-scribe.message.aiFailed', 'AI 写作失败');
+      return translate(i18n, 'plugin.typecho-plugin-scribe.message.aiFailed', 'AI 写作失败');
   }
+}
+
+function streamErrorMessage(error: unknown, i18n: I18n | undefined, model: string): string {
+  const responseInvalid = translate(i18n, 'plugin.typecho-plugin-scribe.message.responseInvalid', 'LLM 返回格式不正确');
+  const aiFailed = translate(i18n, 'plugin.typecho-plugin-scribe.message.aiFailed', 'AI 写作失败');
+  if (error instanceof Error && (error.message === responseInvalid || error.message === aiFailed)) {
+    return error.message;
+  }
+  return chatErrorMessage(error, i18n, model);
 }
 
 /**
@@ -614,12 +636,6 @@ function buildUserContent(prompt: string, assets: ContentAsset[], siteUrl?: stri
   ];
 }
 
-const TEXT_STREAM_HEADERS = {
-  'Content-Type': 'text/plain; charset=utf-8',
-  'Cache-Control': 'no-store',
-  'X-Typecho-Plugin-Stream': '1',
-} as const;
-
 /** Trailing characters held back so a closing code fence can still be removed. */
 const STREAM_TAIL_HOLD = 16;
 
@@ -631,57 +647,17 @@ function sanitizeAssistantText(text: string): string {
     .trim();
 }
 
-/**
- * Adapt the AI capability's chat chunk stream into the plain text stream the
- * editor consumes, dropping the incidental Markdown fence models like to add.
- */
-function textStreamFromChunks(chunks: ReadableStream<ScribeChatChunk>): ReadableStream<Uint8Array> {
-  const reader = chunks.getReader();
-  const encoder = new TextEncoder();
-  let pending = '';
-  let started = false;
-
-  return new ReadableStream<Uint8Array>({
-    async pull(controller) {
-      for (;;) {
-        if (pending.length > STREAM_TAIL_HOLD) {
-          const emit = pending.slice(0, pending.length - STREAM_TAIL_HOLD);
-          pending = pending.slice(pending.length - STREAM_TAIL_HOLD);
-          if (emit) {
-            controller.enqueue(encoder.encode(emit));
-            return;
-          }
-        }
-
-        const { done, value } = await reader.read();
-        if (done) {
-          const tail = sanitizeAssistantText(pending);
-          if (tail) controller.enqueue(encoder.encode(tail));
-          controller.close();
-          return;
-        }
-
-        const content = value?.choices?.[0]?.delta?.content;
-        if (typeof content !== 'string' || !content) continue;
-        pending = started
-          ? pending + content
-          : content.replace(/^\s*```(?:markdown|md)?\s*/i, '');
-        started = true;
-      }
-    },
-    cancel() {
-      void reader.cancel();
-    },
-  });
+function streamContentFromChunk(chunk: ScribeChatChunk): string {
+  const content = chunk.choices?.[0]?.delta?.content;
+  return typeof content === 'string' ? content : '';
 }
 
-/** Run one writing request through the AI plugin and stream the answer back. */
+/** Run one writing request through the AI plugin and stream task telemetry and text back. */
 async function requestDraftStream(
   config: ScribeConfig,
   mode: WriterMode,
   payload: WriterPayload,
-  styleSamples: StyleSample[],
-  assets: ContentAsset[],
+  db: Database | undefined,
   siteUrl: string | undefined,
   capabilityRuntime: CapabilityRuntimeContext | undefined,
   i18n?: I18n,
@@ -698,31 +674,165 @@ async function requestDraftStream(
     ));
   }
 
-  let result: ScribeChatResult;
-  try {
-    result = await service.generate({
-      model: config.model,
-      temperature: Number(config.temperature) || 0.7,
-      max_tokens: Number(config.maxTokens) || Number(DEFAULTS.maxTokens),
-      stream: true,
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: buildUserContent(buildPrompt(mode, payload, styleSamples, config, assets), assets, siteUrl) },
-      ],
-    });
-  } catch (error) {
-    throw new Error(chatErrorMessage(error, i18n, config.model));
-  }
+  return new Response(createScribeEventStream(async writer => {
+    const startedAt = Date.now();
+    let latestProgress: ScribeProgressEvent | undefined;
+    let localProgress: ReturnType<typeof createScribeLocalProgressReporter> | undefined;
+    let providerReportedProgress = false;
+    let announcedActivity: string | undefined;
 
-  if (isChatStream(result)) {
-    return new Response(textStreamFromChunks(result), { status: 200, headers: TEXT_STREAM_HEADERS });
-  }
+    const announceActivity = (activity: string): void => {
+      if (announcedActivity === activity) return;
+      const order: Record<string, number> = {
+        preparing: 0,
+        requesting: 1,
+        streaming: 2,
+        finalizing: 3,
+      };
+      if (announcedActivity && (order[activity] ?? 0) < (order[announcedActivity] ?? 0)) return;
+      announcedActivity = activity;
+      writer.task({ mode, activity: activity as 'preparing' | 'requesting' | 'streaming' | 'finalizing' });
+    };
 
-  const content = sanitizeAssistantText(String(result?.choices?.[0]?.message?.content ?? ''));
-  if (!content) {
-    throw new Error(translate(i18n, 'plugin.typecho-plugin-scribe.message.responseInvalid', 'LLM 返回格式不正确'));
-  }
-  return new Response(content, { status: 200, headers: TEXT_STREAM_HEADERS });
+    const writeProgress = (value: unknown): void => {
+      const event = sanitizeProgressEvent(value);
+      if (!event) return;
+      latestProgress = event;
+      const progress = progressPayload(event);
+      announceActivity(progress.activity);
+      writer.progress(progress);
+    };
+
+    announceActivity('preparing');
+
+    try {
+      const [styleSamples, assets] = await Promise.all([
+        loadStyleSamples(db, Number.isFinite(Number(config.stylePostCount)) ? Number(config.stylePostCount) : 0),
+        loadContentAssets(db, config, payload),
+      ]);
+      const prompt = buildPrompt(mode, payload, styleSamples, config, assets);
+      const content = buildUserContent(prompt, assets, siteUrl);
+      const inputText = typeof content === 'string'
+        ? content
+        : content.filter(part => part.type === 'text').map(part => part.text).join('\n');
+      localProgress = createScribeLocalProgressReporter(inputText, event => {
+        if (!providerReportedProgress) writeProgress(event);
+      });
+
+      announceActivity('requesting');
+      localProgress.reportPhase('requesting');
+
+      let result: ScribeChatResult;
+      try {
+        result = await service.generate({
+          model: config.model,
+          temperature: Number(config.temperature) || 0.7,
+          max_tokens: Number(config.maxTokens) || Number(DEFAULTS.maxTokens),
+          stream: true,
+          messages: [
+            { role: 'system', content: SYSTEM_PROMPT },
+            { role: 'user', content },
+          ],
+        }, {
+          onProgress: event => {
+            const safe = sanitizeProgressEvent(event);
+            if (!safe) return;
+            providerReportedProgress = true;
+            // The Scribe stream already announced its requesting phase before
+            // invoking the capability. Do not let a late provider `queued`
+            // event make the browser display an older phase again.
+            if (safe.phase === 'queued' && announcedActivity !== 'preparing') return;
+            writeProgress(safe);
+          },
+        });
+      } catch (error) {
+        throw new Error(chatErrorMessage(error, i18n, config.model));
+      }
+
+      if (isChatStream(result)) {
+        const reader = result.getReader();
+        let pending = '';
+        let started = false;
+        let lastUsage: ScribeUsage | undefined;
+        let outputText = '';
+
+        for (;;) {
+          const next = await reader.read();
+          if (next.done) break;
+          const chunk = next.value;
+          if (chunk?.usage) lastUsage = chunk.usage;
+          if (!providerReportedProgress) localProgress.reportChunk(chunk);
+
+          const chunkContent = streamContentFromChunk(chunk);
+          if (!chunkContent) continue;
+          announceActivity('streaming');
+          pending = started
+            ? pending + chunkContent
+            : chunkContent.replace(/^\s*```(?:markdown|md)?\s*/i, '');
+          started = true;
+          if (pending.length > STREAM_TAIL_HOLD) {
+            const delta = pending.slice(0, pending.length - STREAM_TAIL_HOLD);
+            pending = pending.slice(pending.length - STREAM_TAIL_HOLD);
+            if (delta) {
+              outputText += delta;
+              writer.text(delta);
+            }
+          }
+        }
+
+        const tail = sanitizeAssistantText(pending);
+        if (tail) {
+          outputText += tail;
+          writer.text(tail);
+        }
+        if (!outputText.trim()) {
+          throw new Error(translate(i18n, 'plugin.typecho-plugin-scribe.message.responseInvalid', 'LLM 返回格式不正确'));
+        }
+        if (!providerReportedProgress) localProgress.complete(lastUsage);
+      } else {
+        const content = sanitizeAssistantText(String(result?.choices?.[0]?.message?.content ?? ''));
+        if (!content) {
+          throw new Error(translate(i18n, 'plugin.typecho-plugin-scribe.message.responseInvalid', 'LLM 返回格式不正确'));
+        }
+        announceActivity('streaming');
+        writer.text(content);
+        if (!providerReportedProgress) {
+          localProgress.reportChunk({ choices: [{ delta: { content } }] });
+          localProgress.complete(result.usage);
+        }
+      }
+
+      if (!latestProgress || latestProgress.phase !== 'completed') {
+        const fallback: ScribeProgressEvent = {
+          phase: 'completed',
+          elapsedMs: Math.max(0, Date.now() - startedAt),
+          usage: latestProgress?.usage || {},
+          ...(latestProgress?.timeToFirstTokenMs === undefined ? {} : { timeToFirstTokenMs: latestProgress.timeToFirstTokenMs }),
+          ...(latestProgress?.inputTokensPerSecond === undefined ? {} : { inputTokensPerSecond: latestProgress.inputTokensPerSecond }),
+          ...(latestProgress?.outputTokensPerSecond === undefined ? {} : { outputTokensPerSecond: latestProgress.outputTokensPerSecond }),
+        };
+        writeProgress(fallback);
+      }
+      announceActivity('finalizing');
+      writer.done(donePayload(latestProgress!));
+    } catch (error) {
+      const message = streamErrorMessage(error, i18n, config.model);
+      if (!latestProgress || latestProgress.phase !== 'failed') {
+        if (localProgress) localProgress.fail();
+      }
+      if (!latestProgress || latestProgress.phase !== 'failed') {
+        latestProgress = {
+          phase: 'failed',
+          elapsedMs: Math.max(0, Date.now() - startedAt),
+          usage: latestProgress?.usage || {},
+        };
+        writeProgress(latestProgress);
+      }
+      announceActivity('finalizing');
+      writer.error(message);
+      writer.done(donePayload(latestProgress));
+    }
+  }), { status: 200, headers: SCRIBE_STREAM_HEADERS });
 }
 
 export default function init({ addHook, pluginId, registerTranslations }: PluginInitContext): void {
@@ -799,16 +909,11 @@ export default function init({ addHook, pluginId, registerTranslations }: Plugin
         const config = getConfig(extra?.options);
         const payload = extra?.payload || {};
         const siteUrl = typeof extra?.options?.siteUrl === 'string' ? extra.options.siteUrl : undefined;
-        const [styleSamples, assets] = await Promise.all([
-          loadStyleSamples(extra?.db, Number.isFinite(Number(config.stylePostCount)) ? Number(config.stylePostCount) : 0),
-          loadContentAssets(extra?.db, config, payload),
-        ]);
         const response = await requestDraftStream(
           config,
           action as WriterMode,
           payload,
-          styleSamples,
-          assets,
+          extra?.db,
           siteUrl,
           extra?.capabilityRuntime,
           extra?.i18n,

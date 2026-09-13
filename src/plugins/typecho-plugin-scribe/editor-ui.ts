@@ -28,6 +28,34 @@ export function editorHtml(contentType: ContentType, i18n?: I18n): string {
       polish: t('plugin.typecho-plugin-scribe.message.polishTitle', 'AI 润色'),
       correct: t('plugin.typecho-plugin-scribe.message.correctTitle', 'AI 纠错'),
     },
+    status: {
+      task: t('plugin.typecho-plugin-scribe.message.statusTask', '任务'),
+      phase: t('plugin.typecho-plugin-scribe.message.statusPhase', '阶段'),
+      activity: t('plugin.typecho-plugin-scribe.message.statusActivity', '当前交互'),
+      input: t('plugin.typecho-plugin-scribe.message.statusInput', '上行 Token'),
+      output: t('plugin.typecho-plugin-scribe.message.statusOutput', '下行 Token'),
+      total: t('plugin.typecho-plugin-scribe.message.statusTotal', '总用量'),
+      inputRate: t('plugin.typecho-plugin-scribe.message.statusInputRate', '上行速率'),
+      outputRate: t('plugin.typecho-plugin-scribe.message.statusOutputRate', '下行速率'),
+      elapsed: t('plugin.typecho-plugin-scribe.message.statusElapsed', '耗时'),
+      tokenPerSecond: t('plugin.typecho-plugin-scribe.message.statusTokenPerSecond', 'token/s'),
+      estimated: t('plugin.typecho-plugin-scribe.message.statusEstimated', '估算'),
+      unavailable: t('plugin.typecho-plugin-scribe.message.statusUnavailable', '—'),
+      phases: {
+        queued: t('plugin.typecho-plugin-scribe.message.statusPhaseQueued', '准备中'),
+        requesting: t('plugin.typecho-plugin-scribe.message.statusPhaseRequesting', '请求中'),
+        streaming: t('plugin.typecho-plugin-scribe.message.statusPhaseStreaming', '生成中'),
+        completed: t('plugin.typecho-plugin-scribe.message.statusPhaseCompleted', '已完成'),
+        failed: t('plugin.typecho-plugin-scribe.message.statusPhaseFailed', '失败'),
+        cancelled: t('plugin.typecho-plugin-scribe.message.statusPhaseCancelled', '已取消'),
+      },
+      activities: {
+        preparing: t('plugin.typecho-plugin-scribe.message.statusActivityPreparing', '正在整理标题、正文、风格样本和写作要求'),
+        requesting: t('plugin.typecho-plugin-scribe.message.statusActivityRequesting', '正在向 LLM 请求并等待响应'),
+        streaming: t('plugin.typecho-plugin-scribe.message.statusActivityStreaming', '正在接收生成内容'),
+        finalizing: t('plugin.typecho-plugin-scribe.message.statusActivityFinalizing', '正在整理结果'),
+      },
+    },
     busy: t('plugin.typecho-plugin-scribe.message.busy', 'AI {label} in progress…', { label: '{label}' }),
     complete: t('plugin.typecho-plugin-scribe.message.complete', 'AI {label}完成', { label: '{label}' }),
     bodyRequired: t('plugin.typecho-plugin-scribe.message.bodyRequired', '请先输入正文，再使用 AI {label}', { label: '{label}' }),
@@ -140,6 +168,58 @@ export function editorHtml(contentType: ContentType, i18n?: I18n): string {
   color: #666;
 }
 
+.typecho-scribe-status {
+  display: none;
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1px solid #d9e2e7;
+  border-radius: 4px;
+  background: #f7fafb;
+  color: #46545c;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.typecho-scribe-status[aria-hidden="false"] {
+  display: block;
+}
+.typecho-scribe-status-head,
+.typecho-scribe-status-row,
+.typecho-scribe-status-metrics {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.typecho-scribe-status-head {
+  justify-content: space-between;
+  margin-bottom: 3px;
+}
+.typecho-scribe-status-task {
+  color: #2f5368;
+  font-weight: 700;
+}
+.typecho-scribe-status-phase {
+  color: #64747c;
+}
+.typecho-scribe-status-activity {
+  color: #64747c;
+  min-height: 1.5em;
+}
+.typecho-scribe-status-metrics {
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 6px;
+}
+.typecho-scribe-status-metric {
+  white-space: nowrap;
+}
+.typecho-scribe-status-metric-label {
+  color: #7a878d;
+}
+.typecho-scribe-status-metric-value {
+  color: #344b57;
+  font-variant-numeric: tabular-nums;
+}
+
 .typecho-scribe-locked {
   overflow: hidden !important;
   resize: none;
@@ -159,6 +239,23 @@ export function editorHtml(contentType: ContentType, i18n?: I18n): string {
   <div class="typecho-scribe-loader">
     <span class="typecho-scribe-loader-spinner" aria-hidden="true"></span>
     <span class="typecho-scribe-loader-text">${t('plugin.typecho-plugin-scribe.message.aiGenerating', 'AI 正在生成…')}</span>
+  </div>
+</div>
+<div class="typecho-scribe-status" role="status" aria-live="polite" aria-hidden="true">
+  <div class="typecho-scribe-status-head">
+    <span class="typecho-scribe-status-task"></span>
+    <span class="typecho-scribe-status-phase"></span>
+  </div>
+  <div class="typecho-scribe-status-row">
+    <span class="typecho-scribe-status-activity"></span>
+  </div>
+  <div class="typecho-scribe-status-metrics">
+    <span class="typecho-scribe-status-metric"><span class="typecho-scribe-status-metric-label">${t('plugin.typecho-plugin-scribe.message.statusInput', '上行 Token')}：</span><span class="typecho-scribe-status-metric-value" data-scribe-metric="input">${t('plugin.typecho-plugin-scribe.message.statusUnavailable', '—')}</span></span>
+    <span class="typecho-scribe-status-metric"><span class="typecho-scribe-status-metric-label">${t('plugin.typecho-plugin-scribe.message.statusOutput', '下行 Token')}：</span><span class="typecho-scribe-status-metric-value" data-scribe-metric="output">${t('plugin.typecho-plugin-scribe.message.statusUnavailable', '—')}</span></span>
+    <span class="typecho-scribe-status-metric"><span class="typecho-scribe-status-metric-label">${t('plugin.typecho-plugin-scribe.message.statusTotal', '总用量')}：</span><span class="typecho-scribe-status-metric-value" data-scribe-metric="total">${t('plugin.typecho-plugin-scribe.message.statusUnavailable', '—')}</span></span>
+    <span class="typecho-scribe-status-metric"><span class="typecho-scribe-status-metric-label">${t('plugin.typecho-plugin-scribe.message.statusInputRate', '上行速率')}：</span><span class="typecho-scribe-status-metric-value" data-scribe-metric="inputRate">${t('plugin.typecho-plugin-scribe.message.statusUnavailable', '—')}</span></span>
+    <span class="typecho-scribe-status-metric"><span class="typecho-scribe-status-metric-label">${t('plugin.typecho-plugin-scribe.message.statusOutputRate', '下行速率')}：</span><span class="typecho-scribe-status-metric-value" data-scribe-metric="outputRate">${t('plugin.typecho-plugin-scribe.message.statusUnavailable', '—')}</span></span>
+    <span class="typecho-scribe-status-metric"><span class="typecho-scribe-status-metric-label">${t('plugin.typecho-plugin-scribe.message.statusElapsed', '耗时')}：</span><span class="typecho-scribe-status-metric-value" data-scribe-metric="elapsed">${t('plugin.typecho-plugin-scribe.message.statusUnavailable', '—')}</span></span>
   </div>
 </div>
 <script is:inline>
@@ -231,6 +328,132 @@ export function editorHtml(contentType: ContentType, i18n?: I18n): string {
 
   function modeLabel(mode) {
     return MODE_LABELS[mode] || MODE_LABELS.generate;
+  }
+
+  var statusState = {
+    mode: 'generate',
+    phase: 'queued',
+    activity: 'preparing',
+    usage: {},
+    inputTokensPerSecond: null,
+    outputTokensPerSecond: null,
+    elapsedMs: null
+  };
+  var STATUS_PHASES = ['queued', 'requesting', 'streaming', 'completed', 'failed', 'cancelled'];
+  var STATUS_ACTIVITIES = ['preparing', 'requesting', 'streaming', 'finalizing'];
+
+  function statusElement() {
+    return document.querySelector('.typecho-scribe-status');
+  }
+
+  function safeStatusInteger(value) {
+    return typeof value === 'number' && isFinite(value) && value >= 0 && Math.floor(value) === value ? value : null;
+  }
+
+  function safeStatusNumber(value) {
+    return typeof value === 'number' && isFinite(value) && value >= 0 ? value : null;
+  }
+
+  function statusUsage(value) {
+    if (!value || typeof value !== 'object') return {};
+    var result = {};
+    ['inputTokens', 'outputTokens', 'totalTokens', 'cachedInputTokens', 'reasoningOutputTokens'].forEach(function(key) {
+      var number = safeStatusInteger(value[key]);
+      if (number !== null) result[key] = number;
+    });
+    if (value.inputTokensEstimated === true) result.inputTokensEstimated = true;
+    if (value.outputTokensEstimated === true) result.outputTokensEstimated = true;
+    return result;
+  }
+
+  function statusActivityForPhase(phase) {
+    if (phase === 'requesting') return 'requesting';
+    if (phase === 'streaming') return 'streaming';
+    if (phase === 'completed' || phase === 'failed' || phase === 'cancelled') return 'finalizing';
+    return 'preparing';
+  }
+
+  function validStatusMode(mode) {
+    return mode === 'generate' || mode === 'polish' || mode === 'correct';
+  }
+
+  function formatStatusNumber(value) {
+    return String(Math.round(value * 100) / 100).replace(/\\B(?=(\\d{3})+(?!\\d))/g, ',');
+  }
+
+  function formatTokenMetric(value, estimated) {
+    if (value === null) return messages.status.unavailable;
+    return (estimated ? '~' : '') + formatStatusNumber(value) + (estimated ? ' (' + messages.status.estimated + ')' : '');
+  }
+
+  function formatRateMetric(value, estimated) {
+    if (value === null) return messages.status.unavailable;
+    return (estimated ? '~' : '') + formatStatusNumber(value) + ' ' + messages.status.tokenPerSecond;
+  }
+
+  function formatElapsedMetric(value) {
+    if (value === null) return messages.status.unavailable;
+    if (value < 1000) return Math.max(0, Math.round(value)) + ' ms';
+    return formatStatusNumber(value / 1000) + ' s';
+  }
+
+  function setStatusMetric(root, name, value) {
+    var element = root.querySelector('[data-scribe-metric="' + name + '"]');
+    if (element) element.textContent = value;
+  }
+
+  function renderScribeStatus() {
+    var root = statusElement();
+    if (!root) return;
+    var mode = validStatusMode(statusState.mode) ? statusState.mode : 'generate';
+    var phase = STATUS_PHASES.indexOf(statusState.phase) >= 0 ? statusState.phase : 'queued';
+    var activity = STATUS_ACTIVITIES.indexOf(statusState.activity) >= 0 ? statusState.activity : statusActivityForPhase(phase);
+    var usage = statusUsage(statusState.usage);
+    var input = usage.inputTokens === undefined ? null : usage.inputTokens;
+    var output = usage.outputTokens === undefined ? null : usage.outputTokens;
+    var total = usage.totalTokens === undefined && input !== null && output !== null ? input + output : (usage.totalTokens === undefined ? null : usage.totalTokens);
+    root.setAttribute('aria-hidden', 'false');
+    var task = root.querySelector('.typecho-scribe-status-task');
+    var phaseElement = root.querySelector('.typecho-scribe-status-phase');
+    var activityElement = root.querySelector('.typecho-scribe-status-activity');
+    if (task) task.textContent = messages.status.task + '：' + (MODE_TITLES[mode] || MODE_TITLES.generate);
+    if (phaseElement) phaseElement.textContent = messages.status.phase + '：' + (messages.status.phases[phase] || messages.status.phases.queued);
+    if (activityElement) activityElement.textContent = messages.status.activity + '：' + (messages.status.activities[activity] || messages.status.activities.preparing);
+    setStatusMetric(root, 'input', formatTokenMetric(input, usage.inputTokensEstimated === true));
+    setStatusMetric(root, 'output', formatTokenMetric(output, usage.outputTokensEstimated === true));
+    setStatusMetric(root, 'total', formatTokenMetric(total, usage.inputTokensEstimated === true || usage.outputTokensEstimated === true));
+    setStatusMetric(root, 'inputRate', formatRateMetric(safeStatusNumber(statusState.inputTokensPerSecond), usage.inputTokensEstimated === true));
+    setStatusMetric(root, 'outputRate', formatRateMetric(safeStatusNumber(statusState.outputTokensPerSecond), usage.outputTokensEstimated === true));
+    setStatusMetric(root, 'elapsed', formatElapsedMetric(safeStatusNumber(statusState.elapsedMs)));
+  }
+
+  function resetScribeStatus(mode) {
+    statusState = {
+      mode: validStatusMode(mode) ? mode : 'generate',
+      phase: 'queued',
+      activity: 'preparing',
+      usage: {},
+      inputTokensPerSecond: null,
+      outputTokensPerSecond: null,
+      elapsedMs: 0
+    };
+    renderScribeStatus();
+  }
+
+  function updateScribeStatus(payload) {
+    if (!payload || typeof payload !== 'object') return;
+    if (validStatusMode(payload.mode)) statusState.mode = payload.mode;
+    if (STATUS_PHASES.indexOf(payload.phase) >= 0) statusState.phase = payload.phase;
+    if (STATUS_ACTIVITIES.indexOf(payload.activity) >= 0) statusState.activity = payload.activity;
+    else if (STATUS_PHASES.indexOf(payload.phase) >= 0) statusState.activity = statusActivityForPhase(payload.phase);
+    if (payload.usage && typeof payload.usage === 'object') statusState.usage = statusUsage(payload.usage);
+    var inputRate = safeStatusNumber(payload.inputTokensPerSecond);
+    var outputRate = safeStatusNumber(payload.outputTokensPerSecond);
+    var elapsed = safeStatusNumber(payload.elapsedMs);
+    if (inputRate !== null) statusState.inputTokensPerSecond = inputRate;
+    if (outputRate !== null) statusState.outputTokensPerSecond = outputRate;
+    if (elapsed !== null) statusState.elapsedMs = elapsed;
+    renderScribeStatus();
   }
 
   function setBusy(text, button, busy, label) {
@@ -438,16 +661,106 @@ export function editorHtml(contentType: ContentType, i18n?: I18n): string {
     return extractActionErrorFromText(text) || response.statusText || messages.aiFailed;
   }
 
+  function parseScribeEventBlock(block) {
+    var eventName = 'message';
+    var dataLines = [];
+    String(block || '').split('\\n').forEach(function(line) {
+      if (line.indexOf('event:') === 0) {
+        eventName = line.slice(6).trim();
+      } else if (line.indexOf('data:') === 0) {
+        dataLines.push(line.slice(5).replace(/^ /, ''));
+      }
+    });
+    if (dataLines.length === 0) return null;
+    try {
+      return { name: eventName, data: JSON.parse(dataLines.join('\\n')) };
+    } catch (error) {
+      return { name: 'error', data: { message: messages.aiFailed } };
+    }
+  }
+
+  function consumeScribeEvents(buffer, onEvent) {
+    var normalized = String(buffer || '').replace(/\\r\\n/g, '\\n').replace(/\\r/g, '\\n');
+    var separator;
+    while ((separator = normalized.indexOf('\\n\\n')) >= 0) {
+      var block = normalized.slice(0, separator);
+      normalized = normalized.slice(separator + 2);
+      var event = parseScribeEventBlock(block);
+      if (event) onEvent(event);
+    }
+    return normalized;
+  }
+
+  async function readScribeEventStream(response, text, oldText, mode) {
+    if (!response.body) throw new Error(messages.aiFailed);
+    var reader = response.body.getReader();
+    var decoder = new TextDecoder();
+    var buffer = '';
+    var nextText = '';
+    var streamError = '';
+    var seenDone = false;
+    var handleEvent = function(event) {
+      if (!event) return;
+      var data = event.data;
+      if (event.name === 'task') {
+        updateScribeStatus(data);
+      } else if (event.name === 'text') {
+        if (data && typeof data.delta === 'string') {
+          nextText += data.delta;
+          text.value = nextText;
+        }
+      } else if (event.name === 'progress') {
+        updateScribeStatus(data);
+      } else if (event.name === 'error') {
+        streamError = extractActionError(data) || messages.aiFailed;
+        updateScribeStatus({ phase: 'failed', activity: 'finalizing' });
+      } else if (event.name === 'done') {
+        seenDone = true;
+        updateScribeStatus(data);
+      }
+    };
+
+    for (;;) {
+      var result = await reader.read();
+      if (result.done) break;
+      buffer += decoder.decode(result.value, { stream: true });
+      buffer = consumeScribeEvents(buffer, handleEvent);
+    }
+    buffer += decoder.decode();
+    buffer = consumeScribeEvents(buffer, handleEvent);
+    if (buffer.trim()) {
+      var finalEvent = parseScribeEventBlock(buffer);
+      if (finalEvent) handleEvent(finalEvent);
+    }
+
+    if (streamError) throw new Error(streamError);
+    if (!seenDone) throw new Error(messages.aiFailed);
+    if (!nextText.trim()) {
+      text.value = oldText;
+      throw new Error(messages.noContent);
+    }
+    text.value = mergeAiCompletion(oldText, nextText, mode);
+    if (!text.value) {
+      text.value = oldText;
+      throw new Error(messages.noContent);
+    }
+  }
+
   async function readStreamIntoEditor(response, text, oldText, mode) {
+    var contentType = response.headers && response.headers.get ? String(response.headers.get('Content-Type') || '').toLowerCase() : '';
+    if (!response.ok) {
+      throw new Error(await readActionError(response));
+    }
+    if (contentType.indexOf('text/event-stream') >= 0) {
+      await readScribeEventStream(response, text, oldText, mode);
+      return;
+    }
     if (!response.body || !window.TextDecoder) {
       var data = await response.json().catch(function() { return {}; });
       if (!response.ok || !data.success) throw new Error(extractActionError(data) || messages.aiFailed);
       text.value = mergeAiCompletion(oldText, data.content || '', mode);
+      updateScribeStatus({ phase: 'completed', activity: 'finalizing', elapsedMs: statusState.elapsedMs || 0 });
       return;
-    }
-
-    if (!response.ok) {
-      throw new Error(await readActionError(response));
     }
 
     var reader = response.body.getReader();
@@ -472,6 +785,7 @@ export function editorHtml(contentType: ContentType, i18n?: I18n): string {
       text.value = oldText;
       throw new Error(messages.noContent);
     }
+    updateScribeStatus({ phase: 'completed', activity: 'finalizing', elapsedMs: statusState.elapsedMs || 0 });
   }
 
   async function runScribe(box, button, requestedMode) {
@@ -497,6 +811,7 @@ export function editorHtml(contentType: ContentType, i18n?: I18n): string {
     }
     var label = modeLabel(mode);
 
+    resetScribeStatus(mode);
     setBusy(text, button, true, label);
     clearAdminNotice();
 
@@ -525,6 +840,7 @@ export function editorHtml(contentType: ContentType, i18n?: I18n): string {
       showAdminNotice(messages.complete.replace('{label}', label), 'success');
     } catch (error) {
       text.value = oldText;
+      updateScribeStatus({ phase: 'failed', activity: 'finalizing' });
       showAdminNotice(error && error.message ? error.message : 'AI 写作失败', 'error');
     } finally {
       setBusy(text, button, false, label);

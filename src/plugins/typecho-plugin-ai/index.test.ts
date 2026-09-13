@@ -399,6 +399,63 @@ describe('typecho-plugin-ai', () => {
     expect(chunks[2].choices[0].delta.tool_calls?.[0].function.arguments).toBe('"x"}');
   });
 
+  it('reports chat progress and forwards streaming usage requests', async () => {
+    const encoder = new TextEncoder();
+    const events = [
+      { choices: [{ delta: { content: '正文' } }] },
+      { choices: [], usage: { prompt_tokens: 12, completion_tokens: 3, total_tokens: 15 } },
+    ].map(item => `data: ${JSON.stringify(item)}\n\n`).join('') + 'data: [DONE]\n\n';
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoder.encode(events));
+          controller.close();
+        },
+      }),
+      { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+    )) as unknown as typeof fetch;
+    const progress = vi.fn();
+    const service = createAiChatService(runtime(), config(), { fetcher });
+
+    const result = await service.generate(
+      { model: 'chat', messages: [{ role: 'user', content: 'x' }], stream: true, stream_options: { include_usage: true } },
+      { onProgress: progress },
+    );
+    await readStream(result as ReadableStream<unknown>);
+
+    expect(progress).toHaveBeenCalledWith(expect.objectContaining({ phase: 'completed' }));
+    const sentBody = JSON.parse(String((fetcher as any).mock.calls[0][1].body));
+    expect(sentBody.stream_options).toEqual({ include_usage: true });
+  });
+
+  it('retries a stream once without include_usage when the provider rejects that option', async () => {
+    const encoder = new TextEncoder();
+    let call = 0;
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      call += 1;
+      if (call === 1) return upstreamJson({ error: { message: 'include_usage is not supported' } }, 400);
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n'));
+            controller.close();
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+      );
+    }) as unknown as typeof fetch;
+    const service = createAiChatService(runtime(), config(), { fetcher });
+
+    const result = await service.generate({ model: 'chat', messages: [{ role: 'user', content: 'x' }], stream: true });
+    await readStream(result as ReadableStream<unknown>);
+
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    const firstBody = JSON.parse(String((fetcher as any).mock.calls[0][1].body));
+    const retryBody = JSON.parse(String((fetcher as any).mock.calls[1][1].body));
+    expect(firstBody.stream_options).toEqual({ include_usage: true });
+    expect(retryBody.stream_options).toBeUndefined();
+  });
+
   it('converts deprecated HTTP functions to modern tools and requires Bearer auth', async () => {
     const parsed = parseChatRequest({
       messages: [{ role: 'user', content: 'x' }],

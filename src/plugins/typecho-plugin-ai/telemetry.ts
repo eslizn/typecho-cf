@@ -135,7 +135,7 @@ export function createAiProgressReporter(
   let lastEmittedAt = Number.NEGATIVE_INFINITY;
   let terminal = false;
 
-  const inputEstimate = estimateChatInputTokens(request);
+  const inputEstimate = Array.isArray(request?.messages) ? estimateChatInputTokens(request) : 0;
   if (inputEstimate > 0) {
     usage.inputTokens = inputEstimate;
     usage.inputTokensEstimated = true;

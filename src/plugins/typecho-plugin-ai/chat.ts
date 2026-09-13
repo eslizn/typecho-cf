@@ -16,6 +16,7 @@ import {
   normalizeUsage,
   numberOr,
 } from './chat-stream';
+import { createAiProgressReporter } from './telemetry';
 import type {
   AiAudioOutput,
   AiBinary,
@@ -26,6 +27,7 @@ import type {
   AiChatResult,
   AiChatStreamChunk,
   AiContentPart,
+  AiGenerationOptions,
   AiFunctionCall,
   AiNormalizedMessage,
   AiToolCall,
@@ -49,55 +51,77 @@ export function createAiChatService(
   const limits = options.limits ?? AI_REQUEST_LIMITS;
 
   return {
-    async generate(request: AiChatRequest): Promise<AiChatResult> {
-      validateChatRequest(request, limits);
-      const selection = selectAiModel(config, request);
-      if (!selection.candidate) {
-        throw new AiCapabilityError(
-          selection.reason === 'model-not-found'
-            ? AI_ERROR_CODES.modelNotFound
-            : selection.reason === 'unsupported-modality'
-              ? AI_ERROR_CODES.unsupportedModality
-              : AI_ERROR_CODES.noAvailableModel,
-          selection.reason === 'model-not-found'
-            ? 'The requested model is not available.'
-            : selection.reason === 'unsupported-modality'
-              ? 'The selected model does not support the requested modality.'
-              : 'No enabled AI model is available.',
-        );
-      }
+    async generate(request: AiChatRequest, options?: AiGenerationOptions): Promise<AiChatResult> {
+      const reporter = createAiProgressReporter(request, options?.onProgress);
+      reporter.reportPhase('queued');
+      try {
+        validateChatRequest(request, limits);
+        reporter.reportPhase('requesting');
+        const selection = selectAiModel(config, request);
+        if (!selection.candidate) {
+          throw new AiCapabilityError(
+            selection.reason === 'model-not-found'
+              ? AI_ERROR_CODES.modelNotFound
+              : selection.reason === 'unsupported-modality'
+                ? AI_ERROR_CODES.unsupportedModality
+                : AI_ERROR_CODES.noAvailableModel,
+            selection.reason === 'model-not-found'
+              ? 'The requested model is not available.'
+              : selection.reason === 'unsupported-modality'
+                ? 'The selected model does not support the requested modality.'
+                : 'No enabled AI model is available.',
+          );
+        }
 
-      const candidate = selection.candidate;
-      const deadline = Date.now() + limits.timeoutMs;
-      const upstreamMessages = await convertMessages(request.messages, limits.maxMediaBytes, runtime.signal, deadline);
-      const body = buildUpstreamBody(request, candidate, upstreamMessages);
-      const encodedBody = JSON.stringify(body);
-      if (new TextEncoder().encode(encodedBody).byteLength > limits.requestBodyBytes) {
-        throw new AiCapabilityError(AI_ERROR_CODES.invalidRequest, 'The AI request body is too large.');
-      }
+        const candidate = selection.candidate;
+        const deadline = Date.now() + limits.timeoutMs;
+        const upstreamMessages = await convertMessages(request.messages, limits.maxMediaBytes, runtime.signal, deadline);
+        const upstreamRequest = withDefaultStreamUsage(request);
+        const encodedBody = encodeRequestBody(upstreamRequest, candidate, upstreamMessages, limits.requestBodyBytes);
 
-      const response = await fetchUpstream(
-        candidate,
-        encodedBody,
-        request.stream === true,
-        runtime,
-        fetcher,
-        deadline,
-      );
-      if (!response.ok) throw await upstreamError(response);
-      if (request.stream === true) {
-        if (!response.body) throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream returned an empty stream.');
-        return createChatStream(
-          response.body,
+        let response = await fetchUpstream(
           candidate,
-          limits.responseBodyBytes,
-          limits.maxMediaBytes,
-          runtime.signal,
+          encodedBody,
+          request.stream === true,
+          runtime,
+          fetcher,
           deadline,
         );
+        if (
+          !response.ok
+          && request.stream === true
+          && upstreamRequest.stream_options?.include_usage === true
+          && await providerRejectedStreamUsage(response, runtime, deadline)
+        ) {
+          const fallbackRequest = withoutStreamUsage(upstreamRequest);
+          const fallbackBody = encodeRequestBody(fallbackRequest, candidate, upstreamMessages, limits.requestBodyBytes);
+          response = await fetchUpstream(candidate, fallbackBody, true, runtime, fetcher, deadline);
+        }
+        if (!response.ok) throw await upstreamError(response);
+        if (request.stream === true) {
+          if (!response.body) throw new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream returned an empty stream.');
+          return createChatStream(
+            response.body,
+            candidate,
+            limits.responseBodyBytes,
+            limits.maxMediaBytes,
+            runtime.signal,
+            deadline,
+            {
+              onChunk: reporter.reportChunk,
+              onComplete: reporter.complete,
+              onError: reporter.fail,
+            },
+          );
+        }
+        const upstream = await readJsonBounded(response, limits.responseBodyBytes, runtime.signal, deadline);
+        const normalized = normalizeChatResponse(upstream, candidate, limits.maxMediaBytes);
+        reporter.complete(normalized.usage);
+        return normalized;
+      } catch (error) {
+        reporter.fail();
+        throw error;
       }
-      const upstream = await readJsonBounded(response, limits.responseBodyBytes, runtime.signal, deadline);
-      return normalizeChatResponse(upstream, candidate, limits.maxMediaBytes);
     },
   };
 }
@@ -304,6 +328,58 @@ function buildUpstreamBody(
     if (request.function_call !== undefined) body.function_call = request.function_call;
   }
   return body;
+}
+
+function withDefaultStreamUsage(request: AiChatRequest): AiChatRequest {
+  if (request.stream !== true || request.stream_options?.include_usage !== undefined) return request;
+  return {
+    ...request,
+    stream_options: { ...(request.stream_options ?? {}), include_usage: true },
+  };
+}
+
+function withoutStreamUsage(request: AiChatRequest): AiChatRequest {
+  if (!request.stream_options) return request;
+  const streamOptions = { ...request.stream_options };
+  delete streamOptions.include_usage;
+  return {
+    ...request,
+    stream_options: Object.keys(streamOptions).length > 0 ? streamOptions : undefined,
+  };
+}
+
+function encodeRequestBody(
+  request: AiChatRequest,
+  candidate: AiModelCandidate,
+  messages: AiChatMessage[],
+  maxBytes: number,
+): string {
+  const encoded = JSON.stringify(buildUpstreamBody(request, candidate, messages));
+  if (new TextEncoder().encode(encoded).byteLength > maxBytes) {
+    throw new AiCapabilityError(AI_ERROR_CODES.invalidRequest, 'The AI request body is too large.');
+  }
+  return encoded;
+}
+
+async function providerRejectedStreamUsage(
+  response: Response,
+  runtime: AiRuntimeContext,
+  deadline: number,
+): Promise<boolean> {
+  if (response.status !== 400 && response.status !== 422) return false;
+  try {
+    const bytes = await readBoundedBytes(response.body, {
+      maxBytes: 8192,
+      signal: runtime.signal,
+      deadline,
+      declaredLength: response.headers.get('content-length'),
+      tooLarge: () => new AiCapabilityError(AI_ERROR_CODES.upstreamClientError, 'The upstream error is too large.'),
+    });
+    if (!bytes) return false;
+    return /include_usage|stream_options/i.test(new TextDecoder().decode(bytes));
+  } catch {
+    return false;
+  }
 }
 
 async function fetchUpstream(
@@ -548,12 +624,12 @@ async function readJsonBounded(
   response: Response,
   maxBytes: number,
   signal: AbortSignal,
-  timeoutMs: number,
+  deadline: number,
 ): Promise<unknown> {
   const bytes = await readBoundedBytes(response.body, {
     maxBytes,
     signal,
-    deadline: Date.now() + timeoutMs,
+    deadline,
     declaredLength: response.headers.get('content-length'),
     tooLarge: () => new AiCapabilityError(AI_ERROR_CODES.upstreamServerError, 'The upstream response is too large.'),
   });

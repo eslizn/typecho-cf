@@ -102,6 +102,7 @@
   "admin.action.back": "Back",
   "admin.action.return": "Return",
   "admin.action.save": "Save settings",
+  "admin.action.saveDraft": "Save draft",
   "admin.action.cancel": "Cancel",
   "admin.action.delete": "Delete",
   "admin.action.add": "Add",

@@ -105,6 +105,7 @@ export const CORE_TRANSLATION_KEYS = [
   'admin.action.back',
   'admin.action.return',
   'admin.action.save',
+  'admin.action.saveDraft',
   'admin.action.cancel',
   'admin.action.delete',
   'admin.action.add',

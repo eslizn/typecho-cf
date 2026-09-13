@@ -30,6 +30,12 @@ describe('admin editor bootstrap', () => {
     expect(contents).not.toContain('pastableTextarea');
   });
 
+  it.each(PAGES)('%s uses the content-specific draft-save translation', (path) => {
+    const contents = source(path);
+    expect(contents).toContain("t('admin.action.saveDraft', {}, 'Save draft')");
+    expect(contents).not.toContain("t('admin.action.save', {}, 'Save')} {t('admin.option.draft'");
+  });
+
   it('keeps the bootstrap in the component, parameterised by the message bundle', () => {
     const component = source('src/components/admin/EditorScript.astro');
     expect(component).toContain('<script type="application/json" id="editor-client-messages"');

@@ -102,6 +102,7 @@
   "admin.action.back": "返回",
   "admin.action.return": "返回",
   "admin.action.save": "保存设置",
+  "admin.action.saveDraft": "保存草稿",
   "admin.action.cancel": "取消",
   "admin.action.delete": "删除",
   "admin.action.add": "增加",

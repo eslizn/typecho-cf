@@ -386,7 +386,18 @@ function chatErrorMessage(error: unknown, i18n: I18n | undefined, model: string)
 function streamErrorMessage(error: unknown, i18n: I18n | undefined, model: string): string {
   const responseInvalid = translate(i18n, 'plugin.typecho-plugin-scribe.message.responseInvalid', 'LLM 返回格式不正确');
   const aiFailed = translate(i18n, 'plugin.typecho-plugin-scribe.message.aiFailed', 'AI 写作失败');
-  if (error instanceof Error && (error.message === responseInvalid || error.message === aiFailed)) {
+  const safeMessages = [
+    responseInvalid,
+    aiFailed,
+    translate(i18n, 'plugin.typecho-plugin-scribe.message.modelMissing', `模型不存在：${model}`, { model }),
+    translate(i18n, 'plugin.typecho-plugin-scribe.message.noAvailableModel', 'AI 插件中没有启用的对话模型，请先在 AI 插件中配置模型'),
+    translate(i18n, 'plugin.typecho-plugin-scribe.message.unsupportedModality', '所选模型不支持本次请求的内容模态'),
+    translate(i18n, 'plugin.typecho-plugin-scribe.message.requestTimeout', 'LLM 请求超时，请稍后重试'),
+    translate(i18n, 'plugin.typecho-plugin-scribe.message.aiInvalidRequest', 'AI 请求无效或超出限制'),
+    translate(i18n, 'plugin.typecho-plugin-scribe.message.upstreamClientError', '上游模型服务拒绝了本次请求，请检查 AI 插件中的 Provider 配置与额度'),
+    translate(i18n, 'plugin.typecho-plugin-scribe.message.upstreamServerError', '上游模型服务返回错误，请稍后重试'),
+  ];
+  if (error instanceof Error && safeMessages.includes(error.message)) {
     return error.message;
   }
   return chatErrorMessage(error, i18n, model);

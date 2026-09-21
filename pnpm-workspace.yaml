@@ -23,3 +23,5 @@ minimumReleaseAgeExclude:
   - '@cloudflare/workerd-linux-arm64@1.20260921.1'
   - '@cloudflare/workerd-windows-64@1.20260921.1'
   - workerd@1.20260921.1
+  - drizzle-kit@0.31.11
+  - drizzle-orm@0.45.3

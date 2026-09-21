@@ -47,10 +47,10 @@
     "reset-password:cloudflare": "tsx scripts/reset-password.ts --target cloudflare"
   },
   "dependencies": {
-    "@astrojs/cloudflare": "^14.3.0",
-    "astro": "^7.3.1",
+    "@astrojs/cloudflare": "^14.3.2",
+    "astro": "^7.3.3",
     "drizzle-orm": "^0.45.2",
-    "marked": "^18.0.12",
+    "marked": "^18.0.13",
     "sanitize-html": "^2.17.7",
     "semver": "^7.8.5",
     "typecho-plugin-ai": "file:src/plugins/typecho-plugin-ai",
@@ -64,19 +64,19 @@
   },
   "devDependencies": {
     "@libsql/client": "^0.17.4",
-    "@types/node": "^26.5.0",
+    "@types/node": "^26.6.2",
     "@types/sanitize-html": "^2.16.1",
     "@types/semver": "^7.8.0",
-    "@typescript-eslint/eslint-plugin": "^8.68.0",
-    "@typescript-eslint/parser": "^8.68.0",
+    "@typescript-eslint/eslint-plugin": "^8.70.0",
+    "@typescript-eslint/parser": "^8.70.0",
     "@vitest/coverage-v8": "^4.1.11",
     "drizzle-kit": "^0.31.10",
     "esbuild": "^0.28.2",
-    "eslint": "^10.10.0",
-    "tsx": "^4.23.13",
+    "eslint": "^10.11.0",
+    "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "typescript-eslint-typescript": "npm:typescript@6.0.3",
     "vitest": "^4.1.11",
-    "wrangler": "^4.129.1"
+    "wrangler": "^4.136.0"
   }
 }

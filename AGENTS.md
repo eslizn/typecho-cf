@@ -454,7 +454,9 @@ Cloudflare Workers 是单线程单 isolate，以下模块级变量是安全的�
 - `optionDisabled` — 选项值数组，适用于 `select` / `radio` / `option` 型 `checkbox`。命中该数组的选项渲染为 disabled，且服务端在保存时直接丢弃该值（即使被伪造提交）。用于「能力已预留但暂未实现」这类场景，不要用文案标注代替禁用
 - `itemFields` — 嵌套字段定义，适用于 `object` 与 `repeatable`；两者允许递归嵌套
 - `collapsible` — 仅适用于 `repeatable`。为 true 时每行渲染为可折叠卡片（首行展开、其余收起），头部显示摘要与状态徽标
-- `summaryFields` — 仅适用于 `collapsible` 的 `repeatable`。声明构成摘要的 itemFields，缺省取第一个 `text` 字段
+- `summaryFields` — 仅适用于 `repeatable`。声明构成摘要的 itemFields，缺省取第一个 `text` 字段
+- `summaryFormat` — 仅适用于 `repeatable`。默认为 `joined`（使用 ` · ` 连接）；`parenthesized` 将首个非空值与其余非空值渲染为 `首值(其余值)`
+- `summaryAsTitle` — 仅适用于 `repeatable`。为 true 时用摘要替换条目的 `Label #N` 标题；摘要为空时回退到原标题
 - `statusField` — 仅适用于 `collapsible` 的 `repeatable`。声明在卡片头部渲染为状态徽标的 itemFields（如 `enabled`）
 - `tokens` — 只读的密钥列表，值为 `[{ id, token }]`。页面只提供「生成 / 复制 / 删除」，没有编辑框；「生成」在**前端**用 `crypto.getRandomValues` 生成（最多 20 个，16–128 位 `A-Za-z0-9_-`），随表单提交、点保存才持久化。服务端只做校验与 allowlist，空值行不落库；超过 20 个时保存直接报错，不做静默截断，前端达到上限会禁用生成按钮。删除行即删除密钥，全部删空表示该功能不再可用。`tokens` 不做掩码，因为需要复制原文
 

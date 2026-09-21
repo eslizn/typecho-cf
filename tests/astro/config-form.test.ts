@@ -331,6 +331,57 @@ describe('ConfigForm rendering', () => {
     expect(html).toContain('class="typecho-repeatable-item is-collapsed"');
   });
 
+  it('uses parenthesized summaries as repeatable titles and falls back to the second value', async () => {
+    const html = await renderForm({
+      configDef: {
+        providers: {
+          type: 'repeatable',
+          label: 'Providers',
+          collapsible: true,
+          summaryFields: ['name', 'baseUrl'],
+          summaryFormat: 'parenthesized',
+          summaryAsTitle: true,
+          itemFields: {
+            name: { type: 'text', label: 'Name' },
+            baseUrl: { type: 'text', label: 'Base URL' },
+            models: {
+              type: 'repeatable',
+              label: 'Models',
+              collapsible: false,
+              summaryFields: ['alias', 'model'],
+              summaryFormat: 'parenthesized',
+              summaryAsTitle: true,
+              itemFields: {
+                alias: { type: 'text', label: 'Alias' },
+                model: { type: 'text', label: 'Model' },
+              },
+            },
+          },
+        },
+      } as Record<string, ConfigField>,
+      configValues: {
+        providers: [{
+          name: 'OpenAI',
+          baseUrl: 'https://api.openai.com/v1',
+          models: [
+            { alias: 'fast', model: 'gpt-4.1' },
+            { alias: '', model: 'gpt-4.1-mini' },
+          ],
+        }],
+      },
+    });
+
+    expect(html).toContain('data-summary-format="parenthesized"');
+    expect(html).toContain('data-summary-as-title="true"');
+    expect(html).toContain('data-item-summary>OpenAI(https://api.openai.com/v1)<');
+    expect(html).toContain('data-item-summary>fast(gpt-4.1)<');
+    expect(html).toContain('data-item-summary>gpt-4.1-mini<');
+    const renderedRows = html.split('<template class="typecho-repeatable-template">')[0];
+    expect(renderedRows).not.toContain('Providers #1');
+    expect(renderedRows).not.toContain('Models #1');
+    expect(renderedRows).not.toContain('Models #2');
+  });
+
   it('renders a token list with copy/delete controls and a pending-row template', async () => {
     const html = await renderForm({
       configDef: { tokens: { type: 'tokens', label: 'Access tokens' } } as Record<string, ConfigField>,

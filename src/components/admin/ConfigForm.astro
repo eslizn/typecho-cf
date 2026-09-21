@@ -112,7 +112,7 @@ const configScope = `${entityName}.${entityId}.config`;
 
     function refreshSummary(item) {
       var root = item.closest('.typecho-repeatable');
-      var summary = item.querySelector(':scope > .typecho-repeatable-header > [data-item-summary]');
+      var summary = item.querySelector(':scope > legend [data-item-summary]');
       if (!root || !summary) return;
       var fields = (root.getAttribute('data-summary-fields') || '').split(',').filter(Boolean);
       var parts = [];
@@ -122,7 +122,16 @@ const configScope = `${entityName}.${entityId}.config`;
         var value = String(control.value || '').trim();
         if (value !== '') parts.push(value);
       });
-      summary.textContent = parts.join(' · ');
+      var text = root.getAttribute('data-summary-format') === 'parenthesized' && parts.length > 1
+        ? parts[0] + '(' + parts.slice(1).join(' · ') + ')'
+        : parts.join(' · ');
+      if (!text && root.getAttribute('data-summary-as-title') === 'true') {
+        var items = root.querySelector(':scope > .typecho-repeatable-items');
+        var index = items ? Array.prototype.indexOf.call(items.children, item) + 1 : 1;
+        var label = root.getAttribute('data-label-translated') || root.getAttribute('data-label') || '';
+        text = label + ' #' + String(index);
+      }
+      summary.textContent = text;
     }
 
     function refreshBadge(item) {
@@ -149,7 +158,12 @@ const configScope = `${entityName}.${entityId}.config`;
 
     function renumberRepeatableItems(root) {
       var label = root.getAttribute('data-label-translated') || root.getAttribute('data-label') || '';
+      var summaryAsTitle = root.getAttribute('data-summary-as-title') === 'true';
       root.querySelectorAll(':scope > .typecho-repeatable-items > .typecho-repeatable-item').forEach(function (item, index) {
+        if (summaryAsTitle) {
+          refreshSummary(item);
+          return;
+        }
         var indexLabel = item.querySelector(':scope > .typecho-repeatable-header [data-index-label]');
         if (indexLabel) {
           indexLabel.textContent = label + ' #' + String(index + 1);

@@ -318,6 +318,8 @@ export const AI_CONFIG_FIELDS: Record<string, PluginConfigField> = {
     description: 'Configure one or more OpenAI-compatible upstream providers and their models.',
     collapsible: true,
     summaryFields: ['name', 'baseUrl'],
+    summaryFormat: 'parenthesized',
+    summaryAsTitle: true,
     itemFields: {
       name: { type: 'text', label: 'Provider name', default: '' },
       baseUrl: {
@@ -332,7 +334,9 @@ export const AI_CONFIG_FIELDS: Record<string, PluginConfigField> = {
         label: 'Models',
         default: [],
         collapsible: true,
-        summaryFields: ['model', 'alias'],
+        summaryFields: ['alias', 'model'],
+        summaryFormat: 'parenthesized',
+        summaryAsTitle: true,
         statusField: 'enabled',
         itemFields: {
           model: { type: 'text', label: 'Upstream model', default: '' },

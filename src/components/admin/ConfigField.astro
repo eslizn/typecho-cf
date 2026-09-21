@@ -154,12 +154,29 @@ function summaryFields(fieldDef: ConfigField): string[] {
   return firstText ? [firstText[0]] : [];
 }
 
-function summaryText(row: Record<string, any>, fieldDef: ConfigField): string {
+function summaryValues(row: Record<string, any>, fieldDef: ConfigField): string[] {
   return summaryFields(fieldDef)
     .map(key => row[key])
     .filter(value => value !== undefined && value !== null && String(value).trim() !== '')
-    .map(value => String(value))
-    .join(' · ');
+    .map(value => String(value));
+}
+
+function summaryText(row: Record<string, any>, fieldDef: ConfigField): string {
+  const values = summaryValues(row, fieldDef);
+  if (fieldDef.summaryFormat === 'parenthesized' && values.length > 1) {
+    return `${values[0]}(${values.slice(1).join(' · ')})`;
+  }
+  return values.join(' · ');
+}
+
+function itemTitle(
+  row: Record<string, any>,
+  fieldDef: ConfigField,
+  fieldLabel: string,
+  rowIndex: number,
+): string {
+  const summary = summaryText(row, fieldDef);
+  return fieldDef.summaryAsTitle && summary ? summary : `${fieldLabel} #${rowIndex + 1}`;
 }
 
 function isEnabledValue(value: unknown): boolean {
@@ -401,6 +418,8 @@ const displayFieldValue = displayValue(value ?? defaultValue(field), field);
         data-label={field.label}
         data-label-translated={fieldText.value}
         data-summary-fields={summaryFields(field).join(',')}
+        data-summary-format={field.summaryFormat || 'joined'}
+        data-summary-as-title={field.summaryAsTitle ? 'true' : 'false'}
         data-status-field={field.statusField || ''}
         data-next-index={String(repeatableRows(displayFieldValue, field).length)}
       >
@@ -412,15 +431,25 @@ const displayFieldValue = displayValue(value ?? defaultValue(field), field);
                 {field.collapsible ? (
                   <legend class="typecho-repeatable-header">
                     <button type="button" class="typecho-repeatable-toggle" aria-expanded={rowIndex === 0}>
-                      <span class="typecho-repeatable-index" data-index-label>{fieldText.value} #{rowIndex + 1}</span>
+                      {field.summaryAsTitle ? (
+                        <span class="typecho-repeatable-index" data-item-summary>{itemTitle(repeatableRow, field, fieldText.value, rowIndex)}</span>
+                      ) : (
+                        <span class="typecho-repeatable-index" data-index-label>{fieldText.value} #{rowIndex + 1}</span>
+                      )}
                     </button>
-                    <span class="typecho-repeatable-summary" data-item-summary>{summaryText(repeatableRow, field)}</span>
+                    {!field.summaryAsTitle && (
+                      <span class="typecho-repeatable-summary" data-item-summary>{summaryText(repeatableRow, field)}</span>
+                    )}
                     <span class="typecho-repeatable-badges">
                       {status && (
                         <span class:list={['admin-badge', status.enabled ? 'admin-badge--active' : 'admin-badge--muted']} data-item-badge>{status.label}</span>
                       )}
                     </span>
                     <button type="button" class="btn btn-xs typecho-repeatable-remove">{t('admin.action.delete', {}, 'Delete')}</button>
+                  </legend>
+                ) : field.summaryAsTitle ? (
+                  <legend class="typecho-repeatable-header">
+                    <span class="typecho-repeatable-index" data-item-summary>{itemTitle(repeatableRow, field, fieldText.value, rowIndex)}</span>
                   </legend>
                 ) : (
                   <legend>{fieldText.value} #{rowIndex + 1}</legend>
@@ -455,13 +484,21 @@ const displayFieldValue = displayValue(value ?? defaultValue(field), field);
             {field.collapsible ? (
               <legend class="typecho-repeatable-header">
                 <button type="button" class="typecho-repeatable-toggle" aria-expanded="false">
-                  <span class="typecho-repeatable-index" data-index-label>{fieldText.value} #__NUMBER__</span>
+                  {field.summaryAsTitle ? (
+                    <span class="typecho-repeatable-index" data-item-summary>{fieldText.value} #__NUMBER__</span>
+                  ) : (
+                    <span class="typecho-repeatable-index" data-index-label>{fieldText.value} #__NUMBER__</span>
+                  )}
                 </button>
-                <span class="typecho-repeatable-summary" data-item-summary></span>
+                {!field.summaryAsTitle && <span class="typecho-repeatable-summary" data-item-summary></span>}
                 <span class="typecho-repeatable-badges">
                   {field.statusField && <span class="admin-badge admin-badge--muted" data-item-badge></span>}
                 </span>
                 <button type="button" class="btn btn-xs typecho-repeatable-remove">{t('admin.action.delete', {}, 'Delete')}</button>
+              </legend>
+            ) : field.summaryAsTitle ? (
+              <legend class="typecho-repeatable-header">
+                <span class="typecho-repeatable-index" data-item-summary>{fieldText.value} #__NUMBER__</span>
               </legend>
             ) : (
               <legend>{fieldText.value} #__NUMBER__</legend>

@@ -105,6 +105,12 @@ describe('typecho-plugin-ai', () => {
     // Availability is controlled per model; providers have no enable switch.
     expect(AI_CONFIG_FIELDS.providers.itemFields?.enabled).toBeUndefined();
     expect(AI_CONFIG_FIELDS.providers.statusField).toBeUndefined();
+    expect(AI_CONFIG_FIELDS.providers.summaryFields).toEqual(['name', 'baseUrl']);
+    expect(AI_CONFIG_FIELDS.providers.summaryFormat).toBe('parenthesized');
+    expect(AI_CONFIG_FIELDS.providers.summaryAsTitle).toBe(true);
+    expect(AI_CONFIG_FIELDS.providers.itemFields?.models.summaryFields).toEqual(['alias', 'model']);
+    expect(AI_CONFIG_FIELDS.providers.itemFields?.models.summaryFormat).toBe('parenthesized');
+    expect(AI_CONFIG_FIELDS.providers.itemFields?.models.summaryAsTitle).toBe(true);
     expect(AI_CONFIG_FIELDS.providers.itemFields?.models.itemFields?.enabled.type).toBe('select');
   });
 

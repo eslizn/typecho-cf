@@ -103,7 +103,7 @@ typecho-plugin-example/
 - `optionsSource: "r2Bindings"`：下拉选项填充为当前 Worker 环境中的 R2 bucket binding。
 - `optionsSource: { capability, ownerPluginId?, minVersion? }`：下拉选项填充为另一个插件通过 capability 发布的列表（例如 Scribe 用 `ai.models.list` 展示 AI 插件里可用的对话模型别名）。该 capability 必须实现 `listOptions(): Array<{ value: string; label?: string }>`；未注册、未激活、ambiguous 或工厂抛错时渲染空列表，不阻断整个表单。这类字段的值不做静态选项校验，只限制长度与可见字符，具体取值由插件在 `plugin:config:beforeSave` 里用同一个 capability 复核。
 
-`repeatable` 可选开启卡片视图：`collapsible: true` 让每行折叠（首行展开），`summaryFields`（如 `["name", "baseUrl"]`）决定标题摘要，`statusField`（如 `enabled`）在标题右侧渲染状态徽标；不声明时保持原来的平铺样式。
+`repeatable` 可选开启卡片视图：`collapsible: true` 让每行折叠（首行展开），`summaryFields`（如 `["name", "baseUrl"]`）决定标题摘要，`summaryFormat: "parenthesized"` 将首个值与其余值渲染为 `首值(其余值)`，`summaryAsTitle: true` 用摘要替换 `Label #N` 条目标题，`statusField`（如 `enabled`）在标题右侧渲染状态徽标；不声明时保持原来的平铺样式。
 
 带有 `options` 的字段可以用 `optionDisabled: ["value"]` 把个别选项渲染为 disabled，服务端保存时也会丢弃这些值。已经预留但还没实现的能力、枚举值用这个字段禁用，不要在选项文案里写「（预留）」之类标注。
 

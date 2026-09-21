@@ -94,6 +94,10 @@ export interface ConfigField {
   collapsible?: boolean;
   /** Item fields whose values form the collapsed summary; defaults to the first text field. */
   summaryFields?: string[];
+  /** How summary field values are joined; defaults to a middle dot. */
+  summaryFormat?: 'joined' | 'parenthesized';
+  /** Replace the default "Label #N" item title with the summary when available. */
+  summaryAsTitle?: boolean;
   /** Item field rendered as a status badge in the card header (for example "enabled"). */
   statusField?: string;
 }

@@ -15,7 +15,6 @@ describe('package scripts', () => {
   it('provisions task queues before the one-command deployment flow', () => {
     const pkg = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf-8'));
     expect(pkg.scripts['queues:ensure']).toBe('node scripts/ensure-queues.mjs');
-    expect(pkg.scripts['queues:cleanup-legacy']).toBe('node scripts/cleanup-legacy-queue.mjs');
     expect(pkg.scripts.deploy).toBe('node scripts/deploy.mjs');
   });
 });

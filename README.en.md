@@ -30,8 +30,6 @@ The wizard prompts for `INSTALL_TOKEN` (recommended; generate with `openssl rand
 
 Tables are created by the install wizard on first submit — you do not need a separate D1 migration step.
 
-The source repository must be a **public GitHub or GitLab repo** for other people to use the button.
-
 ### Prerequisites
 
 - Node.js **22.12+**
@@ -81,16 +79,6 @@ pnpm exec wrangler secret put CF_API_TOKEN
 
 Both secrets are optional; without them the page still shows realtime metrics available from the `QUEUE` binding. This deployment does not configure a dead-letter Queue, so messages that still fail after the retry limit are discarded by Cloudflare. The page does not pull, lease, delete, or replay messages, and it does not record per-task running or completed history.
 
-When upgrading from the older two-Queue deployment, ordinary `pnpm run deploy` does not delete the old
-`typecho-cf-tasks-dlq`, avoiding accidental loss of messages that may still be waiting. After confirming
-that the old Queue is no longer needed, run this from the project root:
-
-```bash
-pnpm run queues:cleanup-legacy -- --confirm typecho-cf-tasks-dlq
-```
-
-This command can delete only that fixed legacy Queue and first checks that the selected Wrangler config no longer references it. Wrangler still shows its final confirmation prompt. Button/Workers Builds never run this cleanup automatically.
-
 The first `wrangler deploy` may write a generated `database_id` back into `wrangler.toml`. Do not commit that change (`git checkout -- wrangler.toml`); later deploys stay bound to the same resources. Only edit `database_name` / `bucket_name` if you want different resource names.
 
 ---
@@ -102,7 +90,6 @@ The first `wrangler deploy` may write a generated `database_id` back into `wrang
 | `pnpm run dev` | Start local dev server |
 | `pnpm run build` | Production build |
 | `pnpm run deploy` | Local: task Queue preflight + build + deploy; Workers Builds: deploy only |
-| `pnpm run queues:cleanup-legacy` | Delete the legacy `typecho-cf-tasks-dlq` only after explicit confirmation |
 | `pnpm run lint` | Type-aware static checks, including floating Promises |
 | `pnpm run types:workers` | Generate Worker binding and runtime types from Wrangler config |
 | `pnpm run typecheck` | Generate Workers / Astro types and run the TypeScript check |

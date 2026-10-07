@@ -30,8 +30,6 @@ Button/Workers Builds 中保持以下命令即可：Build command 为 `pnpm run 
 
 数据表由安装向导在首次提交时创建，不必单独跑 D1 migration。
 
-仓库必须是 **GitHub / GitLab 公开仓库**，Deploy to Cloudflare 按钮才能被他人使用。
-
 ### 前置要求
 
 - Node.js **22.12+**
@@ -92,16 +90,6 @@ pnpm exec wrangler secret put CF_API_TOKEN
 死信队列，消息达到最大重试次数后会被 Cloudflare 丢弃。页面不拉取、租约、删除或重放消息，
 也不记录单条任务的运行中/已完成历史。
 
-从旧版双 Queue 部署升级时，普通 `pnpm run deploy` 不会自动删除旧的
-`typecho-cf-tasks-dlq`，以免误删仍在等待的消息。确认不再需要旧 Queue 后，在项目根目录执行：
-
-```bash
-pnpm run queues:cleanup-legacy -- --confirm typecho-cf-tasks-dlq
-```
-
-该命令只允许删除这个固定的旧 Queue，并会先检查当前 Wrangler 配置没有继续引用它；
-命令仍会由 Wrangler 显示最终确认提示。Button/Workers Builds 不会自动执行此清理。
-
 访问 Worker URL → `/install` → 填写站点与管理员信息（及 `INSTALL_TOKEN`）→ 登录 `/admin`。
 
 首次 `wrangler deploy` 可能会把生成的 `database_id` 写回 `wrangler.toml`。不要提交这次改动（`git checkout -- wrangler.toml`）；之后部署仍会绑定到同一资源。若要用别的库名或桶名，再改 `database_name` / `bucket_name`。
@@ -116,7 +104,6 @@ pnpm run queues:cleanup-legacy -- --confirm typecho-cf-tasks-dlq
 | `pnpm run build` | 生产构建 |
 | `pnpm run deploy` | 本地：幂等创建任务 Queue + 构建 + 部署；Workers Builds：仅部署 |
 | `pnpm run queues:ensure` | 按当前 Wrangler 配置幂等创建任务 Queue |
-| `pnpm run queues:cleanup-legacy` | 在显式确认后删除旧版遗留的 `typecho-cf-tasks-dlq` |
 | `pnpm run reinstall:extensions` | 刷新所有已声明插件和主题的本地依赖快照 |
 | `pnpm run lint` | 类型感知静态检查（含浮空 Promise） |
 | `pnpm run types:workers` | 按 Wrangler 配置生成 Worker 绑定与运行时类型 |

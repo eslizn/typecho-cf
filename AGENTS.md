@@ -607,7 +607,6 @@ scripts/
 - 第一阶段不新增任务专用 D1 表，不用 D1 保存任务 cursor、历史、队列状态或通用幂等记录；已有 D1 仍用于站点配置、插件激活状态和插件配置。
 - Queue 是至少一次投递；不承诺精确一次、跨 PoP 强全局互斥或错过 Cron 槽位的可靠补偿。插件必须保证任务幂等。
 - `typecho-cf-tasks` 是当前唯一的账户级 Cloudflare Queue 资源；本地/手动执行 `pnpm run deploy` 必须先执行 `scripts/deploy.mjs` 的幂等资源检查，按所选 Wrangler 配置调用项目锁定版本的 `wrangler queues list/create`，缺失时创建、已存在时复用，禁止删除或重建。Deploy Button / Workers Builds 已在构建前按 Wrangler 配置自动准备资源，且已单独执行 Build command；当 `WORKERS_CI=1` 时，`pnpm run deploy` 必须跳过 Queue 检查与重复构建，仅执行 `wrangler deploy`。
-- 从旧版双 Queue 部署升级时，普通部署不得自动删除 `typecho-cf-tasks-dlq`；确认旧 Queue 不再需要后，必须显式执行 `pnpm run queues:cleanup-legacy -- --confirm typecho-cf-tasks-dlq`，该命令只允许删除固定的旧名称，并先检查当前 Wrangler 配置未引用它。Button / Workers Builds 不执行该清理。
 - Workers Builds 的非生产分支必须使用 `wrangler versions upload`（项目命令可写为 `pnpm exec wrangler versions upload`），不得复用会执行生产 `wrangler deploy` 的手动部署路径。
 - `pnpm run deploy -- --dry-run` 不得创建 Queue；Queue 资源创建失败必须终止部署，不能用 `|| true` 吞掉权限、认证或网络错误。
 

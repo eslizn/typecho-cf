@@ -2,7 +2,7 @@ import type { APIRoute } from 'astro';
 import { schema } from '@/db';
 import { isAdminActionResponse, requireAdminAction, safeAdminRedirectUrl } from '@/lib/admin-auth';
 import { readAdminFormOrError } from '@/lib/input';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { i18nMessage } from '@/lib/i18n';
 import { textError } from '@/lib/http';
 
@@ -34,36 +34,24 @@ async function handler({ request, locals, url }: { request: Request; locals: App
     return new Response(null, { status: 302, headers: { Location: referer } });
   }
 
-  if (action === 'delete') {
-    // G4-2: collect all candidate users in one query, plus a single
-    // administrator-count check; only then run the writes.
-    const candidates = await auth.db.select().from(schema.users)
-      .where(sql`${schema.users.uid} IN (${sql.join(uids.map(id => sql`${id}`), sql`, `)})`);
-
-    const adminCountResult = await auth.db.select({ count: sql<number>`count(*)` })
-      .from(schema.users)
-      .where(eq(schema.users.group, 'administrator'));
-    let remainingAdmins = adminCountResult[0]?.count || 0;
-
-    const targets: number[] = [];
-    for (const targetUser of candidates) {
-      if (targetUser.uid === auth.uid) continue; // never delete self
-      if (targetUser.group === 'administrator') {
-        if (remainingAdmins <= 1) continue;
-        remainingAdmins -= 1;
-      }
-      targets.push(targetUser.uid);
-    }
-
-    if (targets.length > 0) {
-      const idList = sql.join(targets.map(id => sql`${id}`), sql`, `);
-      await auth.db.update(schema.contents)
-        .set({ authorId: auth.uid })
-        .where(sql`${schema.contents.authorId} IN (${idList})`);
-      await auth.db.update(schema.comments)
-        .set({ authorId: auth.uid })
-        .where(sql`${schema.comments.authorId} IN (${idList})`);
-      await auth.db.delete(schema.users).where(sql`${schema.users.uid} IN (${idList})`);
+  // Keep the acting administrator outside the selection. Recheck that their
+  // role is still current inside the atomic write batch, so a concurrent
+  // demotion cannot leave the site without an administrator.
+  const targets = [...new Set(uids)].filter(uid => uid > 0 && uid !== auth.uid);
+  if (targets.length > 0) {
+    const idList = sql.join(targets.map(id => sql`${id}`), sql`, `);
+    const actorIsAdmin = and(eq(schema.users.uid, auth.uid), eq(schema.users.group, 'administrator'));
+    const authorized = sql`EXISTS (SELECT 1 FROM ${schema.users} WHERE ${actorIsAdmin})`;
+    const [actors] = await auth.db.batch([
+      auth.db.select({ uid: schema.users.uid }).from(schema.users).where(actorIsAdmin),
+      auth.db.update(schema.contents).set({ authorId: auth.uid })
+        .where(and(sql`${schema.contents.authorId} IN (${idList})`, authorized)),
+      auth.db.update(schema.comments).set({ authorId: auth.uid })
+        .where(and(sql`${schema.comments.authorId} IN (${idList})`, authorized)),
+      auth.db.delete(schema.users).where(and(sql`${schema.users.uid} IN (${idList})`, authorized)),
+    ]);
+    if (actors.length === 0) {
+      return textError(403, i18nMessage('core.error.forbidden', 'Forbidden'), undefined, auth.i18n);
     }
   }
 

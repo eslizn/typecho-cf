@@ -6,9 +6,10 @@
  * secret set, mismatch (or empty) tokens are rejected.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createTestDb, type TestDatabase } from '../helpers';
+import { createD1TestDouble, createTestDb, type TestDatabase } from '../helpers';
 
 let testDb: TestDatabase;
+let d1TestDouble: ReturnType<typeof createD1TestDouble>;
 let installToken: string | undefined;
 
 vi.mock('@/db', async () => {
@@ -19,12 +20,7 @@ vi.mock('@/db', async () => {
 vi.mock('cloudflare:workers', () => ({
   get env() {
     return {
-      // ensureTables() expects a D1Database with batch/prepare; since the
-      // tables already exist in testDb we no-op it.
-      DB: {
-        batch: async () => [],
-        prepare: () => ({ first: async () => null }),
-      },
+      DB: d1TestDouble,
       BUCKET: { delete: vi.fn() },
       INSTALL_TOKEN: installToken,
     };
@@ -46,6 +42,7 @@ function buildRequest(body: Record<string, string>) {
 describe('POST /api/install (G2-2)', () => {
   beforeEach(async () => {
     testDb = await createTestDb();
+    d1TestDouble = createD1TestDouble(testDb);
   });
 
   it('allows install without token when INSTALL_TOKEN is unset (legacy)', async () => {

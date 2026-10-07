@@ -1,11 +1,11 @@
 import type { APIRoute } from 'astro';
 import { schema } from '@/db';
-import { hasPermission } from '@/lib/auth';
+import { canManageResource, hasPermission } from '@/lib/auth';
 import { isAdminActionResponse, requireAdminAction, safeAdminRedirectUrl } from '@/lib/admin-auth';
 import { doHook } from '@/lib/plugin';
 import { invalidateSiteCache } from '@/lib/cache';
 import { readAdminFormOrError } from '@/lib/input';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { i18nMessage } from '@/lib/i18n';
 import { textError } from '@/lib/http';
 
@@ -17,7 +17,6 @@ async function handler({ request, locals, url }: { request: Request; locals: App
 
   const pluginCtx = auth.pluginCtx;
 
-  const isAdmin = hasPermission(auth.user.group || 'visitor', 'administrator');
   const isEditor = hasPermission(auth.user.group || 'visitor', 'editor');
 
   const action = url.searchParams.get('do') || '';
@@ -52,7 +51,7 @@ async function handler({ request, locals, url }: { request: Request; locals: App
     const contents = await auth.db.select().from(schema.contents)
       .where(sql`${schema.contents.cid} IN (${sql.join(cids.map(id => sql`${id}`), sql`, `)})`);
 
-    const allowedContents = contents.filter(c => isAdmin || c.authorId === auth.uid);
+    const allowedContents = contents.filter(c => canManageResource(auth.user, c));
     if (allowedContents.length === 0) {
       return new Response(null, { status: 302, headers: {
         Location: type === 'page' ? '/admin/manage-pages' : '/admin/manage-posts',
@@ -60,6 +59,10 @@ async function handler({ request, locals, url }: { request: Request; locals: App
     }
 
     const allowedCids = allowedContents.map(c => c.cid);
+    const revisions = await auth.db.select({ cid: schema.contents.cid }).from(schema.contents)
+      .where(and(eq(schema.contents.type, 'revision'), inArray(schema.contents.parent, allowedCids)));
+    const deleteCids = [...new Set([...allowedCids, ...revisions.map(revision => revision.cid)])];
+    const countedCids = allowedContents.filter(content => content.type !== 'revision').map(content => content.cid);
 
     // Pre-delete hooks (must run sequentially: plugins may rely on
     // ordering and on the row still being present).
@@ -70,24 +73,25 @@ async function handler({ request, locals, url }: { request: Request; locals: App
       });
     }
 
-    // Decrement meta counts in one pass: collect all (cid -> [mid]) and
-    // run a single relationship lookup, then update each meta once with
-    // the actual decrement count.
-    const rels = await auth.db.select({ cid: schema.relationships.cid, mid: schema.relationships.mid })
-      .from(schema.relationships)
-      .where(sql`${schema.relationships.cid} IN (${sql.join(allowedCids.map(id => sql`${id}`), sql`, `)})`);
-    const decrementByMid = new Map<number, number>();
-    for (const rel of rels) {
-      decrementByMid.set(rel.mid, (decrementByMid.get(rel.mid) || 0) + 1);
-    }
+    const cidList = sql.join(deleteCids.map(id => sql`${id}`), sql`, `);
+    // Derive each counter delta from relationships still present when this
+    // batch executes. A preflight read could become stale before the batch
+    // and leave metadata counts inconsistent with the rows being deleted.
+    const decrementStmts = countedCids.length > 0
+      ? [auth.db.update(schema.metas)
+        .set({
+          count: sql`MAX(0, ${schema.metas.count} - (
+            SELECT COUNT(*) FROM ${schema.relationships}
+            WHERE ${schema.relationships.mid} = ${schema.metas.mid}
+              AND ${schema.relationships.cid} IN (${sql.join(countedCids.map(id => sql`${id}`), sql`, `)})
+          ))`,
+        })
+        .where(inArray(schema.metas.mid, auth.db.select({ mid: schema.relationships.mid })
+          .from(schema.relationships)
+          .where(inArray(schema.relationships.cid, countedCids))))]
+      : [];
 
-    // Now stream the writes through D1 batch — atomic and single-round-trip.
-    const decrementStmts = Array.from(decrementByMid.entries()).map(([mid, n]) =>
-      auth.db.update(schema.metas)
-        .set({ count: sql`MAX(0, ${schema.metas.count} - ${n})` })
-        .where(eq(schema.metas.mid, mid))
-    );
-    const cidList = sql.join(allowedCids.map(id => sql`${id}`), sql`, `);
+    // Counter updates and relationship/content deletion share one D1 batch.
     const deleteStmts = [
       auth.db.delete(schema.relationships).where(sql`${schema.relationships.cid} IN (${cidList})`),
       auth.db.delete(schema.comments).where(sql`${schema.comments.cid} IN (${cidList})`),
@@ -120,13 +124,36 @@ async function handler({ request, locals, url }: { request: Request; locals: App
 
     const contents = await auth.db.select().from(schema.contents)
       .where(sql`${schema.contents.cid} IN (${sql.join(cids.map(id => sql`${id}`), sql`, `)})`);
-    const allowedCids = contents
-      .filter(c => isAdmin || c.authorId === auth.uid)
-      .map(c => c.cid);
+    const allowedContents = contents.filter(content =>
+      ['post', 'post_draft', 'page', 'page_draft'].includes(content.type || '')
+      && canManageResource(auth.user, content));
+    const allowedCids = allowedContents.map(content => content.cid);
     if (allowedCids.length > 0) {
       await auth.db.update(schema.contents)
-        .set({ status: markStatus })
+        .set({
+          status: markStatus,
+          type: markStatus === 'draft' ? sql`${schema.contents.type}` : sql`CASE ${schema.contents.type}
+            WHEN 'post_draft' THEN 'post'
+            WHEN 'page_draft' THEN 'page'
+            ELSE ${schema.contents.type} END`,
+        })
         .where(sql`${schema.contents.cid} IN (${sql.join(allowedCids.map(id => sql`${id}`), sql`, `)})`);
+      for (const content of allowedContents) {
+        const baseType = content.type!.startsWith('page') ? 'page' : 'post';
+        const finishData = {
+          ...content,
+          status: markStatus,
+          type: markStatus === 'draft' ? content.type : baseType,
+        };
+        if (markStatus === 'publish') {
+          await doHook(pluginCtx, baseType === 'page' ? 'page:afterPublish' : 'post:afterPublish', finishData, {
+            capabilityRuntime: pluginCtx.capabilityRuntime,
+          });
+        }
+        await doHook(pluginCtx, baseType === 'page' ? 'page:afterSave' : 'post:afterSave', finishData, {
+          capabilityRuntime: pluginCtx.capabilityRuntime,
+        });
+      }
     }
   }
 

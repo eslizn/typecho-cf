@@ -1,6 +1,8 @@
-import { and, eq, ne } from 'drizzle-orm';
+import { and, eq, ne, or, isNull } from 'drizzle-orm';
 import { schema, type Database } from '@/db';
 import { normalizeSlug } from '@/lib/input';
+
+const CONTENT_SLUG_WRITE_ATTEMPTS = 8;
 
 export async function resolveUniqueContentSlug(
   db: Database,
@@ -17,7 +19,7 @@ export async function resolveUniqueContentSlug(
       where: and(
         eq(schema.contents.slug, candidate),
         ne(schema.contents.cid, cid),
-        ne(schema.contents.type, 'revision'),
+        or(isNull(schema.contents.type), ne(schema.contents.type, 'revision')),
       ),
     });
     if (!existing) return candidate;
@@ -26,6 +28,46 @@ export async function resolveUniqueContentSlug(
       ? (suffix === 1 ? `${base}-${cid}` : `${base}-${cid}-${suffix}`)
       : `${base}-${suffix + 1}`;
   }
+}
+
+/**
+ * Resolve and persist a content slug, retrying only when another writer wins
+ * the same slug between the availability read and the write.
+ */
+export async function writeWithUniqueContentSlug<T>(
+  db: Database,
+  desired: unknown,
+  cid: number,
+  write: (slug: string) => Promise<T>,
+  fallback?: string,
+): Promise<T> {
+  for (let attempt = 0; attempt < CONTENT_SLUG_WRITE_ATTEMPTS; attempt++) {
+    const slug = await resolveUniqueContentSlug(db, desired, cid, fallback);
+    try {
+      return await write(slug);
+    } catch (error) {
+      if (!isContentSlugUniqueConflict(error) || attempt === CONTENT_SLUG_WRITE_ATTEMPTS - 1) {
+        throw error;
+      }
+    }
+  }
+  throw new Error('Content slug could not be made unique after bounded retries.');
+}
+
+/** Match only the partial unique constraint owned by content slug writes. */
+export function isContentSlugUniqueConflict(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    if (current instanceof Error &&
+      /unique constraint failed:\s*[`"']?typecho_contents\.slug\b/i.test(current.message)) {
+      return true;
+    }
+    if (typeof current !== 'object') break;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
 }
 
 export async function resolveUniqueMetaSlug(

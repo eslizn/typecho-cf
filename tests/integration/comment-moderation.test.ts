@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import * as schema from '@/db/schema';
 import { createTestDb, type TestDatabase } from '../helpers';
-import { canModerateComment, deleteSpamCommentsForUser } from '@/lib/comment-moderation';
+import { applyCommentAction, applyCommentActions, canModerateComment, deleteSpamCommentsForUser } from '@/lib/comment-moderation';
 import { eq } from 'drizzle-orm';
 
 let testDb: TestDatabase;
@@ -35,7 +35,7 @@ async function seedPost(authorId: number) {
   }))!;
 }
 
-async function seedComment(cid: number, ownerId: number, status: 'approved' | 'spam' = 'approved') {
+async function seedComment(cid: number, ownerId: number, status: 'approved' | 'waiting' | 'spam' = 'approved') {
   await testDb.insert(schema.comments).values({
     cid, author: 'A', text: 'hi', status, type: 'comment', ownerId, created: 200,
   });
@@ -115,4 +115,45 @@ describe('deleteSpamCommentsForUser (G7-4)', () => {
     const removed = await deleteSpamCommentsForUser(testDb as any, stranger);
     expect(removed).toBe(0);
   });
+});
+
+
+describe('moderation counters with stale snapshots', () => {
+  const ctx = { activatedPlugins: new Set<string>() };
+  for (const mode of ['single', 'batch'] as const) {
+    const apply = (comments: Array<typeof schema.comments.$inferSelect>, action: 'approved' | 'delete') =>
+      mode === 'single'
+        ? applyCommentAction(ctx, testDb as any, comments[0], action)
+        : applyCommentActions(ctx, testDb as any, comments, action);
+
+    it(`${mode}: repeated approval of a stale waiting snapshot counts once`, async () => {
+      const user = await seedUser('moderator', 'administrator');
+      const post = await seedPost(user.uid);
+      const stale = await seedComment(post.cid, user.uid, 'waiting');
+      await apply([stale], 'approved');
+      await apply([stale], 'approved');
+      expect((await testDb.query.contents.findFirst())?.commentsNum).toBe(1);
+    });
+
+    it(`${mode}: repeated deletion preserves another approved comment count`, async () => {
+      const user = await seedUser('moderator', 'administrator');
+      const post = await seedPost(user.uid);
+      const stale = await seedComment(post.cid, user.uid);
+      await testDb.insert(schema.comments).values({ cid: post.cid, status: 'approved', type: 'pingback' });
+      await testDb.update(schema.contents).set({ commentsNum: 2 }).where(eq(schema.contents.cid, post.cid));
+      await apply([stale], 'delete');
+      await apply([stale], 'delete');
+      expect((await testDb.query.contents.findFirst())?.commentsNum).toBe(1);
+    });
+
+    it(`${mode}: failure to update count rolls back the status change`, async () => {
+      const user = await seedUser('moderator', 'administrator');
+      const post = await seedPost(user.uid);
+      const comment = await seedComment(post.cid, user.uid, 'waiting');
+      await testDb.$client.execute(`CREATE TRIGGER reject_count_update BEFORE UPDATE OF commentsNum ON typecho_contents BEGIN SELECT RAISE(ABORT, 'count failure'); END`);
+      await expect(apply([comment], 'approved')).rejects.toThrow();
+      expect((await testDb.query.comments.findFirst())?.status).toBe('waiting');
+      expect((await testDb.query.contents.findFirst())?.commentsNum).toBe(0);
+    });
+  }
 });

@@ -52,6 +52,16 @@ describe('incoming trackback and pingback', () => {
     expect((await db.query.contents.findFirst())?.commentsNum).toBe(0);
   });
 
+  it.each(['trackback', 'pingback'] as const)('rolls back a %s insert when its counter update fails', async (type) => {
+    const post = await seed();
+    await db.$client.execute("CREATE TRIGGER reject_feedback_count BEFORE UPDATE OF commentsNum ON typecho_contents BEGIN SELECT RAISE(ABORT, 'counter update failed'); END");
+    await expect(saveIncomingFeedback(db as any, ctx, options, {
+      cid: post.cid, author: 'Blog', url: 'https://source.test/a', text: 'Excerpt', type, ip: '', agent: 'test',
+    })).rejects.toThrow();
+    expect(await db.select().from(schema.comments)).toHaveLength(0);
+    expect(hook).not.toHaveBeenCalled();
+  });
+
   it('rejects feedback whose source cannot be verified without writing a row', async () => {
     const post = await seed();
     verifySource.mockResolvedValueOnce(false);

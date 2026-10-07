@@ -19,6 +19,7 @@ import init, {
   tianyiEnsureSession,
   tianyiListFiles,
 } from './index';
+import { MAX_AUTH_FAILURE_STATES } from './config';
 
 const VALID_MOUNTS = [
   {
@@ -525,6 +526,18 @@ describe('typecho-plugin-webdav auth parsing', () => {
     expect(getWebDavClientIp(new Request('https://example.com/dav'))).toBe('unknown');
   });
 
+  it('uses the core client IP precedence and ignores untrusted x-real-ip', () => {
+    expect(getWebDavClientIp(new Request('https://example.com/dav', {
+      headers: { 'x-real-ip': '192.0.2.1', 'x-forwarded-for': ', 203.0.113.10, 198.51.100.20' },
+    }))).toBe('203.0.113.10');
+    expect(getWebDavClientIp(new Request('https://example.com/dav', {
+      headers: { 'cf-connecting-ip': '198.51.100.2', 'x-real-ip': '192.0.2.1', 'x-forwarded-for': '203.0.113.10' },
+    }))).toBe('198.51.100.2');
+    expect(getWebDavClientIp(new Request('https://example.com/dav', {
+      headers: { 'x-real-ip': '192.0.2.1' },
+    }))).toBe('unknown');
+  });
+
   it('bans an IP after configured failed login attempts and clears after success', () => {
     const config = normalizeConfig({
       mounts: VALID_MOUNTS,
@@ -544,6 +557,56 @@ describe('typecho-plugin-webdav auth parsing', () => {
 
     clearWebDavAuthFailures(ip);
     expect(isWebDavClientBanned(config, ip, 2_000)).toBe(false);
+  });
+
+  it('bounds auth-failure state and preserves active bans at capacity', () => {
+    const config = normalizeConfig({
+      failBanEnabled: true,
+      failBanMaxFailures: 1,
+      failBanWindowSeconds: 60,
+      failBanSeconds: 300,
+    });
+    const ips = Array.from({ length: MAX_AUTH_FAILURE_STATES }, (_, index) => {
+      const thirdOctet = Math.floor(index / 254);
+      const fourthOctet = (index % 254) + 1;
+      return `198.18.${thirdOctet}.${fourthOctet}`;
+    });
+    const now = 10_000;
+
+    try {
+      for (const ip of ips) recordWebDavAuthFailure(config, ip, now);
+      expect(isWebDavClientBanned(config, ips[0], now)).toBe(true);
+
+      const untrackedIp = '203.0.113.250';
+      recordWebDavAuthFailure(config, untrackedIp, now);
+      recordWebDavAuthFailure(config, untrackedIp, now + 1);
+
+      // Saturation does not evict an active ban; new identities are not
+      // tracked while every retained entry is currently banned.
+      expect(isWebDavClientBanned(config, ips[0], now + 1)).toBe(true);
+      expect(isWebDavClientBanned(config, untrackedIp, now + 1)).toBe(false);
+    } finally {
+      for (const ip of ips) clearWebDavAuthFailures(ip);
+      clearWebDavAuthFailures('203.0.113.250');
+    }
+  });
+
+  it('expires an unbanned one-off failure after its configured window', () => {
+    const config = normalizeConfig({
+      failBanEnabled: true,
+      failBanMaxFailures: 2,
+      failBanWindowSeconds: 10,
+      failBanSeconds: 10,
+    });
+    const ip = '198.51.100.91';
+    clearWebDavAuthFailures(ip);
+    recordWebDavAuthFailure(config, ip, 1_000);
+
+    expect(isWebDavClientBanned(config, ip, 11_001)).toBe(false);
+
+    recordWebDavAuthFailure(config, ip, 11_002);
+    expect(isWebDavClientBanned(config, ip, 11_002)).toBe(false);
+    clearWebDavAuthFailures(ip);
   });
 });
 
@@ -1196,6 +1259,58 @@ describe('typecho-plugin-webdav admin panel', () => {
     for (const script of scripts) {
       expect(() => new Function(script)).not.toThrow();
     }
+  });
+
+  it('uploads a dropped file to the hovered folder before resetting the drag state', async () => {
+    const page = collectHooks().get('admin:page')!;
+    const html = page('', { slug: 'webdav', csrfToken: 'csrf-token' });
+    const scripts = [...html.matchAll(/<script>\s*([\s\S]*?)\s*<\/script>/g)].map(match => match[1]);
+    const elements = new Map<string, any>();
+    const element = (id: string) => {
+      if (!elements.has(id)) {
+        const listeners = new Map<string, (...args: any[]) => any>();
+        elements.set(id, {
+          style: {}, dataset: {}, innerHTML: '',
+          classList: { add: vi.fn(), remove: vi.fn(), contains: () => false },
+          listeners,
+          addEventListener: (name: string, handler: (...args: any[]) => any) => listeners.set(name, handler),
+          querySelector: () => null,
+        });
+      }
+      return elements.get(id);
+    };
+    const document = {
+      getElementById: element,
+      querySelectorAll: () => [],
+      addEventListener: vi.fn(),
+    };
+    const fetcher = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ success: true, data: { objects: [], prefixes: [] } }),
+    }));
+    for (const script of scripts) {
+      new Function('document', 'window', 'fetch', 'setTimeout', 'clearTimeout', script)(
+        document, { confirm: () => true }, fetcher, () => 0, () => {},
+      );
+    }
+
+    const folderRow = element('folder-row');
+    folderRow.querySelector = () => ({ dataset: { isFolder: '1' }, value: 'media/photos/' });
+    element('file-list-body').listeners.get('dragover')!({
+      preventDefault: vi.fn(), dataTransfer: {}, target: { closest: () => folderRow },
+    });
+    const file = new File(['photo'], 'photo.txt', { type: 'text/plain' });
+    await element('webdav-table-wrap').listeners.get('drop')!({
+      preventDefault: vi.fn(),
+      dataTransfer: {
+        items: [{ webkitGetAsEntry: () => ({ isFile: true, file: (callback: (file: File) => void) => callback(file) }) }],
+      },
+    });
+
+    const upload = fetcher.mock.calls.find((call: any[]) => call[1]?.body instanceof FormData) as any[] | undefined;
+    expect(upload).toBeDefined();
+    expect(upload![1].body.get('path')).toBe('media/photos/');
+    expect(folderRow.classList.remove).toHaveBeenCalledWith('drag-over-row');
   });
 
   it('does not inject menu item for non-admin users', () => {

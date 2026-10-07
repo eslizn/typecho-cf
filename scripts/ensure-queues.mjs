@@ -228,9 +228,27 @@ function commandStatus(result) {
   return 'unknown failure';
 }
 
+function commandFailureDetail(result) {
+  const output = stripAnsi(`${result?.stderr ?? ''}\n${result?.stdout ?? ''}`)
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean);
+  const diagnostic = output.find(line => (
+    /(?:\[ERROR\]|\berror:|not logged in|authentication|unauthorized|forbidden|permission|CLOUDFLARE_API_TOKEN|ECONN[A-Z]*|ETIMEDOUT|timed out|certificate|HTTP\s+\d{3})/i.test(line)
+  )) ?? output.at(-1);
+  if (!diagnostic) return '';
+  return diagnostic
+    .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]')
+    .replace(/(CLOUDFLARE_API_TOKEN\s*[:=]\s*)\S+/gi, '$1[redacted]')
+    .slice(0, 400);
+}
+
 function assertWranglerSuccess(result, operation) {
   if (result?.status === 0) return;
-  throw new Error(`wrangler ${operation} failed (${commandStatus(result)}); deployment was stopped`);
+  const detail = commandFailureDetail(result);
+  throw new Error(
+    `wrangler ${operation} failed (${commandStatus(result)})${detail ? `: ${detail}` : ''}; deployment was stopped`,
+  );
 }
 
 /**
@@ -319,8 +337,11 @@ export async function ensureQueues({
 
     try {
       existing = await listExistingQueueNames({ runner, cwd, globalArgs: context.globalArgs });
-    } catch {
-      throw new Error(`wrangler queues create failed for '${queueName}' (${commandStatus(result)}); deployment was stopped`);
+    } catch (listError) {
+      const detail = commandFailureDetail(result);
+      throw new Error(
+        `wrangler queues create failed for '${queueName}' (${commandStatus(result)})${detail ? `: ${detail}` : ''}; verification list failed: ${listError instanceof Error ? listError.message : 'unknown failure'}; deployment was stopped`,
+      );
     }
     if (existing.has(queueName)) {
       log(`[queues:ensure] exists after concurrent create: ${queueName}`);

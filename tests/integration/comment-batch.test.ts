@@ -151,6 +151,7 @@ describe('POST /api/admin/comment-batch', () => {
     const cookie = await makeAuthCookie(testDb, admin.uid, TEST_AUTH_CODE, TEST_SECRET);
     const post = await seedPost(testDb, 1);
     const comment = await seedComment(testDb, post.cid!, 'waiting');
+    await seedComment(testDb, post.cid!, 'approved');
 
     const req = makeBatchRequest('POST', 'delete', [comment.coid], cookie);
     await POST({ request: req, locals: {}, url: new URL(req.url) } as any);

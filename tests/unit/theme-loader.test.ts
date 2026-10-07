@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -54,7 +54,7 @@ describe('theme loader local file dependencies', () => {
 
     const [theme] = discoverThemes(root);
 
-    expect(theme.packageDir).toBe(join(root, 'src', 'themes', 'typecho-theme-fixture'));
+    expect(theme.packageDir).toBe(join(realpathSync(root), 'src', 'themes', 'typecho-theme-fixture'));
     expect(theme.manifest.config).toEqual({
       footerText: { type: 'text', label: 'Footer text' },
     });

@@ -80,14 +80,20 @@ export async function saveIncomingFeedback(
   const author = String(value.author || '').slice(0, 150);
   const mail = String(value.mail || '').slice(0, 150);
   const url = String(value.url || '').slice(0, 255);
-  const inserted = await db.insert(schema.comments).values({
+  const insertStatement = db.insert(schema.comments).values({
     cid: input.cid, created: now, author, authorId: 0,
     ownerId: content.authorId || 0, mail, url,
     ip: input.ip, agent: input.agent, text, type: input.type, status, parent: 0,
   }).returning({ coid: schema.comments.coid });
-  if (status === 'approved') {
-    await db.update(schema.contents).set({ commentsNum: sql`${schema.contents.commentsNum} + 1` }).where(eq(schema.contents.cid, input.cid));
-  }
+  // Feedback and its approved counter must commit together, just like a
+  // normal comment. A failed counter update must not leave a saved row.
+  const [inserted] = status === 'approved'
+    ? await db.batch([
+      insertStatement,
+      db.update(schema.contents).set({ commentsNum: sql`${schema.contents.commentsNum} + 1` })
+        .where(eq(schema.contents.cid, input.cid)),
+    ])
+    : await db.batch([insertStatement]);
   const row = { ...value, author, mail, url, text, cid: input.cid, coid: inserted[0]?.coid };
   await doHook(
     pluginCtx,

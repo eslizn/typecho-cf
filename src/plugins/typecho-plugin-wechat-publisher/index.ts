@@ -10,6 +10,15 @@ import zhCN from './locales/zh-CN.json';
 
 const PLUGIN_ID = 'typecho-plugin-wechat-publisher';
 const WECHAT_API_BASE = 'https://api.weixin.qq.com';
+export const MAX_WECHAT_BODY_IMAGES = 20;
+export const MAX_WECHAT_IMAGE_BYTES = 10 * 1024 * 1024;
+export const MAX_WECHAT_SYNC_IMAGE_BYTES = 30 * 1024 * 1024;
+export const WECHAT_IMAGE_UPLOAD_CONCURRENCY = 3;
+const WECHAT_IMAGE_TRANSFER_TIMEOUT_MS = 12_000;
+
+interface WeChatImageBudget {
+  usedBytes: number;
+}
 
 function translate(i18n: I18n | undefined, key: string, fallback: string, variables?: Record<string, string | number>): string {
   return i18n?.t(key, variables, fallback) ?? fallback;
@@ -210,25 +219,6 @@ function getDefaultUploadBucket(): R2Bucket | null {
   return bucket && typeof bucket.get === 'function' ? bucket : null;
 }
 
-async function fetchLocalUploadBlob(key: string, sourceUrl: string, definitive: boolean, i18n?: I18n): Promise<{ blob: Blob; filename: string } | null> {
-  const bucket = getDefaultUploadBucket();
-  if (!bucket) return null;
-
-  const object = await bucket.get(key);
-  if (!object) {
-    if (!definitive) return null;
-    throw new Error(translate(i18n, 'plugin.typecho-plugin-wechat-publisher.message.localImageMissing', `读取站内图片失败：R2 对象不存在：${key}`));
-  }
-
-  const contentType = object.httpMetadata?.contentType || 'image/jpeg';
-  if (!contentType.startsWith('image/')) throw new Error(translate(i18n, 'plugin.typecho-plugin-wechat-publisher.message.notImage', `不是可上传的图片：${sourceUrl}`));
-  const blob = await new Response(object.body).blob();
-  return {
-    blob: blob.type ? blob : new Blob([blob], { type: contentType }),
-    filename: filenameFromUrl(sourceUrl, contentType),
-  };
-}
-
 async function requestWeChatJson(url: string, init: RequestInit, label: string, i18n?: I18n): Promise<WeChatJson> {
   const response = await fetchWithTimeout(
     url,
@@ -266,33 +256,128 @@ async function getAccessTokenCached(config: WeChatMpConfig, i18n?: I18n): Promis
   return token;
 }
 
-async function fetchImageBlob(url: string, siteUrl?: string, i18n?: I18n): Promise<{ blob: Blob; filename: string }> {
-  const localUpload = localUploadKeyFromUrl(url, siteUrl);
-  if (localUpload) {
-    const localImage = await fetchLocalUploadBlob(localUpload.key, url, localUpload.definitive, i18n);
-    if (localImage) return localImage;
+async function readBoundedImageBody(
+  body: ReadableStream<Uint8Array> | null,
+  contentType: string,
+  budget: WeChatImageBudget,
+  onReader: (reader: ReadableStreamDefaultReader<Uint8Array>) => void,
+  i18n?: I18n,
+): Promise<Blob> {
+  if (!body) throw new Error(translate(i18n, 'plugin.typecho-plugin-wechat-publisher.message.imageBodyMissing', '图片响应没有内容'));
+  const reader = body.getReader();
+  onReader(reader);
+  const chunks: Uint8Array[] = [];
+  let imageBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      imageBytes += value.byteLength;
+      budget.usedBytes += value.byteLength;
+      if (imageBytes > MAX_WECHAT_IMAGE_BYTES) {
+        throw new Error(translate(
+          i18n,
+          'plugin.typecho-plugin-wechat-publisher.message.imageTooLarge',
+          `单张图片超过 10 MiB 限制，请压缩图片后重试`,
+        ));
+      }
+      if (budget.usedBytes > MAX_WECHAT_SYNC_IMAGE_BYTES) {
+        throw new Error(translate(
+          i18n,
+          'plugin.typecho-plugin-wechat-publisher.message.syncImagesTooLarge',
+          `本次同步图片总量超过 30 MiB 限制，请减少或压缩图片后重试`,
+        ));
+      }
+      chunks.push(value);
+    }
+  } catch (error) {
+    void reader.cancel(error).catch(() => undefined);
+    throw error;
+  } finally {
+    reader.releaseLock();
   }
+  return new Blob(chunks as BlobPart[], { type: contentType });
+}
 
+async function fetchImageBlob(
+  url: string,
+  siteUrl: string | undefined,
+  budget: WeChatImageBudget,
+  i18n?: I18n,
+): Promise<{ blob: Blob; filename: string }> {
   const imageUrl = absoluteUrl(url, siteUrl);
-  const response = await fetchWithTimeout(
-    imageUrl,
-    { method: 'GET' },
-    12_000,
-    translate(i18n, 'plugin.typecho-plugin-wechat-publisher.message.requestTimeout', '微信公众号接口请求超时'),
-  );
-  if (!response.ok) throw new Error(translate(
-    i18n,
-    'plugin.typecho-plugin-wechat-publisher.message.imageReadFailed',
-    `读取图片失败：${response.status}，URL：${imageUrl}`,
-    { status: response.status, url: imageUrl },
-  ));
-  const blob = await response.blob();
-  const contentType = response.headers.get('Content-Type') || blob.type || 'image/jpeg';
-  if (!contentType.startsWith('image/')) throw new Error(translate(i18n, 'plugin.typecho-plugin-wechat-publisher.message.notImage', `不是可上传的图片：${imageUrl}`));
-  return {
-    blob: blob.type ? blob : new Blob([blob], { type: contentType }),
-    filename: filenameFromUrl(imageUrl, contentType),
+  const controller = new AbortController();
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  let timeoutError: Error | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      timeoutError = new Error(translate(i18n, 'plugin.typecho-plugin-wechat-publisher.message.requestTimeout', '图片读取超时，请稍后重试'));
+      controller.abort();
+      if (reader) void reader.cancel(timeoutError).catch(() => undefined);
+      reject(timeoutError);
+    }, WECHAT_IMAGE_TRANSFER_TIMEOUT_MS);
+  });
+
+  const readResponse = async (
+    body: ReadableStream<Uint8Array> | null,
+    contentType: string,
+    contentLength?: number,
+  ): Promise<{ blob: Blob; filename: string }> => {
+    if (timeoutError) throw timeoutError;
+    if (typeof contentLength === 'number' && contentLength > MAX_WECHAT_IMAGE_BYTES) {
+      throw new Error(translate(i18n, 'plugin.typecho-plugin-wechat-publisher.message.imageTooLarge', '单张图片超过 10 MiB 限制，请压缩图片后重试'));
+    }
+    if (typeof contentLength === 'number' && budget.usedBytes + contentLength > MAX_WECHAT_SYNC_IMAGE_BYTES) {
+      throw new Error(translate(i18n, 'plugin.typecho-plugin-wechat-publisher.message.syncImagesTooLarge', '本次同步图片总量超过 30 MiB 限制，请减少或压缩图片后重试'));
+    }
+    if (!contentType.toLowerCase().startsWith('image/')) {
+      throw new Error(translate(i18n, 'plugin.typecho-plugin-wechat-publisher.message.notImage', `不是可上传的图片：${imageUrl}`));
+    }
+    const blob = await readBoundedImageBody(body, contentType, budget, value => { reader = value; }, i18n);
+    return { blob, filename: filenameFromUrl(imageUrl, contentType) };
   };
+
+  const operation = async (): Promise<{ blob: Blob; filename: string }> => {
+    const localUpload = localUploadKeyFromUrl(url, siteUrl);
+    if (localUpload) {
+      const bucket = getDefaultUploadBucket();
+      if (bucket) {
+        const object = await bucket.get(localUpload.key);
+        if (!object) {
+          if (localUpload.definitive) {
+            throw new Error(translate(i18n, 'plugin.typecho-plugin-wechat-publisher.message.localImageMissing', `读取站内图片失败：R2 对象不存在：${localUpload.key}`));
+          }
+        } else {
+          const contentType = object.httpMetadata?.contentType || 'image/jpeg';
+          return readResponse(object.body, contentType, object.size);
+        }
+      }
+    }
+
+    const response = await fetch(imageUrl, { method: 'GET', signal: controller.signal });
+    if (!response.ok) throw new Error(translate(
+      i18n,
+      'plugin.typecho-plugin-wechat-publisher.message.imageReadFailed',
+      `读取图片失败：${response.status}，URL：${imageUrl}`,
+      { status: response.status, url: imageUrl },
+    ));
+    const contentType = response.headers.get('Content-Type') || 'image/jpeg';
+    const contentLengthValue = Number(response.headers.get('Content-Length'));
+    const contentLength = Number.isSafeInteger(contentLengthValue) && contentLengthValue >= 0
+      ? contentLengthValue
+      : undefined;
+    return readResponse(response.body, contentType, contentLength);
+  };
+
+  try {
+    return await Promise.race([operation(), timeoutPromise]);
+  } catch (error) {
+    if (timeoutError) throw timeoutError;
+    throw error;
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  }
 }
 
 async function uploadImage(
@@ -302,9 +387,10 @@ async function uploadImage(
   endpoint: string,
   extraParams?: Record<string, string>,
   siteUrl?: string,
+  budget?: WeChatImageBudget,
   i18n?: I18n,
 ): Promise<WeChatJson> {
-  const image = await fetchImageBlob(imageUrl, siteUrl, i18n);
+  const image = await fetchImageBlob(imageUrl, siteUrl, budget || { usedBytes: 0 }, i18n);
   const formData = new FormData();
   formData.append('media', image.blob, image.filename);
   const params = new URLSearchParams({ access_token: accessToken, ...(extraParams || {}) });
@@ -314,7 +400,7 @@ async function uploadImage(
   }, label, i18n);
 }
 
-async function uploadCoverImage(accessToken: string, imageUrl: string, siteUrl?: string, i18n?: I18n): Promise<string> {
+async function uploadCoverImage(accessToken: string, imageUrl: string, siteUrl?: string, budget?: WeChatImageBudget, i18n?: I18n): Promise<string> {
   const data = await uploadImage(
     accessToken,
     imageUrl,
@@ -322,13 +408,14 @@ async function uploadCoverImage(accessToken: string, imageUrl: string, siteUrl?:
     '/cgi-bin/material/add_material',
     { type: 'image' },
     siteUrl,
+    budget,
     i18n,
   );
   if (!data.media_id) throw new Error(translate(i18n, 'plugin.typecho-plugin-wechat-publisher.message.coverMediaMissing', '微信公众号未返回封面素材 media_id'));
   return data.media_id;
 }
 
-async function uploadArticleImage(accessToken: string, imageUrl: string, siteUrl?: string, i18n?: I18n): Promise<string> {
+async function uploadArticleImage(accessToken: string, imageUrl: string, siteUrl?: string, budget?: WeChatImageBudget, i18n?: I18n): Promise<string> {
   const data = await uploadImage(
     accessToken,
     imageUrl,
@@ -336,6 +423,7 @@ async function uploadArticleImage(accessToken: string, imageUrl: string, siteUrl
     '/cgi-bin/media/uploadimg',
     undefined,
     siteUrl,
+    budget,
     i18n,
   );
   if (!data.url) throw new Error(translate(i18n, 'plugin.typecho-plugin-wechat-publisher.message.articleImageMissing', '微信公众号未返回正文图片 URL'));
@@ -436,6 +524,30 @@ function isStaleDraftError(error: unknown): boolean {
   return /media_id|草稿|draft|not\s*exist|invalid/i.test(error.message);
 }
 
+async function mapWithConcurrency<T, R>(items: readonly T[], limit: number, map: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  let failed = false;
+  let failure: unknown;
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (true) {
+      if (failed) return;
+      const index = nextIndex;
+      nextIndex += 1;
+      if (index >= items.length) return;
+      try {
+        results[index] = await map(items[index]);
+      } catch (error) {
+        failed = true;
+        failure = error;
+        return;
+      }
+    }
+  }));
+  if (failed) throw failure;
+  return results;
+}
+
 async function syncPostToWeChat(
   db: Database | undefined,
   options: Record<string, unknown> | undefined,
@@ -461,6 +573,15 @@ async function syncPostToWeChat(
   const siteUrl = typeof options?.siteUrl === 'string' ? options.siteUrl : '';
   let html = renderWeChatHtml(post.text || '');
   const imageUrls = extractImageUrls(html);
+  if (imageUrls.length > MAX_WECHAT_BODY_IMAGES) {
+    throw new Error(translate(
+      i18n,
+      'plugin.typecho-plugin-wechat-publisher.message.tooManyImages',
+      `正文图片超过 ${MAX_WECHAT_BODY_IMAGES} 张限制，请减少图片后重试`,
+      { limit: MAX_WECHAT_BODY_IMAGES },
+    ));
+  }
+  const imageBudget: WeChatImageBudget = { usedBytes: 0 };
   const coverSource = imageUrls[0]
     || await loadAttachmentCover(db, cid)
     || config.defaultCoverUrl;
@@ -469,14 +590,14 @@ async function syncPostToWeChat(
   }
 
   const accessToken = await getAccessTokenCached(config, i18n);
-  const uploadResults = await Promise.all(imageUrls.map(async (src) => {
-    const uploadedUrl = await uploadArticleImage(accessToken, src, siteUrl, i18n);
+  const uploadResults = await mapWithConcurrency(imageUrls, WECHAT_IMAGE_UPLOAD_CONCURRENCY, async src => {
+    const uploadedUrl = await uploadArticleImage(accessToken, src, siteUrl, imageBudget, i18n);
     return [src, uploadedUrl] as const;
-  }));
+  });
   const replacements = new Map<string, string>(uploadResults);
   html = replaceImageUrls(html, replacements);
 
-  const coverMediaId = await uploadCoverImage(accessToken, coverSource, siteUrl, i18n);
+  const coverMediaId = await uploadCoverImage(accessToken, coverSource, siteUrl, imageBudget, i18n);
   const authorName = config.author
     || await loadAuthorName(db, post.authorId)
     || user?.screenName
@@ -527,6 +648,31 @@ async function syncPostToWeChat(
     mode,
     uploadedImages: imageUrls.length,
   };
+}
+
+const inFlightSyncs = new Map<number, Promise<PluginActionResult>>();
+
+function syncPostToWeChatOncePerCid(
+  db: Database | undefined,
+  options: Record<string, unknown> | undefined,
+  payload: SyncPayload,
+  user?: { uid?: number | null; group?: string | null; screenName?: string | null; name?: string | null },
+  i18n?: I18n,
+): Promise<PluginActionResult> {
+  const cid = Number(payload.cid);
+  if (!Number.isInteger(cid) || cid <= 0) {
+    return syncPostToWeChat(db, options, payload, user, i18n);
+  }
+  const current = inFlightSyncs.get(cid);
+  if (current) return current;
+
+  const pending = syncPostToWeChat(db, options, payload, user, i18n);
+  inFlightSyncs.set(cid, pending);
+  const cleanup = (): void => {
+    if (inFlightSyncs.get(cid) === pending) inFlightSyncs.delete(cid);
+  };
+  void pending.then(cleanup, cleanup);
+  return pending;
 }
 
 interface ManagePostTitleActionPost {
@@ -709,7 +855,7 @@ export default function init({ addHook, pluginId, registerTranslations }: Plugin
     ) => {
       if (extra?.action !== 'sync') return result;
       try {
-        return await syncPostToWeChat(extra.db, extra.options, extra.payload || {}, extra.user, extra.i18n);
+        return await syncPostToWeChatOncePerCid(extra.db, extra.options, extra.payload || {}, extra.user, extra.i18n);
       } catch (error) {
         return {
           handled: true,

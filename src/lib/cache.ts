@@ -53,14 +53,49 @@ export function normalizeCacheKeyUrl(requestUrl: string): URL {
 const CACHE_VERSION_MEMO_TTL_MS = 60_000;
 let cachedVersion: string | null = null;
 let cachedVersionAt = 0;
+let versionMemoGeneration = 0;
+const cacheWarningsLogged = new Set<'match' | 'put'>();
+
+function warnCacheFailure(operation: 'match' | 'put', error: unknown): void {
+  if (cacheWarningsLogged.has(operation)) return;
+  cacheWarningsLogged.add(operation);
+  console.warn({
+    event: 'cache_operation_failed',
+    operation,
+    errorType: error instanceof Error ? error.name : typeof error,
+  });
+}
+
+/** A failed cache lookup behaves as a miss; D1 remains the source of truth. */
+export async function matchCacheSafely(request: Request): Promise<Response | undefined> {
+  try {
+    return await caches.default.match(request);
+  } catch (error) {
+    warnCacheFailure('match', error);
+    return undefined;
+  }
+}
+
+/** A failed write must not turn a successful request into a failure. */
+export async function putCacheSafely(request: Request, response: Response): Promise<void> {
+  try {
+    await caches.default.put(request, response);
+  } catch (error) {
+    warnCacheFailure('put', error);
+  }
+}
 
 async function readCacheVersion(db: Database, now = Date.now()): Promise<string> {
   if (cachedVersion !== null && now - cachedVersionAt < CACHE_VERSION_MEMO_TTL_MS) {
     return cachedVersion;
   }
+  const generation = versionMemoGeneration;
   const row = await db.query.options.findFirst({
     where: and(eq(schema.options.name, 'cacheVersion'), eq(schema.options.user, 0)),
   });
+  // A slow pre-write read must not overwrite the writer's fresh memo (or
+  // refill a memo that a completed options batch has just invalidated).
+  if (generation !== versionMemoGeneration) return readCacheVersion(db);
   cachedVersion = row?.value ?? '0';
   cachedVersionAt = now;
   return cachedVersion;
@@ -76,6 +111,7 @@ export async function peekCacheVersion(db: Database): Promise<string> {
 
 /** Test-only: reset the in-memory version memo so unit tests start fresh. */
 export function resetCacheVersionMemo(): void {
+  versionMemoGeneration += 1;
   cachedVersion = null;
   cachedVersionAt = 0;
 }
@@ -115,6 +151,7 @@ export function isCacheablePublicPath(
   if (path.startsWith('/tag/') || path.startsWith('/author/') || path.startsWith('/search/')) return true;
   if (path.startsWith('/feed') || path.endsWith('/feed.xml')) return true;
   if (path === '/sitemap.xml' || path === '/robots.txt') return true;
+  if (/^\/sitemap\/[1-9]\d*\.xml$/.test(path)) return true;
 
   return false;
 }
@@ -133,6 +170,7 @@ export async function bumpCacheVersion(db: Database): Promise<void> {
   // Best-effort local memo update so the writer sees its own bump on
   // subsequent reads within the same isolate (other PoPs will refresh
   // after their memo expires — see CACHE_VERSION_MEMO_TTL_MS).
+  versionMemoGeneration += 1;
   cachedVersion = stamp;
   cachedVersionAt = Date.now();
   advanceOptionsSnapshotGeneration();
@@ -146,8 +184,7 @@ export async function bumpCacheVersion(db: Database): Promise<void> {
  */
 export async function getCachedOptions(db: Database): Promise<Record<string, unknown> | null> {
   const version = await readCacheVersion(db);
-  const cache = caches.default;
-  const res = await cache.match(optionsCacheKey(version));
+  const res = await matchCacheSafely(optionsCacheKey(version));
   if (!res) return null;
   try {
     return await res.json();
@@ -162,14 +199,13 @@ export async function getCachedOptions(db: Database): Promise<Record<string, unk
  * another PoP doesn't leave a stale entry under a fresh key.
  */
 export async function setCachedOptions(data: Record<string, unknown>, version: string | number): Promise<void> {
-  const cache = caches.default;
   const res = new Response(JSON.stringify(data), {
     headers: {
       'Content-Type': 'application/json',
       'Cache-Control': `public, max-age=${OPTIONS_CACHE_TTL_SECONDS}`,
     },
   });
-  await cache.put(optionsCacheKey(version), res);
+  await putCacheSafely(optionsCacheKey(version), res);
 }
 
 /**

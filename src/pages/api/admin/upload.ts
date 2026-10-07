@@ -69,7 +69,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const now = Math.floor(Date.now() / 1000);
     const inserted = await db.insert(schema.contents).values({
       title: file.name,
-      slug: `attachment-${Date.now().toString(36)}`,
+      slug: `attachment-${crypto.randomUUID()}`,
       created: now,
       modified: now,
       text: JSON.stringify({

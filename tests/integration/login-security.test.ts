@@ -201,6 +201,50 @@ describe('login security', () => {
     expect(parseInt(parts[2], 10)).toBe(PBKDF2_ITERATIONS);
   });
 
+  it.each([undefined, 50_000])('rejects a login whose password/session changed after lookup (iterations %s)', async (iterations) => {
+    const pluginId = 'login-concurrent-change';
+    registerPlugin(pluginId, { id: pluginId, name: pluginId });
+    await seedSite('sekret', [pluginId]);
+    await seedUser('correct-password', { iterations });
+    const replacementHash = await hashPassword('new-password');
+    addHook('user:login:before', pluginId, async (value: unknown) => {
+      await testDb.update(schema.users).set({ password: replacementHash, authCode: 'reset-session' })
+        .where(eq(schema.users.name, 'alice'));
+      return value;
+    });
+    try {
+      const response = await POST({ request: makeRequest({ origin: SITE_URL,
+        body: { name: 'alice', password: 'correct-password' } }), locals: {} } as any);
+      expect(response.headers.get('Location')).toBe('/admin/login');
+      expect(response.headers.get('Set-Cookie')).not.toContain('__typecho_uid=');
+      const stored = await testDb.query.users.findFirst();
+      expect(stored?.password).toBe(replacementHash);
+      expect(stored?.authCode).toBe('reset-session');
+    } finally {
+      removePluginHooks(pluginId);
+    }
+  });
+
+  it('rejects a login when only the session generation changed after lookup', async () => {
+    const pluginId = 'login-concurrent-revoke';
+    registerPlugin(pluginId, { id: pluginId, name: pluginId });
+    await seedSite('sekret', [pluginId]);
+    await seedUser('correct-password');
+    addHook('user:login:before', pluginId, async (value: unknown) => {
+      await testDb.update(schema.users).set({ authCode: 'revoked-session' })
+        .where(eq(schema.users.name, 'alice'));
+      return value;
+    });
+    try {
+      const response = await POST({ request: makeRequest({ origin: SITE_URL,
+        body: { name: 'alice', password: 'correct-password' } }), locals: {} } as any);
+      expect(response.headers.get('Location')).toBe('/admin/login');
+      expect((await testDb.query.users.findFirst())?.authCode).toBe('revoked-session');
+    } finally {
+      removePluginHooks(pluginId);
+    }
+  });
+
   it('runs login before/success/failure hooks with sanitized payloads', async () => {
     const pluginId = 'login-hooks-test';
     registerPlugin(pluginId, { id: pluginId, name: pluginId });

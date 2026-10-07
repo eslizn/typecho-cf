@@ -174,6 +174,26 @@ describe('GET /api/admin/meta', () => {
 });
 
 describe('POST /api/admin/meta batch + default', () => {
+  it('recounts only matching metadata and excludes revision relationships', async () => {
+    const [category, tag] = await testDb.insert(schema.metas).values([
+      { name: 'Category', slug: 'recount-category', type: 'category', count: 99 },
+      { name: 'Tag', slug: 'recount-tag', type: 'tag', count: 5 },
+    ]).returning();
+    const [post] = await testDb.insert(schema.contents).values({ title: 'Parent', slug: 'recount-post', type: 'post', status: 'publish', authorId: 1 }).returning();
+    const [revision] = await testDb.insert(schema.contents).values({ title: 'Revision', slug: post.slug, type: 'revision', status: 'draft', parent: post.cid, authorId: 1 }).returning();
+    await testDb.insert(schema.relationships).values([{ cid: post.cid, mid: category.mid }, { cid: revision.cid, mid: category.mid }]);
+    const cookie = await makeAuthCookie(testDb, 1, AUTH_CODE, SECRET);
+    const body = new URLSearchParams({ action: 'refresh', type: 'category' });
+    body.append('mid[]', String(category.mid));
+    body.append('mid[]', String(tag.mid));
+    const request = new Request('https://example.com/api/admin/meta', {
+      method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', cookie, origin: 'https://example.com' }, body,
+    });
+    expect((await POST({ request, locals: {}, url: new URL(request.url) } as any)).status).toBe(302);
+    expect((await testDb.query.metas.findFirst({ where: eq(schema.metas.mid, category.mid) }))!.count).toBe(1);
+    expect((await testDb.query.metas.findFirst({ where: eq(schema.metas.mid, tag.mid) }))!.count).toBe(5);
+  });
+
   it('deletes selected mid[] from a form POST', async () => {
     await testDb.insert(schema.metas).values([
       { name: 'A', slug: 'a', type: 'tag', count: 0 },

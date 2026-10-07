@@ -58,6 +58,10 @@ export function discoverDeclaredPackages(rootDir: string): DeclaredPackage[] {
  * installed in production are allowed to introduce a Typecho plugin.
  */
 export function discoverRuntimePackages(rootDir: string): RuntimePackage[] {
+  // Package directories are canonicalized by resolvePackageDirectory. Use
+  // the same root spelling before checking containment (e.g. /var versus
+  // /private/var on macOS, or a checkout reached through a symlink).
+  rootDir = realpathSync(rootDir);
   const rootPackage = readPackageJson(join(rootDir, 'package.json'));
   if (!rootPackage) return [];
 

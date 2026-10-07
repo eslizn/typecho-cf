@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import { sqliteTable, text, integer, real, uniqueIndex, index } from 'drizzle-orm/sqlite-core';
 
 // ==================== Users ====================
@@ -40,9 +41,11 @@ export const contents = sqliteTable('typecho_contents', {
   allowFeed: text('allowFeed').default('0'),
   parent: integer('parent').default(0),
 }, (table) => [
-  // Typecho revisions may temporarily share the canonical slug of their
-  // parent content. Public content slugs remain unique in slug.ts.
+  // Revisions may reuse their parent's canonical slug, while every other
+  // non-null content slug is unique across types.
   index('typecho_contents_slug').on(table.slug),
+  uniqueIndex('typecho_contents_slug_unique').on(table.slug)
+    .where(sql`${table.type} IS NOT 'revision' AND ${table.slug} IS NOT NULL`),
   index('typecho_contents_created').on(table.created),
   // G4-1: archive lookups (type='post' AND status='publish') and
   // author archives are the dominant front-end queries.

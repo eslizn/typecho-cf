@@ -74,7 +74,7 @@ describe('ensureTablesReady', () => {
 
 describe('ensureDatabaseReady', () => {
   it('uses the persistent schema version fast path on a cold isolate', async () => {
-    const first = vi.fn().mockResolvedValue({ value: '20260816' });
+    const first = vi.fn().mockResolvedValue({ value: '20261007' });
     const d1 = {
       prepare: vi.fn().mockReturnValue({ first }),
       batch: vi.fn(),
@@ -121,7 +121,7 @@ describe('ensureDatabaseReady', () => {
       if (sql.startsWith('CREATE INDEX') || sql.startsWith('CREATE UNIQUE INDEX')) {
         return { run: indexRun };
       }
-      return { sql, first: vi.fn().mockResolvedValue(null), run: vi.fn().mockResolvedValue({}), bind: vi.fn().mockReturnThis() };
+      return { sql, first: vi.fn().mockResolvedValue(null), all: vi.fn().mockResolvedValue({ results: [] }), run: vi.fn().mockResolvedValue({}), bind: vi.fn().mockReturnThis() };
     });
     const batch = vi.fn().mockResolvedValue([]);
     const d1 = { prepare, batch } as unknown as D1Database;
@@ -142,7 +142,7 @@ describe('ensureDatabaseReady', () => {
 
     const a = ensureDatabaseReady(d1);
     const b = ensureDatabaseReady(d1);
-    release({ value: '20260816' } as any);
+    release({ value: '20261007' } as any);
     await Promise.all([a, b]);
 
     expect(d1.prepare).toHaveBeenCalledOnce();
@@ -179,7 +179,7 @@ describe('ensureDatabaseReady', () => {
       if (sql.startsWith('CREATE INDEX') || sql.startsWith('CREATE UNIQUE INDEX')) {
         return { run: indexRun };
       }
-      return { sql, first: vi.fn().mockResolvedValue(null), run: vi.fn().mockResolvedValue({}), bind: vi.fn().mockReturnThis() };
+      return { sql, first: vi.fn().mockResolvedValue(null), all: vi.fn().mockResolvedValue({ results: [] }), run: vi.fn().mockResolvedValue({}), bind: vi.fn().mockReturnThis() };
     });
     const batch = vi.fn().mockResolvedValue([]);
     const d1 = { prepare, batch } as unknown as D1Database;
@@ -218,7 +218,7 @@ describe('ensureDatabaseReady', () => {
           })),
         };
       }
-      return { sql, first: vi.fn().mockResolvedValue(null), run: vi.fn().mockResolvedValue({}), bind: vi.fn().mockReturnThis() };
+      return { sql, first: vi.fn().mockResolvedValue(null), all: vi.fn().mockResolvedValue({ results: [] }), run: vi.fn().mockResolvedValue({}), bind: vi.fn().mockReturnThis() };
     });
     const batch = vi.fn().mockImplementation((stmts: unknown[]) => {
       // metas unique conversion batch fails (duplicates)
@@ -263,7 +263,7 @@ describe('ensureDatabaseReady', () => {
           })),
         };
       }
-      return { sql, first: vi.fn().mockResolvedValue(null), run: vi.fn().mockResolvedValue({}), bind: vi.fn().mockReturnThis() };
+      return { sql, first: vi.fn().mockResolvedValue(null), all: vi.fn().mockResolvedValue({ results: [] }), run: vi.fn().mockResolvedValue({}), bind: vi.fn().mockReturnThis() };
     });
     const batch = vi.fn().mockResolvedValue([]);
     const d1 = { prepare, batch } as unknown as D1Database;

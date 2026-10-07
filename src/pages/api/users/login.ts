@@ -19,7 +19,7 @@ import {
 } from '@/lib/login-rate-limit';
 import { isSameOriginRequest, safeAdminRedirectUrl } from '@/lib/admin-auth';
 import { getClientIp, getRequestCoreContextFromLocals, getRequestI18n } from '@/lib/context';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 import { REQUEST_BODY_LIMITS } from '@/lib/constants';
 import { InputError, inputErrorMessage, readBoundedFormData } from '@/lib/input';
@@ -179,9 +179,6 @@ export const POST: APIRoute = async ({ request, locals }) => {
     return redirectWithLoginError(i18nMessage('auth.invalidCredentials', 'Invalid username or password.'), request);
   }
 
-  // Successful login → reset failure counter for this IP.
-  await clearLoginFailures(db, ip);
-
   // Opportunistic password upgrade: if the stored hash uses fewer
   // PBKDF2 iterations than the current recommendation, rehash with the
   // user-supplied plaintext (which we have right here, post-verification).
@@ -196,14 +193,28 @@ export const POST: APIRoute = async ({ request, locals }) => {
   }
 
   const newAuthCode = generateRandomString(32);
-  await db
+  const [updated] = await db
     .update(schema.users)
     .set({
       authCode: newAuthCode,
       logged: Math.floor(Date.now() / 1000),
       ...(upgradedPassword ? { password: upgradedPassword } : {}),
     })
-    .where(eq(schema.users.uid, user.uid));
+    .where(and(
+      eq(schema.users.uid, user.uid),
+      user.password === null ? isNull(schema.users.password) : eq(schema.users.password, user.password),
+      user.authCode === null ? isNull(schema.users.authCode) : eq(schema.users.authCode, user.authCode),
+    ))
+    .returning({ uid: schema.users.uid });
+
+  // A password reset, revocation, deletion, or another login may have won
+  // while PBKDF2 was running. Never create a session from the old snapshot.
+  if (!updated) {
+    await recordLoginFailure(db, ip, rateConfig);
+    await notifyLoginFailure(pluginCtx, request, 'invalid');
+    return redirectWithLoginError(i18nMessage('auth.invalidCredentials', 'Invalid username or password.'), request);
+  }
+  await clearLoginFailures(db, ip);
 
   const hash = await generateAuthToken(user.uid, newAuthCode, options.secret);
   const token = hash.split(':')[1];

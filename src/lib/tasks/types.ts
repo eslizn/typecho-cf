@@ -39,6 +39,11 @@ export interface TaskExecutionContext {
   attempt: number;
   scheduledAt: number;
   localSlot: TaskLocalSlot | null;
+  /**
+   * Aborted when timeoutSeconds expires. This is advisory: JavaScript cannot
+   * forcibly stop a handler that ignores the signal. Handlers must pass it to
+   * I/O where supported and make external side effects idempotent.
+   */
   signal: AbortSignal;
   log: (message: string, fields?: Record<string, unknown>) => void;
 }
@@ -56,6 +61,7 @@ export interface ScheduledTaskKeyContext {
 export interface ScheduledTaskDefinition {
   id: string;
   schedule: string;
+  /** Maximum handlers for this task identity in one Worker isolate. */
   concurrency?: number;
   timeoutSeconds?: number;
   handler: TaskHandler<ScheduledTaskPayload>;
@@ -64,6 +70,7 @@ export interface ScheduledTaskDefinition {
 
 export interface AsyncTaskDefinition<TPayload = unknown> {
   id: string;
+  /** Maximum handlers for this task identity in one Worker isolate. */
   concurrency?: number;
   timeoutSeconds?: number;
   handler: TaskHandler<TPayload>;

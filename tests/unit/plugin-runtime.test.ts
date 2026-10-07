@@ -254,6 +254,108 @@ describe('lazy plugin init (G6-3)', () => {
     removePluginHooks('route-failed-owner');
     removePluginHooks('route-healthy-owner');
   });
+
+  it('invalidates pending init registrations on deactivation and reinitializes on reactivation', async () => {
+    resetPluginInitState();
+    const pluginId = 'pending-lifecycle-owner';
+    let resume!: () => void;
+    let started!: () => void;
+    const gate = new Promise<void>(resolve => { resume = resolve; });
+    const began = new Promise<void>(resolve => { started = resolve; });
+    const handler = vi.fn();
+    const init = vi.fn(async ({ registerAdminPath, registerRouteResolver, registerCapability, addHook: register }: any) => {
+      started();
+      await gate;
+      registerAdminPath('/api/admin/pending-lifecycle');
+      registerRouteResolver(() => [{ path: '/pending-lifecycle' }]);
+      registerCapability({ capability: 'pending.service', version: 1, factory: () => ({}) });
+      register('request:begin', pluginId, handler);
+    });
+    registerPluginInit({ [pluginId]: init }, { addHook, HookPoints: {} as any });
+    const oldContext = mockCtx();
+    const activating = setActivatedPlugins(oldContext, [pluginId]);
+    await began;
+    await setActivatedPlugins(mockCtx(), []);
+    resume();
+    await activating;
+
+    expect(isPluginAdminPath('/api/admin/pending-lifecycle')).toBe(false);
+    expect(oldContext.activatedPlugins.has(pluginId)).toBe(false);
+    expect(hasHook({ activatedPlugins: new Set([pluginId]) }, 'request:begin')).toBe(false);
+    refreshPluginRoutes(new Set([pluginId]), () => ({}));
+    expect(isPluginRoute('/pending-lifecycle')).toBe(false);
+
+    const freshContext = mockCtx();
+    await setActivatedPlugins(freshContext, [pluginId]);
+    expect(init).toHaveBeenCalledTimes(2);
+    expect(isPluginAdminPath('/api/admin/pending-lifecycle')).toBe(true);
+    await doHook(freshContext, 'request:begin');
+    expect(handler).toHaveBeenCalledOnce();
+    resetPluginInitState();
+  });
+
+  it('does not let an obsolete init failure remove a newer successful activation', async () => {
+    resetPluginInitState();
+    const pluginId = 'replaced-pending-owner';
+    let resume!: () => void;
+    let started!: () => void;
+    const gate = new Promise<void>(resolve => { resume = resolve; });
+    const began = new Promise<void>(resolve => { started = resolve; });
+    let attempts = 0;
+    registerPluginInit({
+      [pluginId]: async ({ registerAdminPath, registerCapability }) => {
+        attempts += 1;
+        if (attempts === 1) {
+          started();
+          await gate;
+          throw new Error('obsolete attempt');
+        }
+        registerAdminPath('/api/admin/replaced-pending');
+        registerCapability!({ capability: 'replaced.service', version: 1, factory: () => 'fresh' });
+      },
+    }, { addHook, HookPoints: {} as any });
+    const activating = setActivatedPlugins(mockCtx(), [pluginId]);
+    await began;
+    await setActivatedPlugins(mockCtx(), []);
+    const freshContext = mockCtx();
+    await setActivatedPlugins(freshContext, [pluginId]);
+    resume();
+    await activating;
+
+    expect(isPluginAdminPath('/api/admin/replaced-pending')).toBe(true);
+    expect(getPluginInitFailures()[pluginId]).toBeUndefined();
+    expect(resolveCapability(createCapabilityRuntimeContext({
+      request: new Request('https://example.com/'), db: {} as any,
+      activatedPlugins: freshContext.activatedPlugins,
+      activationGeneration: freshContext.activationGeneration,
+    }), { capability: 'replaced.service' })).toMatchObject({ ok: true, value: 'fresh' });
+    resetPluginInitState();
+  });
+
+  it('invalidates retained registration callbacks after initialization fails', async () => {
+    resetPluginInitState();
+    const pluginId = 'failed-retained-registration';
+    let registerLater!: () => void;
+    registerPluginInit({
+      [pluginId]: ({ registerAdminPath, addHook: register }) => {
+        registerLater = () => {
+          registerAdminPath('/api/admin/failed-retained-registration');
+          register('request:begin', pluginId, () => {});
+        };
+        throw new Error('initialization failed');
+      },
+    }, { addHook, HookPoints: {} as any });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await setActivatedPlugins(mockCtx(), [pluginId]);
+      registerLater();
+      expect(isPluginAdminPath('/api/admin/failed-retained-registration')).toBe(false);
+      expect(hasHook({ activatedPlugins: new Set([pluginId]) }, 'request:begin')).toBe(false);
+    } finally {
+      errorSpy.mockRestore();
+      resetPluginInitState();
+    }
+  });
 });
 
 describe('plugin route resolver lifecycle', () => {

@@ -11,7 +11,7 @@ import {
 } from '@/lib/request-bootstrap';
 import { eq, and, inArray } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
-import { isCacheablePublicPath, normalizeCacheKeyUrl } from '@/lib/cache';
+import { isCacheablePublicPath, matchCacheSafely, normalizeCacheKeyUrl } from '@/lib/cache';
 import { CONTENT_ROUTE_PATHS, isContentPathAllowed } from '@/lib/content-path';
 import type { I18nMessage } from '@/lib/i18n';
 import { i18nMessage, normalizeI18nMessage } from '@/lib/i18n';
@@ -64,6 +64,10 @@ export const onRequest = defineMiddleware(async (context, next) => {
 
   const bootstrap = await bootstrapRequestCore(context.request, context.locals, {
     executionContext: context.locals.cfContext,
+    refreshPluginSecurity:
+      context.request.headers.has('authorization')
+      || hasAuthCookies(context.request.headers.get('cookie'))
+      || isPluginRoute(path),
   });
   if (!bootstrap.ok) {
     return finalizeRequestResponse(bootstrap.response, { request: context.request });
@@ -297,7 +301,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
   }
 
   if (cacheKey) {
-    const cached = await caches.default.match(cacheKey);
+    const cached = await matchCacheSafely(cacheKey);
     if (cached) {
       return await finalizeRequestResponse(cached, {
         request: context.request,

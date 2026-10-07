@@ -194,4 +194,19 @@ dead_letter_queue = "task-failures"
       logger: { log: vi.fn() } as unknown as Console,
     })).rejects.toThrow("wrangler queues create failed for 'typecho-cf-tasks'");
   });
+
+  it('preserves the actionable Wrangler authentication error when list fails', async () => {
+    const runner = vi.fn(() => commandResult(
+      1,
+      '',
+      '✘ [ERROR] Not logged in. Your auth token has expired and could not be refreshed, and the environment is non-interactive. Set CLOUDFLARE_API_TOKEN.',
+    ));
+
+    await expect(ensureQueues({
+      rootDir: process.cwd(),
+      runner,
+      logger: { log: vi.fn() } as unknown as Console,
+    })).rejects.toThrow(/Not logged in.*auth token has expired/i);
+    expect(runner).toHaveBeenCalledOnce();
+  });
 });

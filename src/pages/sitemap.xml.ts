@@ -1,12 +1,11 @@
 import type { APIRoute } from 'astro';
 import { getDb, schema } from '@/db';
 import { loadOptions, computeUrls } from '@/lib/options';
-import { buildPermalink } from '@/lib/content';
 import { escapeXml } from '@/lib/escape';
-import { eq, or, lte, desc, and } from 'drizzle-orm';
+import { and, eq, lte, or, sql } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 
-const SITEMAP_LIMIT = 5000;
+const SITEMAP_SHARD_SIZE = 1000;
 
 export const GET: APIRoute = async () => {
   const db = getDb(env.DB);
@@ -14,46 +13,54 @@ export const GET: APIRoute = async () => {
   const urls = computeUrls(options);
   const nowSec = Math.floor(Date.now() / 1000);
 
-  const rows = await db
+  const ranked = db
     .select({
       cid: schema.contents.cid,
-      slug: schema.contents.slug,
-      type: schema.contents.type,
       modified: schema.contents.modified,
-      created: schema.contents.created,
+      ordinal: sql<number>`ROW_NUMBER() OVER (ORDER BY ${schema.contents.modified} DESC, ${schema.contents.cid} DESC)`.as('ordinal'),
     })
     .from(schema.contents)
-    .where(
-      and(
-        or(eq(schema.contents.type, 'post'), eq(schema.contents.type, 'page')),
-        eq(schema.contents.status, 'publish'),
-        lte(schema.contents.created, nowSec),
-      ),
-    )
-    .orderBy(desc(schema.contents.modified))
-    .limit(SITEMAP_LIMIT);
+    .where(publicContentFilter(nowSec))
+    .as('ranked_sitemap_contents');
 
-  const items = rows
-    .map((r) => {
-      const loc = buildPermalink(
-        { cid: r.cid, slug: r.slug, type: r.type, created: r.created },
-        urls.siteUrl,
-        options.permalinkPattern as string | undefined,
-        options.pagePattern as string | undefined,
-      );
-      const lastmod = new Date((r.modified || r.created || 0) * 1000)
-        .toISOString()
-        .slice(0, 10);
-      return `  <url>\n    <loc>${escapeXml(loc)}</loc>\n    <lastmod>${lastmod}</lastmod>\n  </url>`;
-    })
-    .join('\n');
+  // Keep only one cursor per shard in memory; the window query ranks rows in
+  // SQLite, and every shard later reads its own bounded keyset page.
+  const anchors = await db
+    .select({ cid: ranked.cid, modified: ranked.modified })
+    .from(ranked)
+    .where(sql`${ranked.ordinal} % ${SITEMAP_SHARD_SIZE} = 1`)
+    .orderBy(sql.raw('ordinal'));
 
-  const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${items}\n</urlset>`;
+  const baseUrl = urls.siteUrl.replace(/\/+$/, '');
+  const entries = anchors.map((anchor, index) => {
+    const location = new URL(`${baseUrl}/sitemap/${index + 1}.xml`);
+    location.searchParams.set('cursor', encodeCursor(anchor.modified, anchor.cid));
+    return `  <sitemap>\n    <loc>${escapeXml(location.toString())}</loc>\n  </sitemap>`;
+  }).join('\n');
 
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${entries}\n</sitemapindex>`;
+  return xmlResponse(xml);
+};
+
+export function publicContentFilter(nowSec: number) {
+  return and(
+    or(eq(schema.contents.type, 'post'), eq(schema.contents.type, 'page')),
+    eq(schema.contents.status, 'publish'),
+    lte(schema.contents.created, nowSec),
+  );
+}
+
+export function encodeCursor(modified: number | null, cid: number): string {
+  return `${modified === null ? 'n' : modified}:${cid}`;
+}
+
+export function xmlResponse(xml: string): Response {
   return new Response(xml, {
     headers: {
       'Content-Type': 'application/xml; charset=utf-8',
       'Cache-Control': 'public, s-maxage=3600',
     },
   });
-};
+}
+
+export { SITEMAP_SHARD_SIZE };

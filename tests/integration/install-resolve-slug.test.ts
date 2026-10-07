@@ -6,10 +6,11 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as schema from '@/db/schema';
-import { createTestDb, type TestDatabase } from '../helpers';
+import { createD1TestDouble, createTestDb, type TestDatabase } from '../helpers';
 import { eq } from 'drizzle-orm';
 
 let testDb: TestDatabase;
+let d1TestDouble: ReturnType<typeof createD1TestDouble>;
 
 vi.mock('@/db', async () => {
   const actual = await vi.importActual<typeof import('@/db')>('@/db');
@@ -19,10 +20,7 @@ vi.mock('@/db', async () => {
 vi.mock('cloudflare:workers', () => ({
   get env() {
     return {
-      DB: {
-        batch: async () => [],
-        prepare: () => ({ first: async () => null }),
-      },
+      DB: d1TestDouble,
       BUCKET: { delete: vi.fn() },
       INSTALL_TOKEN: undefined,
     };
@@ -50,9 +48,10 @@ function buildInstallRequest(extra: Record<string, string> = {}) {
 describe('POST /api/install (G7-2 / G7-8)', () => {
   beforeEach(async () => {
     testDb = await createTestDb();
+    d1TestDouble = createD1TestDouble(testDb);
   });
 
-  it('uses returned ids and writes a relationship that links the welcome post to the new category', async () => {
+  it('uses non-default ids and writes a relationship that links the welcome post to the new category', async () => {
     // Pre-seed an unrelated row so the autoincrement counter no longer
     // starts from 1 — proves the install handler is not relying on
     // implicit mid=1 / cid=1.
@@ -74,6 +73,9 @@ describe('POST /api/install (G7-2 / G7-8)', () => {
     });
     expect(welcome).toBeTruthy();
     expect(welcome!.cid).toBeGreaterThan(1); // not the hardcoded cid=1
+    const installedAdmin = await testDb.query.users.findFirst({ where: eq(schema.users.name, 'admin') });
+    expect(installedAdmin).toBeTruthy();
+    expect(welcome!.authorId).toBe(installedAdmin!.uid);
 
     const newCategory = await testDb.query.metas.findFirst({
       where: eq(schema.metas.slug, 'default'),
@@ -84,6 +86,9 @@ describe('POST /api/install (G7-2 / G7-8)', () => {
     const rels = await testDb.select().from(schema.relationships);
     const link = rels.find(r => r.cid === welcome!.cid && r.mid === newCategory!.mid);
     expect(link).toBeTruthy();
+
+    const about = await testDb.query.contents.findFirst({ where: eq(schema.contents.title, '关于') });
+    expect(about?.authorId).toBe(installedAdmin!.uid);
 
     // defaultCategory option should track the new mid.
     const defOpt = await testDb.query.options.findFirst({
@@ -117,5 +122,42 @@ describe('POST /api/install (G7-2 / G7-8)', () => {
       where: eq(schema.contents.title, '关于'),
     });
     expect(aboutNew?.slug).toBe('about-2');
+  });
+
+  it('rolls back every install write on batch failure and permits a retry', async () => {
+    // Batch 1 creates/ensures schema; fail the final installed marker in
+    // batch 2, after all other installation writes have been prepared.
+    d1TestDouble = createD1TestDouble(testDb, { failBatchAt: 8, failBatchCall: 2 });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const failed = await POST({ request: buildInstallRequest(), locals: {} } as any);
+    expect(failed.status).toBe(500);
+    expect(await testDb.select().from(schema.users)).toHaveLength(0);
+    expect(await testDb.select().from(schema.metas)).toHaveLength(0);
+    expect(await testDb.select().from(schema.contents)).toHaveLength(0);
+    expect(await testDb.select().from(schema.relationships)).toHaveLength(0);
+    expect(await testDb.select().from(schema.options)).toHaveLength(0);
+
+    d1TestDouble = createD1TestDouble(testDb);
+    const retried = await POST({ request: buildInstallRequest(), locals: {} } as any);
+    warnSpy.mockRestore();
+
+    expect(retried.status).toBe(302);
+    expect(await testDb.select().from(schema.users)).toHaveLength(1);
+    expect(await testDb.query.options.findFirst({ where: eq(schema.options.name, 'installed') })).toMatchObject({ value: '1' });
+    expect(await testDb.query.options.findFirst({ where: eq(schema.options.name, 'installing') })).toBeUndefined();
+  });
+
+  it('reclaims an expired install lease', async () => {
+    const staleAt = Math.floor(Date.now() / 1000) - 6 * 60;
+    await testDb.insert(schema.options).values({ name: 'installing', user: 0, value: `${staleAt}:abandoned` });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const response = await POST({ request: buildInstallRequest(), locals: {} } as any);
+    warnSpy.mockRestore();
+
+    expect(response.status).toBe(302);
+    expect(await testDb.query.options.findFirst({ where: eq(schema.options.name, 'installed') })).toMatchObject({ value: '1' });
+    expect(await testDb.query.options.findFirst({ where: eq(schema.options.name, 'installing') })).toBeUndefined();
   });
 });

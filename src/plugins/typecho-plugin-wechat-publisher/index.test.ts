@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import init, { canRenderSyncTitleAction, extractImageUrls, normalizeConfig, renderWeChatHtml } from './index';
+import init, {
+  canRenderSyncTitleAction,
+  extractImageUrls,
+  MAX_WECHAT_BODY_IMAGES,
+  MAX_WECHAT_IMAGE_BYTES,
+  MAX_WECHAT_SYNC_IMAGE_BYTES,
+  normalizeConfig,
+  renderWeChatHtml,
+} from './index';
 import { env } from 'cloudflare:workers';
 
 function collectHooks() {
@@ -223,6 +231,182 @@ describe('typecho-plugin-wechat-publisher', () => {
     expect(inserted.filter(row => row.name !== 'cacheVersion').map(row => row.name)).toEqual([
       'plugin:typecho-plugin-wechat-publisher:post:7',
     ]);
+  });
+
+  it('coalesces concurrent synchronization requests for one cid across fresh request database handles', async () => {
+    const hooks = collectHooks();
+    const action = hooks.get('plugin:typecho-plugin-wechat-publisher:action')![0];
+    const { db } = mockDb();
+    const { db: secondRequestDb } = mockDb();
+    let draftCreates = 0;
+    const fetchMock = vi.fn(async (url: string) => {
+      const target = String(url);
+      if (target.includes('/cgi-bin/token')) return Response.json({ access_token: 'token-dedupe' });
+      if (target.includes('/usr/uploads/a.jpg')) return new Response('image', { headers: { 'Content-Type': 'image/jpeg' } });
+      if (target.includes('/cgi-bin/media/uploadimg')) return Response.json({ url: 'https://mmbiz.qpic.cn/dedupe.jpg' });
+      if (target.includes('/cgi-bin/material/add_material')) return Response.json({ media_id: 'cover-dedupe' });
+      if (target.includes('/cgi-bin/draft/add')) {
+        draftCreates += 1;
+        await new Promise(resolve => setTimeout(resolve, 5));
+        return Response.json({ media_id: 'draft-dedupe' });
+      }
+      throw new Error(`unexpected fetch: ${target}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const extra = {
+      action: 'sync',
+      payload: { cid: 7 },
+      db,
+      user: { uid: 3, group: 'contributor', screenName: '当前用户' },
+      options: {
+        siteUrl: 'https://blog.example',
+        'plugin:typecho-plugin-wechat-publisher': JSON.stringify({ appId: 'appid-dedupe', appSecret: 'secret' }),
+      },
+    };
+
+    const [first, second] = await Promise.all([
+      action({ handled: false }, extra),
+      action({ handled: false }, { ...extra, db: secondRequestDb }),
+    ]);
+
+    expect(first).toMatchObject({ success: true, mediaId: 'draft-dedupe' });
+    expect(second).toEqual(first);
+    expect(draftCreates).toBe(1);
+    expect(db.query.contents.findFirst).toHaveBeenCalledTimes(1);
+    expect(secondRequestDb.query.contents.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('rejects body image counts above the documented limit before contacting WeChat', async () => {
+    const hooks = collectHooks();
+    const action = hooks.get('plugin:typecho-plugin-wechat-publisher:action')![0];
+    const imageMarkdown = Array.from({ length: MAX_WECHAT_BODY_IMAGES + 1 }, (_, index) => `![${index}](https://img.example/${index}.jpg)`).join('\n\n');
+    const { db } = mockDb(null, [], `<!--markdown-->${imageMarkdown}`);
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await action({ handled: false }, {
+      action: 'sync',
+      payload: { cid: 7 },
+      db,
+      user: { uid: 3, group: 'contributor' },
+      options: {
+        siteUrl: 'https://blog.example',
+        'plugin:typecho-plugin-wechat-publisher': JSON.stringify({ appId: 'appid-image-limit', appSecret: 'secret' }),
+      },
+    });
+
+    expect(result).toMatchObject({ handled: true, success: false });
+    expect((result as any).error).toContain(String(MAX_WECHAT_BODY_IMAGES));
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects a streamed image body that exceeds the per-image byte limit', async () => {
+    const hooks = collectHooks();
+    const action = hooks.get('plugin:typecho-plugin-wechat-publisher:action')![0];
+    const { db } = mockDb(null, [], '<!--markdown-->![图](https://img.example/oversized.jpg)');
+    const fetchMock = vi.fn(async (url: string) => {
+      const target = String(url);
+      if (target.includes('/cgi-bin/token')) return Response.json({ access_token: 'token-too-large' });
+      if (target === 'https://img.example/oversized.jpg') {
+        return new Response(new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new Uint8Array(MAX_WECHAT_IMAGE_BYTES + 1));
+            controller.close();
+          },
+        }), { headers: { 'Content-Type': 'image/jpeg' } });
+      }
+      throw new Error(`unexpected fetch: ${target}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await action({ handled: false }, {
+      action: 'sync',
+      payload: { cid: 7 },
+      db,
+      user: { uid: 3, group: 'contributor' },
+      options: {
+        siteUrl: 'https://blog.example',
+        'plugin:typecho-plugin-wechat-publisher': JSON.stringify({ appId: 'appid-image-byte-limit', appSecret: 'secret' }),
+      },
+    });
+
+    expect(result).toMatchObject({ handled: true, success: false });
+    expect((result as any).error).toContain('10 MiB');
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/cgi-bin/media/uploadimg'))).toBe(false);
+  });
+
+  it('enforces a shared byte budget across body images', async () => {
+    const hooks = collectHooks();
+    const action = hooks.get('plugin:typecho-plugin-wechat-publisher:action')![0];
+    const imageMarkdown = Array.from({ length: 4 }, (_, index) => `![${index}](https://img.example/large-${index}.jpg)`).join('\n\n');
+    const { db } = mockDb(null, [], `<!--markdown-->${imageMarkdown}`);
+    const imageBytes = 8 * 1024 * 1024;
+    const fetchMock = vi.fn(async (url: string) => {
+      const target = String(url);
+      if (target.includes('/cgi-bin/token')) return Response.json({ access_token: 'token-total-byte-limit' });
+      if (target.startsWith('https://img.example/')) {
+        return new Response(new Uint8Array(imageBytes), {
+          headers: { 'Content-Type': 'image/jpeg', 'Content-Length': String(imageBytes) },
+        });
+      }
+      if (target.includes('/cgi-bin/media/uploadimg')) return Response.json({ url: 'https://mmbiz.qpic.cn/large.jpg' });
+      throw new Error(`unexpected fetch: ${target}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await action({ handled: false }, {
+      action: 'sync',
+      payload: { cid: 7 },
+      db,
+      user: { uid: 3, group: 'contributor' },
+      options: {
+        siteUrl: 'https://blog.example',
+        'plugin:typecho-plugin-wechat-publisher': JSON.stringify({ appId: 'appid-total-byte-limit', appSecret: 'secret' }),
+      },
+    });
+
+    expect(result).toMatchObject({ handled: true, success: false });
+    expect((result as any).error).toContain('30 MiB');
+    expect(MAX_WECHAT_SYNC_IMAGE_BYTES).toBe(30 * 1024 * 1024);
+  });
+
+  it('limits concurrent body image uploads to three', async () => {
+    const hooks = collectHooks();
+    const action = hooks.get('plugin:typecho-plugin-wechat-publisher:action')![0];
+    const imageMarkdown = Array.from({ length: 4 }, (_, index) => `![${index}](https://img.example/${index}.jpg)`).join('\n\n');
+    const { db } = mockDb(null, [], `<!--markdown-->${imageMarkdown}`);
+    let activeUploads = 0;
+    let peakUploads = 0;
+    const fetchMock = vi.fn(async (url: string) => {
+      const target = String(url);
+      if (target.includes('/cgi-bin/token')) return Response.json({ access_token: 'token-concurrency' });
+      if (target.startsWith('https://img.example/')) return new Response('image', { headers: { 'Content-Type': 'image/jpeg' } });
+      if (target.includes('/cgi-bin/media/uploadimg')) {
+        activeUploads += 1;
+        peakUploads = Math.max(peakUploads, activeUploads);
+        await new Promise(resolve => setTimeout(resolve, 0));
+        activeUploads -= 1;
+        return Response.json({ url: `https://mmbiz.qpic.cn/body-${peakUploads}.jpg` });
+      }
+      if (target.includes('/cgi-bin/material/add_material')) return Response.json({ media_id: 'cover-concurrency' });
+      if (target.includes('/cgi-bin/draft/add')) return Response.json({ media_id: 'draft-concurrency' });
+      throw new Error(`unexpected fetch: ${target}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await action({ handled: false }, {
+      action: 'sync',
+      payload: { cid: 7 },
+      db,
+      user: { uid: 3, group: 'contributor' },
+      options: {
+        siteUrl: 'https://blog.example',
+        'plugin:typecho-plugin-wechat-publisher': JSON.stringify({ appId: 'appid-image-concurrency', appSecret: 'secret' }),
+      },
+    });
+
+    expect(result).toMatchObject({ success: true, uploadedImages: 4 });
+    expect(peakUploads).toBe(3);
   });
 
   it('reads local upload images from R2 instead of refetching the public site URL', async () => {

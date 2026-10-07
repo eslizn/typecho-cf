@@ -6,7 +6,7 @@ import { invalidateSiteCache } from '@/lib/cache';
 import { readAdminFormOrError } from '@/lib/input';
 import { i18nMessage } from '@/lib/i18n';
 import { jsonError, textError } from '@/lib/http';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, inArray, sql } from 'drizzle-orm';
 
 type MetaType = 'category' | 'tag';
 
@@ -108,7 +108,10 @@ async function handler({ request, url }: { request: Request; locals: App.Locals;
   }
 
   if (action === 'delete') {
-    const deleteIds = mids.length > 0 ? mids : (mid ? [mid] : []);
+    const requestedIds = mids.length > 0 ? mids : (mid ? [mid] : []);
+    const targets = requestedIds.length ? await db.select({ mid: schema.metas.mid }).from(schema.metas)
+      .where(and(eq(schema.metas.type, type), inArray(schema.metas.mid, requestedIds))) : [];
+    const deleteIds = targets.map(target => target.mid);
     if (deleteIds.length === 0) {
       return new Response(null, { status: 302, headers: { Location: redirectTo } });
     }
@@ -134,7 +137,7 @@ async function handler({ request, url }: { request: Request; locals: App.Locals;
     const deleteMidList = sql.join(deleteIds.map((id) => sql`${id}`), sql`, `);
     await db.batch([
       db.delete(schema.relationships).where(sql`${schema.relationships.mid} IN (${deleteMidList})`),
-      db.delete(schema.metas).where(sql`${schema.metas.mid} IN (${deleteMidList})`),
+      db.delete(schema.metas).where(and(eq(schema.metas.type, type), inArray(schema.metas.mid, deleteIds))),
     ] as [any, ...any[]]);
 
     await invalidateSiteCache(db);
@@ -154,36 +157,23 @@ async function handler({ request, url }: { request: Request; locals: App.Locals;
   }
 
   if (action === 'refresh') {
-    let metas;
     const refreshIds = mids.length > 0 ? mids : [];
-    if (refreshIds.length > 0) {
-      metas = await db.select().from(schema.metas)
-        .where(sql`${schema.metas.mid} IN (${sql.join(refreshIds.map(id => sql`${id}`), sql`, `)})`);
-    } else {
-      metas = await db.select().from(schema.metas).where(eq(schema.metas.type, type));
-    }
+    const conditions = [eq(schema.metas.type, type)];
+    if (refreshIds.length > 0) conditions.push(inArray(schema.metas.mid, refreshIds));
 
-    if (metas.length > 0) {
-      const midList = sql.join(metas.map(m => sql`${m.mid}`), sql`, `);
-      const counts = await db
-        .select({ mid: schema.relationships.mid, count: sql<number>`count(*)` })
-        .from(schema.relationships)
-        .where(sql`${schema.relationships.mid} IN (${midList})`)
-        .groupBy(schema.relationships.mid);
-
-      const countMap = new Map<number, number>();
-      for (const row of counts) countMap.set(row.mid, row.count);
-
-      // Recounting used to issue one UPDATE per meta; batch them instead.
-      const recountStatements = metas.map((meta) =>
-        db.update(schema.metas)
-          .set({ count: countMap.get(meta.mid) || 0 })
-          .where(eq(schema.metas.mid, meta.mid))
-      );
-      if (recountStatements.length > 0) {
-        await db.batch(recountStatements as [any, ...any[]]);
-      }
-    }
+    // Recalculate from live rows inside the UPDATE itself. Separate reads
+    // followed by updates could overwrite a concurrent relationship change.
+    await db.update(schema.metas)
+      .set({
+        count: sql`(
+          SELECT COUNT(*)
+          FROM ${schema.relationships}
+          INNER JOIN ${schema.contents} ON ${schema.relationships.cid} = ${schema.contents.cid}
+          WHERE ${schema.relationships.mid} = ${schema.metas.mid}
+            AND ${schema.contents.type} <> 'revision'
+        )`,
+      })
+      .where(and(...conditions));
 
     await invalidateSiteCache(db);
     return new Response(null, { status: 302, headers: { Location: redirectTo } });

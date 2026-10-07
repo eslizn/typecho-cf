@@ -328,8 +328,23 @@ export async function ensureSecret(db: Database): Promise<string> {
   const existing = await getOption(db, 'secret');
   if (existing) return existing;
   const secret = generateRandomString(32);
-  await setOption(db, 'secret', secret);
-  return secret;
+  // The initial read may race another isolate. Only fill a missing/empty
+  // value; an established signing key must never be overwritten.
+  await executeOptionBatch(db, [
+    db.insert(schema.options)
+      .values({ name: 'secret', user: 0, value: secret })
+      .onConflictDoUpdate({
+        target: [schema.options.user, schema.options.name],
+        set: { value: secret },
+        setWhere: sql`${schema.options.value} IS NULL OR ${schema.options.value} = ''`,
+      }),
+    cacheVersionUpsert(db),
+  ]);
+  resetCacheVersionMemo();
+  invalidateOptionsSnapshot();
+  const persisted = await getOption(db, 'secret');
+  if (!persisted) throw new Error('Failed to initialize site signing key');
+  return persisted;
 }
 
 /**

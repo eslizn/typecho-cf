@@ -1,13 +1,65 @@
 /**
  * Unit tests for the public-cache policy.
  */
-import { describe, it, expect } from 'vitest';
-import { isCacheablePublicPath, normalizeCacheKeyUrl } from '@/lib/cache';
+import { describe, it, expect, vi } from 'vitest';
+import { bumpCacheVersion, getCachedOptions, isCacheablePublicPath, normalizeCacheKeyUrl, peekCacheVersion, resetCacheVersionMemo, setCachedOptions } from '@/lib/cache';
+import { setOption } from '@/lib/options';
+import { createTestDb, disposeTestDb } from '../helpers';
+
+describe('cache version memo concurrency', () => {
+  it.each(['bump', 'options-batch'] as const)('does not let a slow pre-write read overwrite %s invalidation', async (action) => {
+    const db = await createTestDb();
+    const findFirst = db.query.options.findFirst.bind(db.query.options);
+    let resume!: () => void;
+    let read!: () => void;
+    const started = new Promise<void>(resolve => { read = resolve; });
+    const gate = new Promise<void>(resolve => { resume = resolve; });
+    vi.spyOn(db.query.options, 'findFirst').mockImplementationOnce((async (...args: Parameters<typeof findFirst>) => {
+      const row = await findFirst(...args);
+      read();
+      await gate;
+      return row;
+    }) as typeof db.query.options.findFirst);
+    const pending = peekCacheVersion(db as any);
+    await started;
+    if (action === 'bump') await bumpCacheVersion(db as any);
+    else await setOption(db as any, 'title', 'Updated');
+    resume();
+    try {
+      expect(await pending).toBe('1');
+      expect(await peekCacheVersion(db as any)).toBe('1');
+    } finally {
+      db.$client.close();
+      await disposeTestDb(db);
+      resetCacheVersionMemo();
+    }
+  });
+});
 
 describe('normalizeCacheKeyUrl()', () => {
   it('drops campaign noise and canonicalises parameter order', () => {
     const normalized = normalizeCacheKeyUrl('https://example.com/post?b=2&utm_source=news&a=1');
     expect(normalized.toString()).toBe('https://example.com/post?a=1&b=2');
+  });
+});
+
+describe('cache backend failures', () => {
+  it('treats a failed options lookup as a cache miss and a failed write as best-effort', async () => {
+    const db = await createTestDb();
+    const match = vi.spyOn(caches.default, 'match').mockRejectedValueOnce(new Error('cache unavailable'));
+    const put = vi.spyOn(caches.default, 'put').mockRejectedValueOnce(new Error('cache unavailable'));
+    try {
+      await expect(getCachedOptions(db as any)).resolves.toBeNull();
+      await expect(setCachedOptions({ title: 'Blog' }, '0')).resolves.toBeUndefined();
+      expect(match).toHaveBeenCalledOnce();
+      expect(put).toHaveBeenCalledOnce();
+    } finally {
+      match.mockRestore();
+      put.mockRestore();
+      db.$client.close();
+      await disposeTestDb(db);
+      resetCacheVersionMemo();
+    }
   });
 });
 
@@ -47,6 +99,8 @@ describe('isCacheablePublicPath()', () => {
     expect(isCacheablePublicPath('/tag/tech/feed.xml', defaults)).toBe(true);
     expect(isCacheablePublicPath('/author/1/feed.xml', defaults)).toBe(true);
     expect(isCacheablePublicPath('/sitemap.xml', defaults)).toBe(true);
+    expect(isCacheablePublicPath('/sitemap/1.xml', defaults)).toBe(true);
+    expect(isCacheablePublicPath('/sitemap/invalid.xml', defaults)).toBe(false);
     expect(isCacheablePublicPath('/robots.txt', defaults)).toBe(true);
   });
 

@@ -54,14 +54,15 @@
 请求 → src/middleware.ts
         ├─ 安装检测（typecho_options 表不存在 → /install）
         ├─ 分页 URL 重写（/page/N/ → 基础路径 + locals._page）
-        ├─ 加载 options + 激活插件
+        ├─ 加载 options；认证请求 / 插件路由候选路径从 D1 first-primary 刷新插件启用态与配置
+        ├─ 激活插件并同步其路由声明
         ├─ request:route filter（插件自定义路由）
         ├─ 边缘缓存（Cache API，跳过已登录/admin/api 路径）
         └─ 固定链接重写（post/page/category pattern → 内置路由）
      → src/lib/context.ts
         ├─ 初始化 DB 连接
-        ├─ 加载 options + computeUrls
-        ├─ 自动激活插件（首次安装/升级时）
+        ├─ 复用 middleware 的 DB/options/激活插件；单独调用时从持久化启用集合初始化
+        ├─ 计算 computeUrls
         ├─ 验证 Cookie（__typecho_uid / __typecho_authCode）
         ├─ 生成 CSRF token
         └─ 触发 request:begin hook
@@ -121,10 +122,11 @@ src/lib/constants.ts   — 跨模块常量（密码最小长度、slug 后缀上
 - 表名必须保持 `typecho_*` 前缀，**不可重命名**
 - 列名必须与 PHP Typecho 保持一致
 - Schema 定义在 `src/db/schema.ts`，修改后必须运行 `pnpm run db:generate`；`drizzle/` 目录（迁移 SQL + meta 快照）已纳入版本控制，生成的迁移必须随 schema 变更一起提交
+- `typecho_contents_slug_unique` 是 `slug IS NOT NULL AND type IS NOT 'revision'` 的部分唯一索引；revision 可复用父内容 slug。运行时升级先按 cid 升序保留每组最低 cid 的原 slug，再将后续重复项改为 `<slug>-<cid>`；若该值已占用则追加稳定数字后缀，绝不覆盖现存 slug
 - **禁止手动修改 `drizzle/` 目录下的迁移文件**
 - 建表 SQL 由 `src/lib/schema-sql.ts` 在运行时从 Drizzle schema 反射生成（`generateCreateSQL()` 同时输出 CREATE TABLE 与 CREATE INDEX；中间件首次命中时会在后台幂等地补齐生产库索引）
 - FTS5 搜索索引（`typecho_contents_fts` 虚拟表 + 同步触发器）由运行时引导创建/回填（`src/lib/fulltext.ts`、`isolate-boot.ts`），属于派生索引，**不纳入 Drizzle schema 与迁移**；新库安装时由 `generateCreateSQL()` 一并创建
-- D1 不支持真实事务；批量改写应使用 `db.batch([...])` 单次往返
+- D1 不提供应用层交互式 `BEGIN` / `COMMIT`；`db.batch([...])` 将一组 SQL 语句作为原子批次执行，任一语句失败会回滚整批。一个业务写入单元必须把互相依赖的表更新放进同一个 batch；外部副作用在 batch 成功后触发
 - 评论的「能否审核」必须查 `contents.authorId`，禁止以 `comments.ownerId` 作为权限判定来源（ownerId 仅是内容作者变更前的历史快照）
 - trackback / pingback 是 `typecho_comments` 中 `type='trackback'|'pingback'` 的行，与普通评论**共用** `status` 列与后台「评论」审核队列（`/admin/manage-comments`，按 status 分标签页，不按 type 过滤）；它们同样计入 `commentsNum`。这是与 PHP Typecho 对齐的有意设计，不要在审核页里按 type 拆分队列
 - 入站反馈（trackback / pingback）必须先校验来源页面确实链回目标：**校验不通过一律 4xx 拒收且不写库**；校验通过后是否待审只由 `commentsRequireModeration` 决定（开启落 `waiting`，关闭落 `approved`），与普通评论共用同一个开关，不另设开关
@@ -416,13 +418,14 @@ WebDAV 插件的文件管理器是完整参考实现：`admin:page` 返回包含
 - 文件格式：`.ts`，直接 `export const POST/PUT/DELETE = ...`，返回 `Response`
 - 路由由 Astro 文件系统路由自动生成
 - `src/pages/api/admin/meta.ts` 只能写入 `category` / `tag` 两类元数据，禁止接受任意 `type`；删除分类前必须拒绝默认分类与有文章关联的分类
-- `src/pages/api/admin/content.ts` 保存文章/页面时必须确保 `contents.slug` 唯一；唯一性是**应用层约束**（`slug.ts` 的 `resolveUniqueContentSlug`），DB 侧 `typecho_contents_slug` 只是普通索引（revision 行需要复用父级 slug），因此更新为冲突 slug 时追加当前 `cid` 后缀，不允许把唯一索引错误暴露成 500
+- `src/pages/api/admin/content.ts` 保存文章/页面时必须确保 `contents.slug` 唯一；DB 的 `typecho_contents_slug_unique` 部分唯一索引覆盖所有非 revision 且非空 slug，revision 可复用父级 slug。应用层先由 `resolveUniqueContentSlug` 生成 `<slug>-<cid>` 后缀，并只对该索引冲突做有界重试
 - `src/pages/api/install.ts` 的 install handler 必须用 `.returning()` 拿真实自增主键，不准硬编码 `cid:1` / `mid:1`；slug 冲突要走 `resolveSlug` 后缀策略
 - 副作用类管理操作禁止响应 GET（`delete-spam` 等），统一走 POST + CSRF
 - 公共归档（首页/分类/标签/作者/搜索）必须过滤 `created > now()` 的将来贴
 - 评论 / 注册 / 登录 等公共 POST 必须做 Origin 同源校验（参考 `isSameOriginRequest`）
 - 搜索优先走 FTS5 trigram（`src/lib/fulltext.ts`，仅当每个空白分隔词都 ≥ `FTS_MIN_CHARS` 且 FTS 就绪时启用，MATCH 按词 AND 匹配）；其余情况回退 LIKE 并套 `[2,50]` 字符护栏，长度不在范围内时短路 `1=0`
 - Feed 路由的条数受 `options.feedItems` 控制并 clamp 到 `[5,50]`；description 始终走 excerpt，content:encoded 仅在 `feedFullText` 开启时才输出
+- `/sitemap.xml` 是站点地图索引，每个 `/sitemap/{part}.xml` 分片最多包含 1000 条 URL；分片按 `(modified DESC, cid DESC)` 使用游标读取，只包含已发布且非未来的文章/页面，并使用当前 canonical permalink；`/robots.txt` 始终公布索引 URL
 
 ### 9.2 管理后台页面
 
@@ -431,10 +434,11 @@ WebDAV 插件的文件管理器是完整参考实现：`admin:page` 返回包含
 
 ### 9.3 模块级状态
 
-Cloudflare Workers 是单线程单 isolate，以下模块级变量是安全的：
+Cloudflare Workers 单个 isolate 内的模块级状态会在异步请求间交错；写路径必须显式处理竞态。以下模块级状态只允许用作有界的读取缓存或按 owner 管理的运行时注册表：
 - `src/lib/plugin.ts`：`pluginRegistry` 与 loader 在启动时登记；`hookRegistry` 在插件首次激活时幂等写入，初始化完成后只读；`initialisingPlugins` 合并并发初始化
-- `src/lib/cache.ts`：`cacheVersion` memo（60s）+ options 版本戳缓存（Cache API）
+- `src/lib/cache.ts`：`cacheVersion` memo（60s）+ options 版本戳缓存（Cache API）；Cache API 失败必须回源 D1 或跳过写入，不得使业务请求失败；Set-Cookie、`private`、`no-store`、`no-cache` 与 `Vary: *` 响应不进入公共缓存
 - `src/lib/options.ts`：`optionSnapshot` / `pendingOptionLoad`（isolate 级单槽快照，5 分钟 TTL + cacheVersion 校验 + 并发合并；`getDb()` 每次请求新建 handle，WeakMap 按 Database 键控无法跨请求命中）
+- `src/lib/security-options.ts`：只在带认证 Cookie、`Authorization` 头或已登记插件路由候选的请求上，通过 D1 `first-primary` 会话刷新插件启用集合与 `plugin:*` 配置；普通公开页面继续使用 options 快照。D1 批次提交后才能触发插件 Hooks 或外部副作用
 - `src/lib/sidebar.ts`：`sidebarSnapshot` / `navSnapshot`（同样是 isolate 级单槽 + cacheVersion 版本化键）
 - `src/lib/comment-page.ts`：`commentRootCounts`（按 cacheVersion 键控的根评论计数缓存，TTL + 条数上限）
 - `src/lib/fulltext.ts`：`ftsAvailability`（FTS5 就绪状态）

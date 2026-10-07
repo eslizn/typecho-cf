@@ -27,8 +27,8 @@ describe('generateCreateSQL', () => {
     const stmts = generateCreateSQL();
 
     const uniqueIndexes = stmts.filter(s => s.startsWith('CREATE UNIQUE INDEX'));
-    // Core unique indexes plus reset token hash and metas (type, slug).
-    expect(uniqueIndexes.length).toBe(7);
+    // Core unique indexes plus reset token hash, metas, and non-revision slugs.
+    expect(uniqueIndexes.length).toBe(8);
 
     const indexNames = uniqueIndexes.map(s => {
       const match = s.match(/`(typecho_\w+)`/);
@@ -45,6 +45,12 @@ describe('generateCreateSQL', () => {
     expect(indexNames).toContain('typecho_fields_cid_name');
     expect(indexNames).toContain('typecho_password_reset_requests_tokenHash');
     expect(indexNames).toContain('typecho_metas_type_slug');
+    expect(indexNames).toContain('typecho_contents_slug_unique');
+    expect(uniqueIndexes.some(s => (
+      s.includes('typecho_contents_slug_unique')
+      && s.includes("IS NOT 'revision'")
+      && s.includes('IS NOT NULL')
+    ))).toBe(true);
   });
 
   it('generates plain CREATE INDEX statements', () => {

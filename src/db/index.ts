@@ -12,6 +12,14 @@ export function getDb(d1: D1Database) {
   return drizzle(queryable as D1Database, { schema });
 }
 
+/** Use the current D1 primary when revocation state must be observed immediately. */
+export function getPrimaryDb(d1: D1Database) {
+  const primary = typeof d1.withSession === 'function'
+    ? d1.withSession('first-primary')
+    : d1;
+  return drizzle(primary as D1Database, { schema });
+}
+
 export type Database = ReturnType<typeof getDb>;
 
 export { schema };

@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX `typecho_contents_slug_unique` ON `typecho_contents` (`slug`) WHERE "typecho_contents"."type" IS NOT 'revision' AND "typecho_contents"."slug" IS NOT NULL;

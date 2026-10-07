@@ -5,10 +5,11 @@
  * Verifies auth guards (admin only), self-deletion guard, content/comment
  * re-assignment to the acting admin, actual user deletion, and redirect behaviour.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as schema from '@/db/schema';
 import { createTestDb, seedAdmin, makeAuthCookie, type TestDatabase } from '../helpers';
 import { hashPassword } from '@/lib/auth';
+import { eq } from 'drizzle-orm';
 
 // ---- shared DB ref -----------------------------------------------------------
 
@@ -21,6 +22,18 @@ vi.mock('@/db', async () => {
 vi.mock('@/lib/auth', async () => {
   const actual = await vi.importActual<typeof import('@/lib/auth')>('@/lib/auth');
   return { ...actual, requireAdminCSRF: async () => null };
+});
+
+let demoteAfterAuthorization = false;
+vi.mock('@/lib/admin-auth', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/admin-auth')>('@/lib/admin-auth');
+  return { ...actual, requireAdminAction: async (...args: Parameters<typeof actual.requireAdminAction>) => {
+    const auth = await actual.requireAdminAction(...args);
+    if (demoteAfterAuthorization && !(auth instanceof Response)) {
+      await testDb.update(schema.users).set({ group: 'editor' }).where(eq(schema.users.uid, auth.uid));
+    }
+    return auth;
+  } };
 });
 
 import { POST } from '@/pages/api/admin/user-batch';
@@ -72,6 +85,40 @@ function makeBatchRequest(
 describe('POST /api/admin/user-batch', () => {
   beforeEach(async () => {
     testDb = await createTestDb();
+    demoteAfterAuthorization = false;
+  });
+
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it('rejects deletion and ownership transfers if the actor was demoted after authorization', async () => {
+    const admin = await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE });
+    const cookie = await makeAuthCookie(testDb, admin.uid, TEST_AUTH_CODE, TEST_SECRET);
+    const otherAdmin = await seedExtraUser(testDb, 'other-admin', 'administrator');
+    const target = await seedExtraUser(testDb, 'target');
+    await testDb.insert(schema.contents).values({ authorId: target.uid, title: 'target post', slug: 'target-post' });
+    await testDb.insert(schema.comments).values({ authorId: target.uid, text: 'target comment' });
+    demoteAfterAuthorization = true;
+    const req = makeBatchRequest([otherAdmin.uid, target.uid], cookie);
+    const res = await POST({ request: req, locals: {}, url: new URL(req.url) } as any);
+    expect(res.status).toBe(403);
+    expect(await testDb.query.users.findFirst({ where: eq(schema.users.uid, otherAdmin.uid) })).toBeTruthy();
+    expect(await testDb.query.users.findFirst({ where: eq(schema.users.uid, target.uid) })).toBeTruthy();
+    expect((await testDb.query.contents.findFirst())?.authorId).toBe(target.uid);
+    expect((await testDb.query.comments.findFirst())?.authorId).toBe(target.uid);
+  });
+
+  it('rolls back ownership transfers when deleting a user fails', async () => {
+    const admin = await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE });
+    const cookie = await makeAuthCookie(testDb, admin.uid, TEST_AUTH_CODE, TEST_SECRET);
+    const target = await seedExtraUser(testDb, 'target');
+    await testDb.insert(schema.contents).values({ authorId: target.uid, title: 'target post', slug: 'target-post' });
+    await testDb.insert(schema.comments).values({ authorId: target.uid, text: 'target comment' });
+    await testDb.$client.execute(`CREATE TRIGGER reject_user_delete BEFORE DELETE ON typecho_users BEGIN SELECT RAISE(ABORT, 'delete failure'); END`);
+    const req = makeBatchRequest([target.uid], cookie);
+    await expect(POST({ request: req, locals: {}, url: new URL(req.url) } as any)).rejects.toThrow();
+    expect(await testDb.query.users.findFirst({ where: eq(schema.users.uid, target.uid) })).toBeTruthy();
+    expect((await testDb.query.contents.findFirst())?.authorId).toBe(target.uid);
+    expect((await testDb.query.comments.findFirst())?.authorId).toBe(target.uid);
   });
 
   // -- Auth guards --

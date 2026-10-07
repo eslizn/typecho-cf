@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:workers';
-import { getDb } from '@/db';
+import { getDb, getPrimaryDb } from '@/db';
 import { setRequestCoreContext, type RequestCoreContext } from '@/lib/context';
 import { ensureDatabaseReady, TablesMissingError } from '@/lib/isolate-boot';
 import { ensureSecret, loadOptions } from '@/lib/options';
@@ -17,6 +17,8 @@ import { applySecurityHeaders } from '@/lib/security-headers';
 import { createCoreRequestI18n, createRequestI18n } from '@/lib/i18n-runtime';
 import type { I18n, ResolvedLocale } from '@/lib/i18n';
 import { createRequestCapabilityRuntime } from '@/lib/request-capability';
+import { loadPluginSecurityOptions } from '@/lib/security-options';
+import { putCacheSafely } from '@/lib/cache';
 
 export interface RequestTarget {
   originalUrl: URL;
@@ -80,6 +82,8 @@ export function resolveRequestTarget(request: Request, locals: App.Locals): Requ
 
 export interface BootstrapOptions {
   executionContext?: { waitUntil(promise: Promise<unknown>): void } | null;
+  /** Refresh plugin routing and credentials from D1 primary on auth-bearing requests. */
+  refreshPluginSecurity?: boolean;
 }
 
 /** Initialize the database, Site Options, and activated Hook Context once. */
@@ -109,6 +113,9 @@ export async function bootstrapRequestCore(
     if (!options.secret) {
       await ensureSecret(db);
       options = await loadOptions(db);
+    }
+    if (bootstrapOptions.refreshPluginSecurity) {
+      options = await loadPluginSecurityOptions(getPrimaryDb(d1), options);
     }
 
     // Plugins are always activated before the route, cache, and capability
@@ -181,7 +188,13 @@ export async function finalizeRequestResponse(
   // negative TTL so a bot walking random /{slug} URLs cannot force a D1 lookup
   // (or a full page render) on every single request.
   const cacheableStatus = finalized.status === 200 || finalized.status === 404;
-  if (finalization.cacheKey && cacheableStatus) {
+  // Cookie-setting responses may contain visitor-specific HTML. Removing
+  // only Set-Cookie would still share that body with other visitors.
+  const cacheControl = finalized.headers.get('Cache-Control') || '';
+  const responseIsPublic = !finalized.headers.has('Set-Cookie')
+    && !/(?:^|,)\s*(?:private|no-store|no-cache)\b/i.test(cacheControl)
+    && finalized.headers.get('Vary')?.trim() !== '*';
+  if (finalization.cacheKey && cacheableStatus && responseIsPublic) {
     const isNotFound = finalized.status === 404;
     const cacheHeaders = new Headers(finalized.headers);
     if (!cacheHeaders.has('Cache-Control')) {
@@ -190,13 +203,12 @@ export async function finalizeRequestResponse(
     const vary = ['Cookie', 'Accept-Encoding'];
     if (finalization.autoLocale) vary.push('Accept-Language');
     cacheHeaders.set('Vary', mergeVary(cacheHeaders.get('Vary'), vary));
-    cacheHeaders.delete('Set-Cookie');
     const cacheable = new Response(finalized.clone().body, {
       status: finalized.status,
       statusText: finalized.statusText,
       headers: cacheHeaders,
     });
-    const cacheWrite = caches.default.put(finalization.cacheKey, cacheable);
+    const cacheWrite = putCacheSafely(finalization.cacheKey, cacheable);
     if (finalization.executionContext) finalization.executionContext.waitUntil(cacheWrite);
     else await cacheWrite;
   }

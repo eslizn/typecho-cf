@@ -42,6 +42,43 @@ export async function disposeTestDb(db: Awaited<ReturnType<typeof createTestDb>>
   }
 }
 
+/** D1-shaped adapter over the SQLite test client, including atomic batches. */
+export function createD1TestDouble(
+  db: Awaited<ReturnType<typeof createTestDb>>,
+  options: { failBatchAt?: number; failBatchCall?: number } = {},
+) {
+  const client = (db as typeof db & { $client: ReturnType<typeof createClient> }).$client;
+  let batchCalls = 0;
+  return {
+    prepare(query: string) {
+      let args: unknown[] = [];
+      const statement = {
+        bind(...values: unknown[]) {
+          args = values;
+          return statement;
+        },
+        async run() {
+          const result = await client.execute({ sql: query, args: args as never[] });
+          return { meta: { changes: result.rowsAffected } };
+        },
+        query,
+        get params() { return args; },
+      };
+      return statement;
+    },
+    async batch(statements: Array<{ query: string; params?: unknown[] }>) {
+      batchCalls += 1;
+      const batch = statements.map((statement, index) => ({
+        sql: options.failBatchAt === index && (options.failBatchCall ?? 1) === batchCalls
+          ? 'THIS IS AN INJECTED D1 BATCH FAILURE'
+          : statement.query,
+        args: (statement.params ?? []) as never[],
+      }));
+      return client.batch(batch, 'write');
+    },
+  };
+}
+
 // ---- shared seed helpers ----------------------------------------------------
 
 export interface SeedAdminOptions {

@@ -52,6 +52,13 @@ function writeCachedRootCount(key: string, count: number): void {
     for (const [cacheKey, entry] of commentRootCounts) {
       if (entry.expiresAt <= now) commentRootCounts.delete(cacheKey);
     }
+    // A burst can fill the map with entries whose TTL has not expired yet.
+    // Expiry alone does not enforce the documented per-isolate capacity.
+    while (commentRootCounts.size > COMMENT_ROOT_CACHE_MAX_ENTRIES) {
+      const oldest = commentRootCounts.keys().next().value;
+      if (oldest === undefined) break;
+      commentRootCounts.delete(oldest);
+    }
   }
 }
 

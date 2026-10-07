@@ -10,7 +10,6 @@ import type {
 import type { TaskRuntime } from './runtime';
 
 export const TASK_GLOBAL_MAX_IN_FLIGHT = 16;
-export const TASK_LATE_HANDLER_GRACE_MS = 1_000;
 const DEFAULT_RETRY_DELAY_SECONDS = 5;
 const MAX_RETRY_DELAY_SECONDS = 300;
 const MAX_LOG_TEXT_LENGTH = 512;
@@ -264,42 +263,31 @@ interface PendingExecution {
   taskIdentity: string;
   taskConcurrency: number;
   run: (holdTaskSlot: (completion: Promise<unknown>) => void) => Promise<void>;
+  retryIfLateHandlerOccupiesSlot: () => Promise<void>;
   resolve: () => void;
   reject: (reason?: unknown) => void;
 }
 
-function boundedTaskSlotCompletion(completion: Promise<unknown>): Promise<void> {
-  return new Promise(resolve => {
-    let released = false;
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    const release = (): void => {
-      if (released) return;
-      released = true;
-      if (timeoutId !== undefined) clearTimeout(timeoutId);
-      resolve();
-    };
-
-    timeoutId = setTimeout(release, TASK_LATE_HANDLER_GRACE_MS);
-    void Promise.resolve(completion).then(release, release);
-  });
-}
-
-/** Small fair scheduler shared by all messages in one Queue batch. */
+/** Fair scheduler shared by Queue events within one Worker isolate. */
 class InFlightScheduler {
   private running = 0;
+  private lateHandlers = 0;
   private readonly runningByTask = new Map<string, number>();
+  private readonly lateHandlersByTask = new Map<string, number>();
   private readonly pending: PendingExecution[] = [];
 
   run(
     taskIdentity: string,
     taskConcurrency: number,
     run: PendingExecution['run'],
+    retryIfLateHandlerOccupiesSlot: PendingExecution['retryIfLateHandlerOccupiesSlot'],
   ): Promise<void> {
     return new Promise((resolve, reject) => {
       this.pending.push({
         taskIdentity,
         taskConcurrency,
         run,
+        retryIfLateHandlerOccupiesSlot,
         resolve,
         reject,
       });
@@ -314,7 +302,27 @@ class InFlightScheduler {
   }
 
   private pump(): void {
-    while (this.running < TASK_GLOBAL_MAX_IN_FLIGHT) {
+    // A timed-out handler cannot be forcefully stopped. If it still occupies
+    // this task's configured capacity, retry queued deliveries immediately
+    // instead of leaving the Queue batch waiting forever or starting an
+    // overlapping handler in this isolate.
+    for (let index = this.pending.length - 1; index >= 0; index -= 1) {
+      const item = this.pending[index];
+      if (
+        (
+          (this.runningByTask.get(item.taskIdentity) ?? 0) >= item.taskConcurrency
+          && (this.lateHandlersByTask.get(item.taskIdentity) ?? 0) > 0
+        )
+        || (this.running + this.lateHandlers >= TASK_GLOBAL_MAX_IN_FLIGHT && this.lateHandlers > 0)
+      ) {
+        this.pending.splice(index, 1);
+        void Promise.resolve()
+          .then(item.retryIfLateHandlerOccupiesSlot)
+          .then(item.resolve, item.reject);
+      }
+    }
+
+    while (this.running + this.lateHandlers < TASK_GLOBAL_MAX_IN_FLIGHT) {
       const nextIndex = this.pending.findIndex(item => (
         (this.runningByTask.get(item.taskIdentity) ?? 0) < item.taskConcurrency
       ));
@@ -328,10 +336,23 @@ class InFlightScheduler {
       let taskSlotCompletion: Promise<void> | undefined;
       const holdTaskSlot = (completion: Promise<unknown>): void => {
         if (taskSlotCompletion !== undefined) return;
-        // Preserve the same-task guard while a timed-out handler gets a short
-        // chance to honor AbortSignal, but never let a non-cooperative handler
-        // block the rest of this Queue batch indefinitely.
-        taskSlotCompletion = boundedTaskSlotCompletion(completion);
+        // JavaScript cannot terminate a handler that ignores AbortSignal. Keep
+        // its task slot until it really settles; later messages that cannot
+        // fit retry immediately, while unrelated tasks still use the isolate.
+        this.lateHandlersByTask.set(
+          next.taskIdentity,
+          (this.lateHandlersByTask.get(next.taskIdentity) ?? 0) + 1,
+        );
+        this.lateHandlers += 1;
+        taskSlotCompletion = Promise.resolve(completion).then(
+          () => undefined,
+          () => undefined,
+        ).then(() => {
+          this.lateHandlers -= 1;
+          const count = (this.lateHandlersByTask.get(next.taskIdentity) ?? 1) - 1;
+          if (count <= 0) this.lateHandlersByTask.delete(next.taskIdentity);
+          else this.lateHandlersByTask.set(next.taskIdentity, count);
+        });
       };
       void Promise.resolve()
         .then(() => next.run(holdTaskSlot))
@@ -357,6 +378,10 @@ class InFlightScheduler {
     }
   }
 }
+
+// Queue events can overlap in one Worker isolate, so task limits and late
+// handler reservations must outlive a single delivered batch.
+const isolateScheduler = new InFlightScheduler();
 
 async function processMessage(
   message: TaskMessageLike,
@@ -397,6 +422,7 @@ async function processMessage(
     taskIdentity(task.pluginId, task.id),
     task.concurrency,
     holdTaskSlot => executeMessage(message, envelope, task, runtime, holdTaskSlot),
+    () => finalizer.retry(retryDelay(attempt)),
   );
 }
 
@@ -406,9 +432,8 @@ export async function dispatchTaskMessages(
   runtime: TaskRuntime,
 ): Promise<void> {
   if (messages.length === 0) return;
-  const scheduler = new InFlightScheduler();
   const results = await Promise.allSettled(
-    messages.map(message => processMessage(message, runtime, scheduler)),
+    messages.map(message => processMessage(message, runtime, isolateScheduler)),
   );
   for (const result of results) {
     if (result.status === 'rejected') throw result.reason;

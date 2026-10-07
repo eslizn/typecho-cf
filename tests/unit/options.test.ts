@@ -131,6 +131,31 @@ describe('loadOptions()', () => {
     const second = await ensureSecret(db);
     expect(second).toBe(first);
   });
+
+  it.each([undefined, null, ''])('concurrent secret bootstrap preserves one signing key for %s', async (value) => {
+    const db = await createOptionsTestDb();
+    if (value !== undefined) {
+      await db.insert(schema.options).values({ name: 'secret', user: 0, value });
+    }
+    // All callers finish their initial lookup before any can write. This
+    // reproduces cold requests from independent isolates on a legacy site.
+    const findFirst = db.query.options.findFirst.bind(db.query.options);
+    let lookups = 0;
+    let release!: () => void;
+    const ready = new Promise<void>(resolve => { release = resolve; });
+    vi.spyOn(db.query.options, 'findFirst').mockImplementation(async (...args: any[]) => {
+      const row = await findFirst(...args);
+      if (++lookups <= 4) {
+        if (lookups === 4) release();
+        await ready;
+      }
+      return row;
+    });
+    const keys = await Promise.all(Array.from({ length: 4 }, () => ensureSecret(db)));
+    expect(new Set(keys).size).toBe(1);
+    expect(keys[0]).toBe(await getOption(db, 'secret'));
+    expect((await loadOptions(db)).secret).toBe(keys[0]);
+  });
 });
 
 describe('getOption()', () => {

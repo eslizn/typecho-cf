@@ -6,6 +6,8 @@ import {
   setCapabilityActivation,
 } from '@/lib/capability';
 import init from './index';
+import { createTestDb, disposeTestDb } from '../../../tests/helpers';
+import { schema } from '@/db';
 
 function collectHooks() {
   const hooks = new Map<string, Function[]>();
@@ -301,6 +303,62 @@ describe('typecho-plugin-scribe', () => {
     expect(text).toContain('内容');
     // The incidental Markdown fence the model added is stripped on both ends.
     expect(text).not.toContain('```');
+  });
+
+  it('preserves a configured temperature of zero in the AI request', async () => {
+    const action = collectHooks().get('plugin:typecho-plugin-scribe:action')![0];
+    const generate = vi.fn(async (_request: any) => chatChunks(['正文']));
+    const result = await action({ handled: false }, {
+      action: 'generate', payload: { title: 'Test' },
+      capabilityRuntime: aiRuntime(generate), options: scribeOptions({ temperature: '0' }),
+    });
+    await result.response.text();
+    expect(generate.mock.calls[0][0].temperature).toBe(0);
+  });
+
+  it('does not send another author\'s attachments to AI when a contributor supplies their IDs', async () => {
+    const db = await createTestDb();
+    try {
+      await db.insert(schema.contents).values([
+        { cid: 101, type: 'post_draft', status: 'draft', authorId: 1 },
+        { cid: 201, type: 'attachment', authorId: 1, parent: 101, text: JSON.stringify({ name: 'own.png', url: '/usr/uploads/own.png', type: 'image/png' }) },
+        { cid: 202, type: 'attachment', authorId: 2, parent: 102, text: JSON.stringify({ name: 'private.png', url: '/usr/uploads/private.png', type: 'image/png' }) },
+      ]);
+      const action = collectHooks().get('plugin:typecho-plugin-scribe:action')![0];
+      const generate = vi.fn(async (_request: any) => chatChunks(['正文']));
+      const result = await action({ handled: false }, {
+        action: 'generate', payload: { title: 'Test', cid: 101, attachmentIds: [201, 202] },
+        db, user: { uid: 1, group: 'contributor' },
+        capabilityRuntime: aiRuntime(generate), options: scribeOptions({ includeBodyAssets: '1', stylePostCount: '0' }),
+      });
+      await result.response.text();
+      const request = JSON.stringify(generate.mock.calls[0][0]);
+      expect(request).toContain('own.png');
+      expect(request).not.toContain('private.png');
+    } finally {
+      await disposeTestDb(db);
+    }
+  });
+
+  it('rejects another author\'s content ID before loading its attachments for a contributor', async () => {
+    const db = await createTestDb();
+    try {
+      await db.insert(schema.contents).values([
+        { cid: 102, type: 'post_draft', status: 'draft', authorId: 2 },
+        { cid: 202, type: 'attachment', authorId: 2, parent: 102, text: JSON.stringify({ name: 'private.png', url: '/usr/uploads/private.png', type: 'image/png' }) },
+      ]);
+      const action = collectHooks().get('plugin:typecho-plugin-scribe:action')![0];
+      const generate = vi.fn(async (_request: any) => chatChunks(['正文']));
+      const result = await action({ handled: false }, {
+        action: 'generate', payload: { title: 'Test', cid: 102 }, db,
+        user: { uid: 1, group: 'contributor' }, capabilityRuntime: aiRuntime(generate),
+        options: scribeOptions({ includeBodyAssets: '1', stylePostCount: '0' }),
+      });
+      expect(await result.response.text()).toContain('event: error');
+      expect(generate).not.toHaveBeenCalled();
+    } finally {
+      await disposeTestDb(db);
+    }
   });
 
   it('maps AI capability failures into localized writing errors', async () => {

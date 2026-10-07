@@ -271,6 +271,7 @@ registerScheduledTask({
 - `id` must be unique within the plugin; the task identity is `{pluginId}:{taskId}`.
 - `schedule` must use exactly five Cron fields: `minute hour day-of-month month day-of-week`; seconds are not supported.
 - `concurrency` and `timeoutSeconds` are optional, with defaults of `1` and `30`; `concurrency` limits this task identity.
+- When `timeoutSeconds` expires, the dispatcher aborts `context.signal` and retries the Queue message; it cannot forcibly stop JavaScript that ignores the signal. A timed-out handler keeps its task concurrency slot and one of the 16 total execution slots in the **current Worker isolate** until it actually settles. New messages are retried immediately when that capacity is full instead of starting an overlapping or over-capacity handler in that isolate. Pass `context.signal` to cancellable I/O and protect external side effects with a stable idempotency key. Queue delivery is at least once and a retry may run in another isolate; the core provides no cross-isolate mutual exclusion or exactly-once guarantee.
 - The scheduled handler's `payload` type is fixed as `ScheduledTaskPayload` and contains only the core-generated `localSlot` and `scheduledAt`; read business parameters from the plugin's own configuration or data source.
 - `getTaskKey(context)` is optional and can split scheduled work by business dimension. The default `taskKey` is `{pluginId}:{taskId}:{localSlot}:{scheduledAt}`, where `scheduledAt` is the real UTC instant; the default idempotency key is `schedule:{taskKey}`. Repeated delivery of the same Cron instant still receives the same default key.
 - The Cloudflare Cron Trigger runs once per minute (`* * * * *`) and invokes the Worker's `scheduled` entry; it is not an HTTP request. The scheduler converts the current UTC instant with the site's `options.timezone` IANA timezone to produce `localSlot`, applying the timezone's DST rules rather than a fixed offset. During a fall-back transition, the two real instants are enqueued separately even when their local-minute slots match; the core does not merge slots across isolates, so plugins should use a business idempotency mechanism when they want to merge them.
@@ -556,13 +557,15 @@ The host project supplies the `typecho` package at install time, and `typecho/pl
 | Types | `PluginInitContext`, `PluginRouteClaim`, `PluginRouteResolver`, `PluginRouteResolverContext`, `PluginRouteResult`, `PluginManifest`, `PluginConfigField`, `CapabilityDescriptor`, `CapabilityFactory`, `CapabilityRuntimeContext`, `CapabilityResolveResult`, `PluginActivationPlan`, `PluginDependency`, `PluginDependencyIssue`, `AttachmentMeta`, `Database`, `IanaTimezone`, `TimezoneSetting` |
 | Task types | `AsyncTaskDefinition`, `RegisteredAsyncTask`, `RegisteredScheduledTask`, `ScheduledTaskDefinition`, `ScheduledTaskKeyContext`, `ScheduledTaskPayload`, `TaskEnvelope`, `TaskExecutionContext`, `TaskHandler`, `TaskKind`, `TaskLocalSlot`, `TaskResult`, `TaskSource`, `EnqueueAsyncTaskOptions` |
 | Plugin system | `HookPoints`, `parsePluginOption`, `parsePluginConfigFormData`, `loadPluginConfig`, `escapeAttr`, `resolveCapability`, `createCapabilityRuntimeContext`, `getClientIp` |
-| Auth | `hasPermission`, `verifyPassword` |
+| Auth | `canManageResource`, `hasPermission`, `verifyPassword` |
 | Content | `buildPermalink`, `formatDate`, `buildAuthorLink`, `buildCategoryLink` |
 | Markdown/HTML | `escapeHtml`, `renderMarkdown`, `renderMarkdownFiltered`, `renderContentExcerpt`, `generateExcerpt`, `autop`, `stripTypechoMarkers`, `stripHtmlTags` |
 | Network | `fetchWithTimeout` |
 | Attachments | `parseAttachmentMeta` |
 | URL | `normalizeHttpUrl` |
 | Options | `getOption`, `setOption` |
+
+`canManageResource(user, { authorId })` checks ownership for content and attachments: administrators and editors can manage all resources; other users can manage their own. Check the endpoint's required role first. This helper does not replace authentication, CSRF validation, or comment moderation checks.
 
 `formatDate(timestamp, format, timezone, locale)` uses an IANA identifier
 (for example `Asia/Shanghai` or `America/New_York`) so regional DST rules are applied.

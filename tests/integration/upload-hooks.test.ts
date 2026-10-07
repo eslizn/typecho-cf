@@ -127,6 +127,24 @@ describe('upload endpoint (G5-4 + G5-5)', () => {
     expect(putCalls[0]?.[1]).toBeInstanceOf(ReadableStream);
   });
 
+  it('uses collision-resistant attachment slugs when uploads share a timestamp', async () => {
+    const cookie = await adminCookie();
+    const csrfToken = await csrf();
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(Date.now());
+    try {
+      for (let index = 0; index < 2; index++) {
+        const response = await POST({ request: buildUploadRequest(cookie, csrfToken), locals: {} } as any);
+        expect(response.status).toBe(200);
+      }
+    } finally {
+      nowSpy.mockRestore();
+    }
+    const attachments = await testDb.select({ slug: schema.contents.slug }).from(schema.contents);
+    expect(attachments).toHaveLength(2);
+    expect(attachments.every(row => /^attachment-[0-9a-f-]{36}$/.test(row.slug ?? ''))).toBe(true);
+    expect(new Set(attachments.map(row => row.slug)).size).toBe(2);
+  });
+
   it('rejects an oversized declared upload before multipart parsing', async () => {
     const cookie = await adminCookie();
     const csrfToken = await csrf();

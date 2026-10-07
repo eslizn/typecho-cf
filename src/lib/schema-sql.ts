@@ -6,7 +6,7 @@
  */
 
 import { getTableConfig } from 'drizzle-orm/sqlite-core';
-import type { SQLiteTable, SQLiteColumn } from 'drizzle-orm/sqlite-core';
+import { SQLiteSyncDialect, type SQLiteTable, type SQLiteColumn } from 'drizzle-orm/sqlite-core';
 import * as schema from '@/db/schema';
 import { contentsFtsSql } from '@/lib/fulltext';
 
@@ -62,6 +62,7 @@ function buildCreateTable(table: SQLiteTable): string {
 function buildCreateIndexes(table: SQLiteTable): string[] {
   const config = getTableConfig(table);
   const stmts: string[] = [];
+  const dialect = new SQLiteSyncDialect();
 
   for (const idx of config.indexes) {
     const cols = idx.config.columns
@@ -77,8 +78,11 @@ function buildCreateIndexes(table: SQLiteTable): string[] {
     const keyword = idx.config.unique
       ? 'CREATE UNIQUE INDEX IF NOT EXISTS'
       : 'CREATE INDEX IF NOT EXISTS';
+    const where = idx.config.where
+      ? ` WHERE ${dialect.sqlToQuery(idx.config.where, 'indexes').sql}`
+      : '';
 
-    stmts.push(`${keyword} ${escName(idx.config.name)} ON ${escName(config.name)} (${cols})`);
+    stmts.push(`${keyword} ${escName(idx.config.name)} ON ${escName(config.name)} (${cols})${where}`);
   }
 
   return stmts;

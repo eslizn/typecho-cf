@@ -71,7 +71,7 @@ export { getClientIp } from './client-ip';
 export { safeJsonForScript } from './escape';
 
 // ── Auth ──
-export { generateRandomString, hasPermission, timeSafeEqual, verifyPassword } from './auth';
+export { canManageResource, generateRandomString, hasPermission, timeSafeEqual, verifyPassword } from './auth';
 
 // ── Content ──
 export { buildPermalink, formatDate, buildAuthorLink, buildCategoryLink } from './content';

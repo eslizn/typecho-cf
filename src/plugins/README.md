@@ -178,6 +178,7 @@ registerScheduledTask({
 - `id` 在同一插件内必须唯一；任务身份是 `{pluginId}:{taskId}`。
 - `schedule` 必须是标准五字段 Cron：`分钟 小时 月内日期 月份 星期`，不支持秒字段。
 - `concurrency` 和 `timeoutSeconds` 可选，默认分别为 `1` 和 `30`；`concurrency` 是该任务身份的并发上限。
+- `timeoutSeconds` 到期会触发 `context.signal.abort()` 并让当前 Queue 消息重试；它不能强制终止忽略 signal 的 JavaScript handler。超时 handler 会在**当前 Worker isolate**继续占用该任务的并发槽和 16 个总执行槽之一，直到真实结束；容量因此已满时，新消息立即重试，不会在这个 isolate 再启动超额 handler。handler 必须把 `context.signal` 传给支持取消的 I/O，并用稳定幂等键保护外部副作用。Queue 是至少一次投递，重投可能落到其他 isolate；核心不提供跨 isolate 的互斥或 exactly-once 保证。
 - 定时 handler 的 `payload` 类型固定为 `ScheduledTaskPayload`，只包含核心生成的 `localSlot` 与 `scheduledAt`；业务参数应通过插件自己的配置或数据源读取。
 - `getTaskKey(context)` 可选，用于需要按业务维度拆分定时任务的场景。默认 `taskKey` 为 `{pluginId}:{taskId}:{localSlot}:{scheduledAt}`，其中 `scheduledAt` 是真实 UTC instant；默认幂等键为 `schedule:{taskKey}`。同一 Cron instant 的重复投递仍会得到同一默认 key。
 - Cloudflare Cron Trigger 固定每分钟触发（`* * * * *`），平台调用 Worker 的 `scheduled` 入口；它不是 HTTP 请求。调度器使用当前 UTC instant，结合站点 `options.timezone` 的 IANA 时区计算 `localSlot`，并按 IANA 规则处理夏令时，不能使用固定 offset。夏令时回拨时，两个真实 instant 会分别投递，即使它们的本地分钟相同；核心不提供跨 isolate 的槽位合并，插件应使用业务幂等机制决定是否合并。
@@ -557,13 +558,15 @@ import { schema } from 'typecho/db';
 | 类型 | `PluginInitContext`, `PluginRouteClaim`, `PluginRouteResolver`, `PluginRouteResolverContext`, `PluginRouteResult`, `PluginManifest`, `PluginConfigField`, `CapabilityDescriptor`, `CapabilityFactory`, `CapabilityRuntimeContext`, `CapabilityResolveResult`, `PluginActivationPlan`, `PluginDependency`, `PluginDependencyIssue`, `AttachmentMeta`, `Database`, `IanaTimezone`, `TimezoneSetting` |
 | 任务类型 | `AsyncTaskDefinition`, `RegisteredAsyncTask`, `RegisteredScheduledTask`, `ScheduledTaskDefinition`, `ScheduledTaskKeyContext`, `ScheduledTaskPayload`, `TaskEnvelope`, `TaskExecutionContext`, `TaskHandler`, `TaskKind`, `TaskLocalSlot`, `TaskResult`, `TaskSource`, `EnqueueAsyncTaskOptions` |
 | 插件系统 | `HookPoints`, `parsePluginOption`, `parsePluginConfigFormData`, `loadPluginConfig`, `escapeAttr`, `resolveCapability`, `createCapabilityRuntimeContext`, `getClientIp` |
-| 认证 | `hasPermission`, `verifyPassword` |
+| 认证 | `canManageResource`, `hasPermission`, `verifyPassword` |
 | 内容 | `buildPermalink`, `formatDate`, `buildAuthorLink`, `buildCategoryLink` |
 | Markdown/HTML | `escapeHtml`, `renderMarkdown`, `renderMarkdownFiltered`, `renderContentExcerpt`, `generateExcerpt`, `autop`, `stripTypechoMarkers`, `stripHtmlTags` |
 | 网络 | `fetchWithTimeout` |
 | 附件 | `parseAttachmentMeta` |
 | URL | `normalizeHttpUrl` |
 | 选项 | `getOption`, `setOption` |
+
+`canManageResource(user, { authorId })` 统一判断内容/附件管理范围：管理员与编辑可管理全部，其他用户仅能管理自己创建的资源。调用前仍需校验端点要求的角色；它不替代登录、CSRF 或评论审核权限检查。
 
 `formatDate(timestamp, format, timezone, locale)` 的 `timezone` 参数使用 IANA
 标识（例如 `Asia/Shanghai` 或 `America/New_York`），会按地区规则处理夏令时。

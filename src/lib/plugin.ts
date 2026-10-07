@@ -232,6 +232,8 @@ type PluginInitLoader = () => PluginInitFn | Promise<PluginInitFn>;
 const pluginInitLoaders = new Map<string, PluginInitLoader>();
 const initialisedPlugins = new Set<string>();
 const initialisingPlugins = new Map<string, Promise<void>>();
+/** Owner tokens invalidate in-flight init work across deactivation/retry. */
+const pluginInitialisationTokens = new Map<string, symbol>();
 const failedPlugins = new Map<string, { error: string; failedAt: number; attempts: number }>();
 /** Backoff base between init retries after a failure (doubles up to 5×). */
 const PLUGIN_INIT_FAIL_BACKOFF_MS = 60_000;
@@ -254,6 +256,7 @@ export function getPluginInitFailures(): Record<string, { error: string; attempt
 export function resetPluginInitState(): void {
   initialisedPlugins.clear();
   initialisingPlugins.clear();
+  pluginInitialisationTokens.clear();
   failedPlugins.clear();
   resetPluginRouteRegistry();
   resetCapabilityRegistry();
@@ -420,6 +423,10 @@ export async function setActivatedPlugins(ctx: HookContext, ids: string[]): Prom
   if (!pluginInitContext) return;
   const dependencyNodes = pluginDependencyNodes();
   for (const id of orderedIds) {
+    if (!activePluginIds.has(id)) {
+      ctx.activatedPlugins.delete(id);
+      continue;
+    }
     const dependencyNode = dependencyNodes.get(id);
     if (dependencyNode?.dependencies?.some(dependency => (
       dependency.kind === 'required' && !ctx.activatedPlugins.has(dependency.pluginId)
@@ -452,46 +459,65 @@ export async function setActivatedPlugins(ctx: HookContext, ids: string[]): Prom
     }
     const loader = pluginInitLoaders.get(id);
     if (!loader) continue;
+    const token = Symbol(id);
+    pluginInitialisationTokens.set(id, token);
+    const isCurrentInitialisation = () => (
+      pluginInitialisationTokens.get(id) === token && activePluginIds.has(id)
+    );
     const pending = Promise.resolve()
       .then(() => {
+        if (!isCurrentInitialisation()) return undefined;
         beginPluginTranslationStage(id);
         return loader();
       })
-      .then(init => init({
-          addHook: pluginInitContext!.addHook,
+      .then(init => {
+        if (!init || !isCurrentInitialisation()) return;
+        return init({
+          addHook: (...args: Parameters<typeof addHook>) => {
+            if (isCurrentInitialisation()) pluginInitContext!.addHook(...args);
+          },
           HookPoints: pluginInitContext!.HookPoints,
           pluginId: id,
           registerRouteResolver: (resolver: PluginRouteResolver) => {
-            registerPluginRouteResolver(id, resolver);
+            if (isCurrentInitialisation()) registerPluginRouteResolver(id, resolver);
           },
           registerAdminPath: (path: string) => {
-            registerPluginAdminPath(id, path);
+            if (isCurrentInitialisation()) registerPluginAdminPath(id, path);
           },
           registerCapability: <T>(registration: Omit<CapabilityRegistration<T>, 'ownerPluginId'>) => {
-            registerOwnedCapability(id, registration);
+            if (isCurrentInitialisation()) registerOwnedCapability(id, registration);
           },
           registerTranslations: (locale, messages, displayName) => {
-            stagePluginTranslation(id, locale, messages, displayName);
+            if (isCurrentInitialisation()) stagePluginTranslation(id, locale, messages, displayName);
           },
           registerScheduledTask: (definition: ScheduledTaskDefinition) => {
-            registerScheduledTask(id, definition);
+            if (isCurrentInitialisation()) registerScheduledTask(id, definition);
           },
           registerAsyncTask: <TPayload>(definition: AsyncTaskDefinition<TPayload>) => {
-            registerAsyncTask(id, definition);
+            if (isCurrentInitialisation()) registerAsyncTask(id, definition);
           },
           enqueueAsyncTask: <TPayload>(
             taskId: string,
             payload: TPayload,
             options: EnqueueAsyncTaskOptions,
-          ) => enqueueAsyncTaskMessage(runtimeEnv, id, taskId, payload, options),
-        }))
+          ) => {
+            if (!isCurrentInitialisation()) throw new Error(`Plugin ${id} is no longer active`);
+            return enqueueAsyncTaskMessage(runtimeEnv, id, taskId, payload, options);
+          },
+        });
+      })
       .then(() => {
+        if (!isCurrentInitialisation()) return;
         commitPluginTranslationStage(id);
         initialisedPlugins.add(id);
         markPluginRouteResolverReady(id);
         failedPlugins.delete(id);
       })
       .catch(err => {
+        if (!isCurrentInitialisation()) return;
+        // An init may retain callbacks in timers or other asynchronous work.
+        // Invalidate them before rolling back the failed owner's state.
+        pluginInitialisationTokens.delete(id);
         removePluginHooks(id);
         unregisterCapabilityOwner(id);
         ctx.activatedPlugins.delete(id);
@@ -509,10 +535,11 @@ export async function setActivatedPlugins(ctx: HookContext, ids: string[]): Prom
         console.error(`[plugin] Failed to init ${id}:`, err);
       })
       .finally(() => {
-        initialisingPlugins.delete(id);
+        if (initialisingPlugins.get(id) === pending) initialisingPlugins.delete(id);
       });
     initialisingPlugins.set(id, pending);
     await pending;
+    if (!isCurrentInitialisation()) ctx.activatedPlugins.delete(id);
   }
 }
 
@@ -524,6 +551,9 @@ export async function setActivatedPlugins(ctx: HookContext, ids: string[]): Prom
  * creates fresh owner-bound Capability registrations for the new generation.
  */
 function deactivatePluginRuntime(pluginId: string): void {
+  pluginInitialisationTokens.delete(pluginId);
+  initialisingPlugins.delete(pluginId);
+  discardPluginTranslationStage(pluginId);
   removePluginHooks(pluginId);
   unregisterCapabilityOwner(pluginId);
   clearPluginRouteClaims(pluginId);

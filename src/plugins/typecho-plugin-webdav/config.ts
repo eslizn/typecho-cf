@@ -1,4 +1,4 @@
-import { hasPermission, verifyPassword } from 'typecho/plugin-sdk';
+import { getClientIp, hasPermission, verifyPassword } from 'typecho/plugin-sdk';
 import type { Database } from 'typecho/db';
 import { schema } from 'typecho/db';
 import { eq } from 'drizzle-orm';
@@ -14,6 +14,7 @@ interface AuthFailureState {
   failures: number;
   windowStartedAt: number;
   bannedUntil: number;
+  expiresAt: number;
 }
 
 export const DEFAULT_ROUTE = '/webdav';
@@ -22,6 +23,8 @@ const DEFAULT_FAIL_BAN_ENABLED = true;
 const DEFAULT_FAIL_BAN_MAX_FAILURES = 5;
 const DEFAULT_FAIL_BAN_WINDOW_SECONDS = 300;
 const DEFAULT_FAIL_BAN_SECONDS = 900;
+export const MAX_AUTH_FAILURE_STATES = 2_048;
+const AUTH_FAILURE_SWEEP_INTERVAL = 64;
 
 const DEFAULT_MOUNTS = `[
   {
@@ -33,6 +36,20 @@ const DEFAULT_MOUNTS = `[
 ]`;
 
 const authFailureStates = new Map<string, AuthFailureState>();
+let authFailureOperations = 0;
+
+function pruneAuthFailureStates(now: number): void {
+  for (const [ip, state] of authFailureStates) {
+    if (state.expiresAt <= now) authFailureStates.delete(ip);
+  }
+}
+
+function sweepExpiredAuthFailureStates(now: number): void {
+  authFailureOperations += 1;
+  if (authFailureOperations % AUTH_FAILURE_SWEEP_INTERVAL === 0) {
+    pruneAuthFailureStates(now);
+  }
+}
 
 // Mounts whose sessionCookie came from the plugin config (not a password
 // login). User-supplied cookies must never be silently cleared to fall back
@@ -283,22 +300,20 @@ export function normalizeConfig(settings?: Record<string, unknown>): WebDavConfi
 // --- Auth / Fail-ban ---
 
 export function getWebDavClientIp(request: Request): string {
-  const forwarded = request.headers.get('cf-connecting-ip')
-    || request.headers.get('x-real-ip')
-    || request.headers.get('x-forwarded-for')?.split(',')[0]
-    || '';
-  const ip = forwarded.trim();
-  return ip || 'unknown';
+  return getClientIp(request) || 'unknown';
 }
 
 export function isWebDavClientBanned(config: WebDavConfig, ip: string, now = Date.now()): boolean {
   if (!config.failBanEnabled) return false;
+  sweepExpiredAuthFailureStates(now);
   const state = authFailureStates.get(ip);
   if (!state) return false;
-  if (state.bannedUntil > now) return true;
-  if (state.bannedUntil > 0) {
+  if (state.expiresAt <= now) {
     authFailureStates.delete(ip);
+    return false;
   }
+  if (state.bannedUntil > now) return true;
+  if (state.bannedUntil > 0) authFailureStates.delete(ip);
   return false;
 }
 
@@ -306,14 +321,29 @@ export function recordWebDavAuthFailure(config: WebDavConfig, ip: string, now = 
   if (!config.failBanEnabled) return;
   const windowMs = config.failBanWindowSeconds * 1000;
   const banMs = config.failBanSeconds * 1000;
+  sweepExpiredAuthFailureStates(now);
   const current = authFailureStates.get(ip);
-  const state = !current || now - current.windowStartedAt > windowMs
-    ? { failures: 0, windowStartedAt: now, bannedUntil: 0 }
-    : current;
+  if (current && current.expiresAt <= now) authFailureStates.delete(ip);
+  const usableCurrent = current && current.expiresAt > now ? current : undefined;
+  const state = !usableCurrent || now - usableCurrent.windowStartedAt > windowMs
+    ? { failures: 0, windowStartedAt: now, bannedUntil: 0, expiresAt: now + windowMs }
+    : usableCurrent;
 
   state.failures += 1;
   if (state.failures >= config.failBanMaxFailures) {
     state.bannedUntil = now + banMs;
+  }
+  state.expiresAt = Math.max(state.windowStartedAt + windowMs, state.bannedUntil);
+  authFailureStates.delete(ip);
+  if (!usableCurrent && authFailureStates.size >= MAX_AUTH_FAILURE_STATES) {
+    pruneAuthFailureStates(now);
+    if (authFailureStates.size >= MAX_AUTH_FAILURE_STATES) {
+      // Preserve active bans. At capacity, new untracked IPs fail open until
+      // space is reclaimed; the map remains bounded and current bans survive.
+      const oldestUnbanned = [...authFailureStates].find(([, existing]) => existing.bannedUntil <= now);
+      if (oldestUnbanned) authFailureStates.delete(oldestUnbanned[0]);
+      else return;
+    }
   }
   authFailureStates.set(ip, state);
 }

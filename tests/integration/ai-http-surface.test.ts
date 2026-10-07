@@ -11,7 +11,7 @@ function createD1Stub() {
     prepare: (sql: string) => ({
       first: () => Promise.resolve(
         sql.includes('runtimeSchemaVersion')
-          ? { value: '20260816' }
+          ? { value: '20261007' }
           : ({ name: 'typecho_options' } as any),
       ),
       all: () => Promise.resolve({ results: [] }),
@@ -28,7 +28,7 @@ let d1Stub = createD1Stub();
 
 vi.mock('@/db', async () => {
   const actual = await vi.importActual<typeof import('@/db')>('@/db');
-  return { ...actual, getDb: () => testDb, schema: actual.schema };
+  return { ...actual, getDb: () => testDb, getPrimaryDb: () => testDb, schema: actual.schema };
 });
 
 vi.mock('cloudflare:workers', () => ({
@@ -40,6 +40,7 @@ vi.mock('cloudflare:workers', () => ({
 }));
 
 import { schema } from '@/db';
+import { eq } from 'drizzle-orm';
 import { resetCacheVersionMemo } from '@/lib/cache';
 import { resetOptionsSnapshot } from '@/lib/options';
 import { advanceOptionsSnapshotGeneration } from '@/lib/options-snapshot-generation';
@@ -113,6 +114,48 @@ describe('AI plugin HTTP surface', () => {
     expect(response.status).toBe(200);
     const body = await response.json() as { data: Array<{ id: string }> };
     expect(body.data.map(entry => entry.id)).toEqual(['chat']);
+  });
+
+  it('rejects a revoked bearer token despite a warm options snapshot', async () => {
+    const nextConfig = {
+      ...AI_CONFIG,
+      http: { ...AI_CONFIG.http, tokens: [{ id: 'replacement', token: 'replacement-token-1234' }] },
+    };
+    await testDb.update(schema.options)
+      .set({ value: JSON.stringify(nextConfig) })
+      .where(eq(schema.options.name, 'plugin:typecho-plugin-ai'));
+
+    try {
+      const rejected = await call('/ai/v1/models', {
+        headers: { authorization: `Bearer ${ACCESS_TOKEN}` },
+      });
+      expect(rejected.status).toBe(401);
+
+      const accepted = await call('/ai/v1/models', {
+        headers: { authorization: 'Bearer replacement-token-1234' },
+      });
+      expect(accepted.status).toBe(200);
+    } finally {
+      await testDb.update(schema.options)
+        .set({ value: JSON.stringify(AI_CONFIG) })
+        .where(eq(schema.options.name, 'plugin:typecho-plugin-ai'));
+    }
+  });
+
+  it('stops an authenticated plugin route when the plugin is disabled in D1', async () => {
+    await testDb.update(schema.options)
+      .set({ value: '[]' })
+      .where(eq(schema.options.name, 'activatedPlugins'));
+    try {
+      const response = await call('/ai/v1/models', {
+        headers: { authorization: `Bearer ${ACCESS_TOKEN}` },
+      });
+      expect(response.status).not.toBe(200);
+    } finally {
+      await testDb.update(schema.options)
+        .set({ value: JSON.stringify(['typecho-plugin-ai']) })
+        .where(eq(schema.options.name, 'activatedPlugins'));
+    }
   });
 
   it('proxies a chat completion through the capability', async () => {

@@ -37,6 +37,17 @@ async function addComment(created: number, parent = 0) {
 }
 
 describe('loadCommentPage', () => {
+  it('evicts old root counts when more than 200 fresh entries are written', async () => {
+    const batch = vi.spyOn(db, 'batch');
+    for (let cid = 1; cid <= 201; cid++) {
+      await loadCommentPage(db as any, cid, options(), 'https://example.com/post', 0);
+    }
+    batch.mockClear();
+    await loadCommentPage(db as any, 1, options(), 'https://example.com/post', 0);
+    expect(batch).toHaveBeenCalledOnce();
+    batch.mockRestore();
+  });
+
   it('keeps the legacy full result when pagination is disabled', async () => {
     await addComment(1);
     await addComment(2);

@@ -91,12 +91,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
   }
 
   if (action === 'update' && uid) {
-    const [[existing], [existingMail], adminCounts] = await db.batch([
+    const [[existing], [existingMail]] = await db.batch([
       db.select().from(schema.users).where(eq(schema.users.uid, uid)).limit(1),
       db.select({ uid: schema.users.uid }).from(schema.users)
         .where(and(eq(schema.users.mail, mail), ne(schema.users.uid, uid))).limit(1),
-      db.select({ count: sql<number>`count(*)` }).from(schema.users)
-        .where(eq(schema.users.group, 'administrator')),
     ]);
     if (!existing) {
       return error(404, 'admin.user.notFound', {}, 'The user does not exist.');
@@ -111,10 +109,6 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     if (existingMail) {
       return error(409, 'admin.user.emailTaken', {}, 'This email address is already in use.');
-    }
-
-    if (existing.group === 'administrator' && group !== 'administrator' && (adminCounts[0]?.count || 0) <= 1) {
-      return error(400, 'admin.user.lastAdmin', {}, 'The last administrator cannot be demoted.');
     }
 
     let normalizedUrl: string | null = null;
@@ -143,7 +137,17 @@ export const POST: APIRoute = async ({ request, locals }) => {
       updateData.authCode = generateRandomString(32);
     }
 
-    await db.update(schema.users).set(updateData).where(eq(schema.users.uid, uid));
+    // Count at the write boundary: two administrators cannot both demote
+    // themselves after reading the same earlier count.
+    const [updated] = await db.update(schema.users).set(updateData).where(and(
+      eq(schema.users.uid, uid),
+      group !== 'administrator'
+        ? sql`(${schema.users.group} IS NOT 'administrator' OR (SELECT COUNT(*) FROM ${schema.users} WHERE ${schema.users.group} = 'administrator') > 1)`
+        : undefined,
+    )).returning({ uid: schema.users.uid });
+    if (!updated) {
+      return error(400, 'admin.user.lastAdmin', {}, 'The last administrator cannot be demoted.');
+    }
 
     return new Response(null, {
       status: 302,

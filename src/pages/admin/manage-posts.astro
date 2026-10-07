@@ -16,7 +16,6 @@ const authCheck = requirePermission(ctx, 'contributor');
 if (authCheck) return authCheck;
 
 const { db, options, urls, user, csrfToken } = ctx;
-const isAdmin = hasPermission(user!.group || 'visitor', 'administrator');
 const isEditor = hasPermission(user!.group || 'visitor', 'editor');
 
 const page = parsePageNumber(Astro.url.searchParams.get('page'));
@@ -31,7 +30,7 @@ const conditions: any[] = [
   sql`${schema.contents.type} IN ('post', 'post_draft')`,
 ];
 
-if (!isAdmin) {
+if (!isEditor) {
   conditions.push(eq(schema.contents.authorId, user!.uid));
 } else if (requestedUid) {
   conditions.push(eq(schema.contents.authorId, requestedUid));
@@ -80,9 +79,9 @@ const [countResult, posts, allCategories, draftCount, waitingCount] = await db.b
     .where(eq(schema.metas.type, 'category'))
     .orderBy(schema.metas.order),
   db.select({ count: sql<number>`count(*)` }).from(schema.contents)
-    .where(and(eq(schema.contents.type, 'post_draft'), ...(!isAdmin ? [eq(schema.contents.authorId, user!.uid)] : []))),
+    .where(and(eq(schema.contents.type, 'post_draft'), ...(!isEditor ? [eq(schema.contents.authorId, user!.uid)] : []))),
   db.select({ count: sql<number>`count(*)` }).from(schema.contents)
-    .where(and(eq(schema.contents.type, 'post'), eq(schema.contents.status, 'waiting'), ...(!isAdmin ? [eq(schema.contents.authorId, user!.uid)] : []))),
+    .where(and(eq(schema.contents.type, 'post'), eq(schema.contents.status, 'waiting'), ...(!isEditor ? [eq(schema.contents.authorId, user!.uid)] : []))),
 ]);
 const totalPosts = Number(countResult?.[0]?.count ?? 0);
 const totalPages = Math.max(1, Math.ceil(totalPosts / pageSize));

@@ -58,11 +58,12 @@ export function resetIsolateBoot(): void {
 // runtime password-reset upgrade or generated index set changes. A stable
 // database needs one indexed point lookup per cold isolate instead of probing
 // every table, column and index.
-const RUNTIME_SCHEMA_VERSION = '20260816';
+const RUNTIME_SCHEMA_VERSION = '20261007';
 const RUNTIME_SCHEMA_VERSION_KEY = 'runtimeSchemaVersion';
 const METAS_TYPE_SLUG_INDEX = 'typecho_metas_type_slug';
 const OPTIONS_USER_NAME_INDEX = 'typecho_options_user_name';
 const OPTIONS_NAME_USER_INDEX_LEGACY = 'typecho_options_name_user';
+const CONTENTS_SLUG_UNIQUE_INDEX = 'typecho_contents_slug_unique';
 
 export async function ensureDatabaseReady(
   d1: D1Database,
@@ -296,6 +297,12 @@ async function ensureIndexesReady(d1: D1Database): Promise<boolean> {
       allOk = false;
     }
 
+    // Normalize old non-revision slug collisions before creating the partial
+    // unique index. Revisions intentionally remain free to reuse their parent.
+    if (!(await ensureContentsSlugUnique(d1))) {
+      allOk = false;
+    }
+
     // Reorder options unique index to (user, name) so WHERE user = ? can use
     // the leftmost prefix. Drop the legacy (name, user) index of the old name.
     if (!(await ensureOptionsUserNameUnique(d1))) {
@@ -304,6 +311,7 @@ async function ensureIndexesReady(d1: D1Database): Promise<boolean> {
 
     for (const sql of indexStatements) {
       if (sql.includes(METAS_TYPE_SLUG_INDEX)) continue;
+      if (sql.includes(CONTENTS_SLUG_UNIQUE_INDEX)) continue;
       if (sql.includes(OPTIONS_USER_NAME_INDEX)) continue;
       try {
         await d1.prepare(sql).run();
@@ -324,6 +332,65 @@ async function ensureIndexesReady(d1: D1Database): Promise<boolean> {
     return await pending;
   } finally {
     if (state.indexEnsurePending === pending) state.indexEnsurePending = undefined;
+  }
+}
+
+/**
+ * Keep the lowest cid's legacy slug, then move later collisions to a stable
+ * `<slug>-<cid>` value. If that value is already used, append a deterministic
+ * numeric discriminator rather than overwriting another content URL.
+ */
+async function ensureContentsSlugUnique(d1: D1Database): Promise<boolean> {
+  try {
+    const existing = await d1.prepare(
+      "SELECT sql FROM sqlite_master WHERE type='index' AND name=?",
+    ).bind(CONTENTS_SLUG_UNIQUE_INDEX).first<{ sql: string | null }>();
+    const normalizedSql = (existing?.sql ?? '').replace(/[\s`"\[\]]/g, '').toLowerCase();
+    if (normalizedSql.includes('createuniqueindex') &&
+      normalizedSql.includes("wheretypeisnot'revision'andslugisnotnull")) {
+      return true;
+    }
+
+    const result = await d1.prepare(
+      "SELECT cid, slug FROM typecho_contents " +
+      "WHERE slug IS NOT NULL AND type IS NOT 'revision' ORDER BY cid ASC",
+    ).all<{ cid: number; slug: string }>();
+    const rows = result.results ?? [];
+    const used = new Set(rows.map(row => row.slug));
+    const seen = new Set<string>();
+    const repairs: D1PreparedStatement[] = [];
+
+    for (const row of rows) {
+      if (!seen.has(row.slug)) {
+        seen.add(row.slug);
+        continue;
+      }
+
+      const base = `${row.slug}-${row.cid}`;
+      let candidate = base;
+      let discriminator = 2;
+      while (used.has(candidate)) {
+        candidate = `${base}-${discriminator++}`;
+      }
+      used.add(candidate);
+      repairs.push(d1.prepare('UPDATE typecho_contents SET slug=? WHERE cid=?').bind(candidate, row.cid));
+    }
+
+    const createIndex =
+      `CREATE UNIQUE INDEX ${CONTENTS_SLUG_UNIQUE_INDEX} ON typecho_contents (slug) ` +
+      "WHERE type IS NOT 'revision' AND slug IS NOT NULL";
+    await d1.batch([
+      ...repairs,
+      d1.prepare(`DROP INDEX IF EXISTS ${CONTENTS_SLUG_UNIQUE_INDEX}`),
+      d1.prepare(createIndex),
+    ]);
+    return true;
+  } catch (error) {
+    console.warn(
+      '[isolate-boot] content slug unique index failed:',
+      error instanceof Error ? error.message : String(error),
+    );
+    return false;
   }
 }
 
@@ -381,9 +448,19 @@ async function ensureMetasTypeSlugUnique(d1: D1Database): Promise<boolean> {
       return true;
     }
 
-    // Remap relationships from duplicate metas onto the keeper (MIN mid),
-    // collapse duplicate (cid, mid) pairs, then drop duplicate meta rows.
+    // Collapse relationships by their *destination* before remapping. An
+    // UPDATE first would violate the existing UNIQUE (cid, mid) index when
+    // a content row already references both the keeper and a duplicate.
     await d1.batch([
+      d1.prepare(
+        'DELETE FROM typecho_relationships WHERE rowid NOT IN (' +
+        'SELECT MIN(r.rowid) FROM typecho_relationships AS r ' +
+        'LEFT JOIN typecho_metas AS m ON m.mid = r.mid ' +
+        'GROUP BY r.cid, COALESCE((' +
+        'SELECT MIN(keeper.mid) FROM typecho_metas AS keeper ' +
+        'WHERE keeper.type = m.type ' +
+        "AND IFNULL(keeper.slug, '') = IFNULL(m.slug, '')), r.mid))",
+      ),
       d1.prepare(
         'UPDATE typecho_relationships SET mid = (' +
         'SELECT MIN(keeper.mid) FROM typecho_metas AS keeper ' +
@@ -403,8 +480,32 @@ async function ensureMetasTypeSlugUnique(d1: D1Database): Promise<boolean> {
         'SELECT MIN(rowid) FROM typecho_relationships GROUP BY cid, mid)',
       ),
       d1.prepare(
+        'UPDATE typecho_options SET value = CAST((' +
+        'SELECT MIN(keeper.mid) FROM typecho_metas AS keeper ' +
+        'INNER JOIN typecho_metas AS loser ON loser.mid = CAST(typecho_options.value AS INTEGER) ' +
+        "WHERE keeper.type = 'category' AND loser.type = 'category' " +
+        "AND IFNULL(keeper.slug, '') = IFNULL(loser.slug, '')) AS TEXT) " +
+        "WHERE name = 'defaultCategory' AND user = 0 AND EXISTS (" +
+        'SELECT 1 FROM typecho_metas WHERE mid = CAST(typecho_options.value AS INTEGER) ' +
+        "AND type = 'category')",
+      ),
+      d1.prepare(
+        'UPDATE typecho_metas SET parent = (' +
+        'SELECT MIN(keeper.mid) FROM typecho_metas AS keeper ' +
+        'INNER JOIN typecho_metas AS loser ON loser.mid = typecho_metas.parent ' +
+        'WHERE keeper.type = loser.type ' +
+        "AND IFNULL(keeper.slug, '') = IFNULL(loser.slug, '')) " +
+        'WHERE parent IN (SELECT mid FROM typecho_metas)',
+      ),
+      d1.prepare(
         'DELETE FROM typecho_metas WHERE mid NOT IN (' +
         "SELECT MIN(mid) FROM typecho_metas GROUP BY type, IFNULL(slug, ''))",
+      ),
+      d1.prepare(
+        'UPDATE typecho_metas SET count = (' +
+        'SELECT COUNT(*) FROM typecho_relationships AS r ' +
+        'INNER JOIN typecho_contents AS c ON c.cid = r.cid ' +
+        "WHERE r.mid = typecho_metas.mid AND c.type <> 'revision')",
       ),
       d1.prepare(`DROP INDEX IF EXISTS ${METAS_TYPE_SLUG_INDEX}`),
       d1.prepare(

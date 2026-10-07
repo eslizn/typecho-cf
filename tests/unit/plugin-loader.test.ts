@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -29,6 +29,29 @@ afterEach(() => {
 });
 
 describe('plugin loader declared dependencies', () => {
+  it('keeps local and nested imports root-relative through a symlinked checkout', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'typecho-plugin-loader-'));
+    temporaryRoots.push(directory);
+    const root = join(directory, 'checkout');
+    const alias = join(directory, 'alias');
+    const local = 'typecho-plugin-local';
+    const nested = 'typecho-plugin-nested';
+    writePlugin(join(root, 'src', 'plugins', local), local);
+    writePackage(join(root, 'src', 'plugins', local), {
+      name: local,
+      keywords: ['typecho', 'plugin'],
+      dependencies: { [nested]: '1.0.0' },
+    });
+    writePlugin(join(root, 'src', 'plugins', local, 'node_modules', nested), nested);
+    writePackage(root, { dependencies: { [local]: `file:src/plugins/${local}` } });
+    symlinkSync(root, alias, 'dir');
+    const plugins = discoverPlugins(alias);
+    expect(plugins.map(plugin => plugin.importPath)).toEqual([
+      `/src/plugins/${local}/index.ts`,
+      `/src/plugins/${local}/node_modules/${nested}/index.ts`,
+    ]);
+  });
+
   it('ignores a typecho plugin that is only present in node_modules', () => {
     const root = mkdtempSync(join(tmpdir(), 'typecho-plugin-loader-'));
     temporaryRoots.push(root);

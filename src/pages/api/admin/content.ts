@@ -4,12 +4,12 @@ import { type SiteOptions } from '@/lib/options';
 import { canManageResource } from '@/lib/auth';
 import { isAdminActionResponse, requireAdminAction } from '@/lib/admin-auth';
 import { normalizeSlug, readAdminFormOrError } from '@/lib/input';
-import { resolveUniqueContentSlug, resolveUniqueMetaSlug } from '@/lib/slug';
+import { resolveUniqueMetaSlug, writeWithUniqueContentSlug } from '@/lib/slug';
 import { applyFilter, doHook } from '@/lib/plugin';
 import { invalidateSiteCache } from '@/lib/cache';
 import { jsonError, jsonOk } from '@/lib/http';
 import { i18nMessage } from '@/lib/i18n';
-import { eq, and, sql, inArray } from 'drizzle-orm';
+import { eq, and, sql, inArray, type SQL } from 'drizzle-orm';
 import { validateFilteredContent, WriteFilterError } from '@/lib/write-filter';
 
 // Typecho convention: visibility dropdown maps to db status column.
@@ -26,8 +26,11 @@ const VISIBILITY_TO_STATUS: Record<string, string> = {
  * Save custom fields for a content item.
  * Handles the field[name], fieldNames[], fieldTypes[] form pattern from Typecho.
  */
-function buildCustomFieldStatements(db: any, cid: number, formData: FormData): any[] {
-  const statements = [db.delete(schema.fields).where(eq(schema.fields.cid, cid))];
+function buildCustomFieldStatements(db: any, cid: number | SQL, formData: FormData): any[] {
+  const cidCondition = typeof cid === 'number'
+    ? eq(schema.fields.cid, cid)
+    : sql`${schema.fields.cid} = ${cid}`;
+  const statements = [db.delete(schema.fields).where(cidCondition)];
   const fieldNames = formData.getAll('fieldNames[]').map((v: any) => v.toString().trim()).filter(Boolean);
   for (const name of fieldNames) {
     const type = formData.get(`fieldTypes[${name}]`)?.toString() || 'str';
@@ -55,77 +58,137 @@ function parseTagNames(tags: string): string[] {
   return [...new Set(tags.split(',').map((t) => t.trim()).filter(Boolean))];
 }
 
-function hookNameForType(type: 'post' | 'page'): 'post:write' | 'page:write' {
-  return type === 'page' ? 'page:write' : 'post:write';
+interface TagPlan {
+  name: string;
+  slug: string;
 }
 
-async function attachTags(db: any, cid: number, tags: string, count = true) {
-  const tagNames = parseTagNames(tags);
-  if (tagNames.length === 0) return;
+async function prepareTagPlan(db: any, tags: string): Promise<TagPlan[]> {
+  const desired = [...new Map(parseTagNames(tags).map((name) => {
+    const slug = normalizeSlug(name, 'tag');
+    return [slug, { name, slug }] as const;
+  })).values()];
+  if (desired.length === 0) return [];
 
-  const desired = tagNames.map((tagName) => ({
-    name: tagName,
-    slug: normalizeSlug(tagName, 'tag'),
-  }));
-  const slugs = [...new Set(desired.map((t) => t.slug))];
-
-  const existingTags = await db
-    .select({ mid: schema.metas.mid, slug: schema.metas.slug, name: schema.metas.name })
+  const slugs = desired.map((tag) => tag.slug);
+  const existing = await db
+    .select({ slug: schema.metas.slug })
     .from(schema.metas)
     .where(and(
       eq(schema.metas.type, 'tag'),
-      sql`${schema.metas.slug} IN (${sql.join(slugs.map((s) => sql`${s}`), sql`, `)})`,
+      sql`${schema.metas.slug} IN (${sql.join(slugs.map((slug) => sql`${slug}`), sql`, `)})`,
     ));
-  const tagBySlug = new Map<string, { mid: number; slug: string; name: string | null }>(
-    existingTags.map((row: { mid: number; slug: string; name: string | null }) => [row.slug, row]),
-  );
+  const existingSlugs = new Set(existing.map((row: { slug: string | null }) => row.slug));
 
+  const plan: TagPlan[] = [];
   for (const tag of desired) {
-    if (tagBySlug.has(tag.slug)) continue;
-    const uniqueTagSlug = await resolveUniqueMetaSlug(db, tag.slug, 'tag', 0, tag.name);
-    try {
-      const inserted = await db.insert(schema.metas).values({
-        name: tag.name,
-        slug: uniqueTagSlug,
-        type: 'tag',
-        count: 0,
-      }).returning({ mid: schema.metas.mid, slug: schema.metas.slug, name: schema.metas.name });
-      if (inserted[0]) tagBySlug.set(inserted[0].slug, inserted[0]);
-    } catch {
-      // Concurrent create of the same (type, slug) — re-read the winner.
-      const [existing] = await db
-        .select({ mid: schema.metas.mid, slug: schema.metas.slug, name: schema.metas.name })
-        .from(schema.metas)
-        .where(and(eq(schema.metas.type, 'tag'), eq(schema.metas.slug, uniqueTagSlug)))
-        .limit(1);
-      if (existing) tagBySlug.set(existing.slug, existing);
-    }
+    plan.push({
+      ...tag,
+      slug: existingSlugs.has(tag.slug)
+        ? tag.slug
+        : await resolveUniqueMetaSlug(db, tag.slug, 'tag', 0, tag.name),
+    });
   }
+  return plan;
+}
 
-  const mids = [...new Set(
-    desired
-      .map((tag) => tagBySlug.get(tag.slug)?.mid)
-      .filter((mid): mid is number => typeof mid === 'number'),
-  )];
-  if (mids.length === 0) return;
+function buildTagMetaStatements(db: any, tagPlan: TagPlan[]): any[] {
+  if (tagPlan.length === 0) return [];
+  return [db.insert(schema.metas).values(tagPlan.map((tag) => ({
+    name: tag.name,
+    slug: tag.slug,
+    type: 'tag',
+    count: 0,
+  }))).onConflictDoNothing()];
+}
 
-  const existingRels = await db
-    .select({ mid: schema.relationships.mid })
-    .from(schema.relationships)
+function buildTagRelationshipStatements(db: any, cid: number | SQL, tagPlan: TagPlan[]): any[] {
+  if (tagPlan.length === 0) return [];
+  return [db.insert(schema.relationships).values(tagPlan.map((tag) => ({
+    cid,
+    mid: sql<number>`(SELECT ${schema.metas.mid} FROM ${schema.metas} WHERE ${schema.metas.type} = 'tag' AND ${schema.metas.slug} = ${tag.slug})`,
+  }))).onConflictDoNothing()];
+}
+
+/**
+ * Recalculate counts for the live old relationship set plus the requested new
+ * set. This runs before relationship replacement in the same atomic batch:
+ * its correlated count excludes this content and adds its requested links,
+ * avoiding any dependence on an earlier request snapshot.
+ */
+function buildContentMetaCountStatement(
+  db: any,
+  cid: number,
+  categoryIds: number[],
+  tagPlan: TagPlan[],
+  resultingType: string,
+): any | null {
+  const newTargets: SQL[] = [];
+  if (categoryIds.length > 0) {
+    newTargets.push(sql`${schema.metas.mid} IN (${sql.join(categoryIds.map((mid) => sql`${mid}`), sql`, `)})`);
+  }
+  if (tagPlan.length > 0) {
+    newTargets.push(and(
+      eq(schema.metas.type, 'tag'),
+      inArray(schema.metas.slug, tagPlan.map((tag) => tag.slug)),
+    )!);
+  }
+  const newTargetCondition = newTargets.length > 0
+    ? sql`(${sql.join(newTargets, sql` OR `)})`
+    : sql`0 = 1`;
+  const oldTargetCondition = sql`${schema.metas.mid} IN (
+    SELECT ${schema.relationships.mid}
+    FROM ${schema.relationships}
+    WHERE ${schema.relationships.cid} = ${cid}
+  )`;
+  const contributes = resultingType === 'revision'
+    ? sql`0`
+    : sql`CASE WHEN ${newTargetCondition} THEN 1 ELSE 0 END`;
+
+  return db.update(schema.metas)
+    .set({
+      count: sql`(
+        SELECT COUNT(*)
+        FROM ${schema.relationships}
+        INNER JOIN ${schema.contents} ON ${schema.relationships.cid} = ${schema.contents.cid}
+        WHERE ${schema.relationships.mid} = ${schema.metas.mid}
+          AND ${schema.relationships.cid} <> ${cid}
+          AND ${schema.contents.type} <> 'revision'
+      ) + ${contributes}`,
+    })
     .where(and(
-      eq(schema.relationships.cid, cid),
-      sql`${schema.relationships.mid} IN (${sql.join(mids.map((id) => sql`${id}`), sql`, `)})`,
+      inArray(schema.metas.type, ['category', 'tag']),
+      sql`(${oldTargetCondition} OR ${newTargetCondition})`,
     ));
-  const linked = new Set(existingRels.map((row: { mid: number }) => row.mid));
-  const toLink = mids.filter((mid) => !linked.has(mid));
-  if (toLink.length === 0) return;
+}
 
-  await db.batch([
-    ...toLink.map((mid) => db.insert(schema.relationships).values({ cid, mid })),
-    ...(count ? toLink.map((mid) => db.update(schema.metas)
-      .set({ count: sql`${schema.metas.count} + 1` })
-      .where(eq(schema.metas.mid, mid))) : []),
-  ]);
+function isContentPrimaryKeyConflict(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    if (current instanceof Error && /unique constraint failed:\s*[`"']?typecho_contents\.cid\b/i.test(current.message)) {
+      return true;
+    }
+    if (typeof current !== 'object') break;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
+async function getNextContentId(db: any): Promise<number> {
+  const [row] = await db
+    .select({ nextId: sql<number>`max(
+      coalesce((SELECT seq FROM sqlite_sequence WHERE name = 'typecho_contents'), 0),
+      coalesce(max(${schema.contents.cid}), 0)
+    ) + 1` })
+    .from(schema.contents);
+  if (!row?.nextId) throw new Error('content-id-allocation-failed');
+  return Number(row.nextId);
+}
+
+function hookNameForType(type: 'post' | 'page'): 'post:write' | 'page:write' {
+  return type === 'page' ? 'page:write' : 'post:write';
 }
 
 async function purgeContentAndRelatedCache(
@@ -224,7 +287,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     // New draft: create a post_draft row
     const inserted = await db.insert(schema.contents).values({
       title,
-      slug: `autosave-${Date.now()}`,
+      slug: `autosave-${crypto.randomUUID()}`,
       created,
       modified: now,
       text,
@@ -282,37 +345,79 @@ export const POST: APIRoute = async ({ request, locals }) => {
       throw error;
     }
 
-    const insertData = {
-      ...contentData,
-      slug: (contentData.slug as string) || `temp-${Date.now().toString(36)}`,
-    };
-    const result = await db.insert(schema.contents).values(insertData as any).returning({ cid: schema.contents.cid });
+    const tagPlan = await prepareTagPlan(db, tags);
+    const desiredSlug = contentData.slug as string;
+    let newCid = 0;
+    let finalSlug = '';
+    // CID is part of the established collision suffix (`slug-<cid>`), so
+    // reserve the next candidate before preparing the complete write batch.
+    // A concurrent creator can still win that CID; retry only that narrowly
+    // identified primary-key collision with a fresh candidate.
+    for (let idAttempt = 0; idAttempt < 4; idAttempt++) {
+      const candidateCid = await getNextContentId(db);
+      try {
+        const created = await writeWithUniqueContentSlug(
+          db,
+          desiredSlug || String(candidateCid),
+          candidateCid,
+          async (resolvedSlug) => {
+            const createStatements: any[] = [
+              db.insert(schema.contents).values({
+                ...contentData,
+                cid: candidateCid,
+                slug: resolvedSlug,
+              } as any).returning({ cid: schema.contents.cid }),
+              ...buildCustomFieldStatements(db, candidateCid, formData),
+            ];
+            if (tagPlan.length > 0) {
+              createStatements.push(db.insert(schema.metas).values(tagPlan.map((tag) => ({
+                name: tag.name,
+                slug: tag.slug,
+                type: 'tag',
+                count: 0,
+              }))).onConflictDoNothing());
+            }
+            if (categoryIds.length > 0) {
+              createStatements.push(
+                db.insert(schema.relationships).values(
+                  categoryIds.map((mid) => ({ cid: candidateCid, mid })),
+                ),
+                db.update(schema.metas)
+                  .set({ count: sql`${schema.metas.count} + 1` })
+                  .where(inArray(schema.metas.mid, categoryIds)),
+              );
+            }
+            if (tagPlan.length > 0) {
+              createStatements.push(
+                db.insert(schema.relationships).values(tagPlan.map((tag) => ({
+                  cid: candidateCid,
+                  mid: sql<number>`(SELECT ${schema.metas.mid} FROM ${schema.metas} WHERE ${schema.metas.type} = 'tag' AND ${schema.metas.slug} = ${tag.slug})`,
+                }))).onConflictDoNothing(),
+                db.update(schema.metas)
+                  .set({ count: sql`${schema.metas.count} + 1` })
+                  .where(and(
+                    eq(schema.metas.type, 'tag'),
+                    inArray(schema.metas.slug, tagPlan.map((tag) => tag.slug)),
+                  )),
+              );
+            }
 
-    const newCid = result[0]?.cid;
+            const [inserted] = await db.batch(createStatements as [any, ...any[]]);
+            const insertedCid = (inserted as Array<{ cid: number }> | undefined)?.[0]?.cid;
+            if (!insertedCid) throw new Error('content-create-batch-returned-no-id');
+            return { cid: insertedCid, slug: resolvedSlug };
+          },
+          String(candidateCid),
+        );
+        newCid = created.cid;
+        finalSlug = created.slug;
+        break;
+      } catch (writeError) {
+        if (!isContentPrimaryKeyConflict(writeError) || idAttempt === 3) throw writeError;
+      }
+    }
     if (!newCid) return error(500, 'admin.content.createFailed', {}, 'Content could not be created.');
-
-    const finalSlug = await resolveUniqueContentSlug(db, (contentData.slug as string) || String(newCid), newCid);
     contentData.slug = finalSlug;
-    const createStatements: any[] = [
-      db.update(schema.contents).set({ slug: finalSlug }).where(eq(schema.contents.cid, newCid)),
-      ...buildCustomFieldStatements(db, newCid, formData),
-    ];
-    if (categoryIds.length > 0) {
-      createStatements.push(
-        db.insert(schema.relationships).values(
-          categoryIds.map((mid) => ({ cid: newCid, mid })),
-        ),
-        db.update(schema.metas)
-        .set({ count: sql`${schema.metas.count} + 1` })
-        .where(sql`${schema.metas.mid} IN (${sql.join(categoryIds.map(id => sql`${id}`), sql`, `)})`),
-      );
-    }
-    await db.batch(createStatements as [any, ...any[]]);
-
-    // Add tags
-    if (tags) {
-      await attachTags(db, newCid, tags);
-    }
 
     // Trigger post/page finish hooks
     const finishData = { ...contentData, cid: newCid };
@@ -386,23 +491,38 @@ export const POST: APIRoute = async ({ request, locals }) => {
         if (error instanceof WriteFilterError) return jsonError(400, error.message);
         throw error;
       }
-      const revisionCid = revision?.cid ?? (await db.insert(schema.contents).values(revisionData as any)
-        .returning({ cid: schema.contents.cid }))[0]?.cid;
-      if (!revisionCid) return error(500, 'admin.content.revisionSaveFailed', {}, 'The revision could not be saved.');
-      if (revision) {
-        await db.update(schema.contents).set(revisionData as any)
-          .where(eq(schema.contents.cid, revisionCid));
-      }
+      const tagPlan = await prepareTagPlan(db, tags);
+      const temporarySlug = revision ? null : `revision-${crypto.randomUUID()}`;
+      const revisionCidRef: number | SQL = revision?.cid
+        ?? sql<number>`(SELECT ${schema.contents.cid} FROM ${schema.contents} WHERE ${schema.contents.slug} = ${temporarySlug} AND ${schema.contents.type} = 'revision' AND ${schema.contents.parent} = ${cid})`;
+      const revisionWriteData = temporarySlug
+        ? { ...revisionData, slug: temporarySlug }
+        : revisionData;
       const revisionStatements: any[] = [
-        ...buildCustomFieldStatements(db, revisionCid, formData),
-        db.delete(schema.relationships).where(eq(schema.relationships.cid, revisionCid)),
+        revision
+          ? db.update(schema.contents).set(revisionWriteData as any)
+            .where(eq(schema.contents.cid, revision.cid)).returning({ cid: schema.contents.cid })
+          : db.insert(schema.contents).values(revisionWriteData as any)
+            .returning({ cid: schema.contents.cid }),
+        ...buildCustomFieldStatements(db, revisionCidRef, formData),
+        ...buildTagMetaStatements(db, tagPlan),
+        typeof revisionCidRef === 'number'
+          ? db.delete(schema.relationships).where(eq(schema.relationships.cid, revisionCidRef))
+          : db.delete(schema.relationships).where(sql`${schema.relationships.cid} = ${revisionCidRef}`),
       ];
       if (categoryIds.length) {
         revisionStatements.push(db.insert(schema.relationships).values(
-          categoryIds.map(mid => ({ cid: revisionCid, mid }))));
+          categoryIds.map(mid => ({ cid: revisionCidRef, mid }))));
       }
-      await db.batch(revisionStatements as [any, ...any[]]);
-      await attachTags(db, revisionCid, tags, false);
+      revisionStatements.push(...buildTagRelationshipStatements(db, revisionCidRef, tagPlan));
+      if (temporarySlug) {
+        revisionStatements.push(db.update(schema.contents)
+          .set({ slug: String(revisionData.slug || existing.slug || cid) })
+          .where(eq(schema.contents.slug, temporarySlug)));
+      }
+      const [savedRevisionRows] = await db.batch(revisionStatements as [any, ...any[]]);
+      const revisionCid = revision?.cid ?? (savedRevisionRows as Array<{ cid: number }> | undefined)?.[0]?.cid;
+      if (!revisionCid) return error(500, 'admin.content.revisionSaveFailed', {}, 'The revision could not be saved.');
       await doHook(pluginCtx, existingBaseType === 'page' ? 'page:afterSave' : 'post:afterSave', {
         ...revisionData, cid: revisionCid, parent: cid,
       }, { capabilityRuntime: pluginCtx.capabilityRuntime });
@@ -437,64 +557,57 @@ export const POST: APIRoute = async ({ request, locals }) => {
       if (error instanceof WriteFilterError) return jsonError(400, error.message);
       throw error;
     }
-    const finalSlug = await resolveUniqueContentSlug(db, contentData.slug as string || String(cid), cid);
-    contentData.slug = finalSlug;
-
-    // Update categories: remove old, add new. Snapshot old category/tag
-    // slugs first so we can purge their archive pages after the writes —
-    // otherwise a re-categorised post keeps showing up on its previous
-    // category page until the cacheVersion bumps invalidate everything.
-    const oldRelMetas = await db.select({
-      mid: schema.relationships.mid,
-    })
-      .from(schema.relationships)
-      .where(eq(schema.relationships.cid, cid));
-    const oldMids = oldRelMetas.map((r: any) => r.mid);
-
-    const updateStatements: any[] = [
-      db.update(schema.contents).set(contentData as any).where(eq(schema.contents.cid, cid)),
-      ...buildCustomFieldStatements(db, cid, formData),
-      db.delete(schema.relationships).where(eq(schema.relationships.cid, cid)),
-    ];
-
-    if (oldMids.length > 0) {
-      updateStatements.push(db.update(schema.metas)
-        .set({ count: sql`MAX(0, ${schema.metas.count} - 1)` })
-        .where(and(
-          sql`${schema.metas.mid} IN (${sql.join(oldMids.map(id => sql`${id}`), sql`, `)})`,
-          sql`${schema.metas.type} IN ('category', 'tag')`,
-        )));
-    }
-
-    if (categoryIds.length > 0) {
-      updateStatements.push(
-        db.insert(schema.relationships).values(
-          categoryIds.map((mid) => ({ cid, mid })),
-        ),
-        db.update(schema.metas)
-        .set({ count: sql`${schema.metas.count} + 1` })
-        .where(sql`${schema.metas.mid} IN (${sql.join(categoryIds.map(id => sql`${id}`), sql`, `)})`),
-      );
-    }
-    await db.batch(updateStatements as [any, ...any[]]);
-
-    // Add tags
-    if (tags) {
-      await attachTags(db, cid, tags);
-    }
-
-    // Publishing a parent promotes its active revision and removes the
-    // revision row after the canonical content has been written.
+    const tagPlan = await prepareTagPlan(db, tags);
+    // Read the active revision before the main write. Its removal can then
+    // share the same atomic publish batch as the parent update.
     const activeRevision = !isDraft
       ? await db.query.contents.findFirst({
         where: and(eq(schema.contents.parent, cid), eq(schema.contents.type, 'revision')),
       })
       : null;
-    if (activeRevision) {
-      await db.delete(schema.relationships).where(eq(schema.relationships.cid, activeRevision.cid));
-      await db.delete(schema.fields).where(eq(schema.fields.cid, activeRevision.cid));
-      await db.delete(schema.contents).where(eq(schema.contents.cid, activeRevision.cid));
+
+    await writeWithUniqueContentSlug(db, contentData.slug as string || String(cid), cid, async (finalSlug) => {
+      contentData.slug = finalSlug;
+      const updateStatements: any[] = [
+        db.update(schema.contents).set(contentData as any).where(eq(schema.contents.cid, cid)),
+        ...buildCustomFieldStatements(db, cid, formData),
+        ...buildTagMetaStatements(db, tagPlan),
+      ];
+      const countStatement = buildContentMetaCountStatement(
+        db,
+        cid,
+        categoryIds,
+        tagPlan,
+        String(contentData.type || ''),
+      );
+      if (countStatement) updateStatements.push(countStatement);
+      updateStatements.push(db.delete(schema.relationships).where(eq(schema.relationships.cid, cid)));
+
+      if (categoryIds.length > 0) {
+        updateStatements.push(db.insert(schema.relationships).values(
+          categoryIds.map((mid) => ({ cid, mid })),
+        ));
+      }
+      updateStatements.push(...buildTagRelationshipStatements(db, cid, tagPlan));
+      if (activeRevision) {
+        updateStatements.push(
+          db.delete(schema.relationships).where(eq(schema.relationships.cid, activeRevision.cid)),
+          db.delete(schema.fields).where(eq(schema.fields.cid, activeRevision.cid)),
+          db.delete(schema.contents).where(eq(schema.contents.cid, activeRevision.cid)),
+        );
+      }
+      await db.batch(updateStatements as [any, ...any[]]);
+    });
+
+    const finishData = { ...existing, ...contentData, cid };
+    if (!isDraft) {
+      await doHook(pluginCtx, existingBaseType === 'page' ? 'page:afterPublish' : 'post:afterPublish', finishData, {
+        capabilityRuntime: pluginCtx.capabilityRuntime,
+      });
     }
+    await doHook(pluginCtx, existingBaseType === 'page' ? 'page:afterSave' : 'post:afterSave', finishData, {
+      capabilityRuntime: pluginCtx.capabilityRuntime,
+    });
 
     await purgeContentAndRelatedCache(db, options, cid, {
       ...existing,
@@ -524,27 +637,38 @@ export const POST: APIRoute = async ({ request, locals }) => {
       capabilityRuntime: pluginCtx.capabilityRuntime,
     });
 
-    // Decrement meta counts before deleting relationships (single UPDATE
-    // over all mids linked to this content, restricted to category/tag
-    // metas since those are the only rows whose count column is meaningful).
-    const rels = await db.select({ mid: schema.relationships.mid })
-      .from(schema.relationships)
-      .where(eq(schema.relationships.cid, cid));
+    const revisions = await db.select({ cid: schema.contents.cid }).from(schema.contents)
+      .where(and(eq(schema.contents.type, 'revision'), eq(schema.contents.parent, cid)));
+    const deleteCids = [cid, ...revisions.map(revision => revision.cid)];
     const deleteStatements: any[] = [];
-    if (rels.length > 0) {
-      const mids = rels.map(r => r.mid);
-      deleteStatements.push(db.update(schema.metas)
-        .set({ count: sql`MAX(0, ${schema.metas.count} - 1)` })
-        .where(and(
-          sql`${schema.metas.mid} IN (${sql.join(mids.map(id => sql`${id}`), sql`, `)})`,
-          sql`${schema.metas.type} IN ('category', 'tag')`,
-        )));
-    }
+    // Compute final counters from current relationships, excluding the
+    // content and revision rows this atomic batch removes. The affected-mid
+    // subquery is live at execution time, so concurrent edits cannot leave a
+    // stale preflight decrement behind.
+    deleteStatements.push(db.update(schema.metas)
+      .set({
+        count: sql`(
+          SELECT COUNT(*)
+          FROM ${schema.relationships}
+          INNER JOIN ${schema.contents} ON ${schema.relationships.cid} = ${schema.contents.cid}
+          WHERE ${schema.relationships.mid} = ${schema.metas.mid}
+            AND ${schema.relationships.cid} NOT IN (${sql.join(deleteCids.map(id => sql`${id}`), sql`, `)})
+            AND ${schema.contents.type} <> 'revision'
+        )`,
+      })
+      .where(and(
+        inArray(schema.metas.type, ['category', 'tag']),
+        sql`${schema.metas.mid} IN (
+          SELECT ${schema.relationships.mid}
+          FROM ${schema.relationships}
+          WHERE ${schema.relationships.cid} IN (${sql.join(deleteCids.map(id => sql`${id}`), sql`, `)})
+        )`,
+      )));
     deleteStatements.push(
-      db.delete(schema.relationships).where(eq(schema.relationships.cid, cid)),
-      db.delete(schema.comments).where(eq(schema.comments.cid, cid)),
-      db.delete(schema.fields).where(eq(schema.fields.cid, cid)),
-      db.delete(schema.contents).where(eq(schema.contents.cid, cid)),
+      db.delete(schema.relationships).where(inArray(schema.relationships.cid, deleteCids)),
+      db.delete(schema.comments).where(inArray(schema.comments.cid, deleteCids)),
+      db.delete(schema.fields).where(inArray(schema.fields.cid, deleteCids)),
+      db.delete(schema.contents).where(inArray(schema.contents.cid, deleteCids)),
     );
     await db.batch(deleteStatements as [any, ...any[]]);
 

@@ -17,7 +17,7 @@ function createD1Stub(_db: TestDatabase) {
   const stmt = {
     first: (sql?: string) => Promise.resolve(
       typeof sql === 'string' && sql.includes('runtimeSchemaVersion')
-        ? { value: '20260816' }
+        ? { value: '20261007' }
         : { name: 'typecho_options' } as any,
     ),
     all: () => Promise.resolve({
@@ -37,7 +37,7 @@ function createD1Stub(_db: TestDatabase) {
       ...stmt,
       first: () => Promise.resolve(
         sql.includes('runtimeSchemaVersion')
-          ? { value: '20260816' }
+          ? { value: '20261007' }
           : { name: 'typecho_options' } as any,
       ),
       bind() { return this; },
@@ -53,7 +53,7 @@ let d1Stub: ReturnType<typeof createD1Stub>;
 
 vi.mock('@/db', async () => {
   const actual = await vi.importActual<typeof import('@/db')>('@/db');
-  return { ...actual, getDb: () => testDb, schema: actual.schema };
+  return { ...actual, getDb: () => testDb, getPrimaryDb: () => testDb, schema: actual.schema };
 });
 
 vi.mock('cloudflare:workers', () => ({

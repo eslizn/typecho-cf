@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -42,6 +42,6 @@ describe('client loader declared plugins', () => {
 
     expect(sources).toHaveLength(1);
     expect(sources[0].publicUrl).toBe(`/plugin-assets/${declaredName}/editor.js`);
-    expect(sources[0].sourcePath).toBe(join(root, 'src', 'plugins', declaredName, 'client', 'editor.ts'));
+    expect(sources[0].sourcePath).toBe(join(realpathSync(root), 'src', 'plugins', declaredName, 'client', 'editor.ts'));
   });
 });

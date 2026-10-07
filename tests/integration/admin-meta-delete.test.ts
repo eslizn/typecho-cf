@@ -42,10 +42,10 @@ async function seedDefaultCategory(mid?: number) {
   });
 }
 
-function buildDeleteRequest(mid: number, cookie: string) {
+function buildDeleteRequest(mid: number, cookie: string, type = 'category') {
   const body = new URLSearchParams();
   body.set('action', 'delete');
-  body.set('type', 'category');
+  body.set('type', type);
   body.append('mid[]', String(mid));
   return new Request('https://example.com/api/admin/meta', {
     method: 'POST',
@@ -142,5 +142,23 @@ describe('POST /api/admin/meta delete (G7-1)', () => {
     expect(res.status).toBe(302);
     const gone = await testDb.query.metas.findFirst({ where: eq(schema.metas.mid, orphanMid) });
     expect(gone).toBeFalsy();
+  });
+
+  it('cannot delete a default or in-use category through a tag request', async () => {
+    const admin = await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE });
+    const cookie = await makeAuthCookie(testDb, admin.uid, TEST_AUTH_CODE, TEST_SECRET);
+    const categories = await testDb.insert(schema.metas).values([
+      { name: 'Default', slug: 'protected-default', type: 'category' },
+      { name: 'Used', slug: 'protected-used', type: 'category' },
+    ]).returning();
+    await seedDefaultCategory(categories[0].mid);
+    await testDb.insert(schema.relationships).values({ cid: 123, mid: categories[1].mid });
+    for (const category of categories) {
+      const request = buildDeleteRequest(category.mid, cookie, 'tag');
+      const response = await POST({ request, locals: {}, url: new URL(request.url) } as any);
+      expect(response.status).toBe(302);
+    }
+    expect(await testDb.select().from(schema.metas)).toHaveLength(2);
+    expect(await testDb.select().from(schema.relationships)).toHaveLength(1);
   });
 });

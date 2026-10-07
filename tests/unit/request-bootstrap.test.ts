@@ -31,14 +31,13 @@ describe('resolveRequestTarget()', () => {
 });
 
 describe('finalizeRequestResponse()', () => {
-  it('applies common headers and tracks a cookie-free cache write', async () => {
+  it('applies common headers and tracks a public cache write', async () => {
     const waitUntil = vi.fn();
     const put = vi.spyOn(caches.default, 'put');
     const request = new Request('https://example.com/page/2/');
     const cacheKey = new Request('https://example.com/page/2/?v=1');
-    const response = await finalizeRequestResponse(new Response('ok', {
-      headers: { 'Set-Cookie': 'secret=value' },
-    }), { request, cacheKey, executionContext: { waitUntil } });
+    const response = await finalizeRequestResponse(new Response('ok'),
+      { request, cacheKey, executionContext: { waitUntil } });
 
     expect(response.headers.get('x-content-type-options')).toBe('nosniff');
     expect(put).toHaveBeenCalledOnce();
@@ -46,6 +45,39 @@ describe('finalizeRequestResponse()', () => {
     const cached = put.mock.calls[0][1];
     expect(cached.headers.get('set-cookie')).toBeNull();
     expect(cached.headers.get('vary')).toContain('Cookie');
+    put.mockRestore();
+  });
+
+  it('returns the rendered response when the cache backend rejects a write', async () => {
+    const put = vi.spyOn(caches.default, 'put').mockRejectedValueOnce(new Error('cache unavailable'));
+    try {
+      const response = await finalizeRequestResponse(new Response('rendered'), {
+        request: new Request('https://example.com/'),
+        cacheKey: new Request('https://example.com/'),
+      });
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe('rendered');
+    } finally {
+      put.mockRestore();
+    }
+  });
+
+  it.each<Record<string, string>>([
+    { 'Set-Cookie': 'visitor=one' },
+    { 'Cache-Control': 'private, max-age=60' },
+    { 'Cache-Control': 'public, no-store' },
+    { 'Cache-Control': 'no-cache' },
+    { Vary: '*' },
+  ])('does not share a visitor-specific or uncacheable response: %j', async (headers) => {
+    const put = vi.spyOn(caches.default, 'put');
+    const request = new Request('https://example.com/');
+    const response = await finalizeRequestResponse(new Response('visitor-specific HTML', { headers }), {
+      request,
+      cacheKey: request,
+    });
+    expect(await response.text()).toBe('visitor-specific HTML');
+    expect(response.headers.get('set-cookie')).toBe(headers['Set-Cookie'] ?? null);
+    expect(put).not.toHaveBeenCalled();
     put.mockRestore();
   });
 

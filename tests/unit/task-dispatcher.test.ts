@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTaskEnvelope } from '@/lib/tasks/envelope';
 import {
   dispatchTaskMessages,
-  TASK_LATE_HANDLER_GRACE_MS,
   type TaskMessageLike,
 } from '@/lib/tasks/dispatcher';
 import {
@@ -163,18 +162,25 @@ describe('task dispatcher', () => {
   });
 
   it('retries a task that exceeds its timeout', async () => {
+    let release!: () => void;
+    const lateCompletion = new Promise<void>(resolve => { release = resolve; });
     registerAsyncTask('plugin-a', {
       id: 'slow',
       timeoutSeconds: 0.01,
-      handler: async () => new Promise(() => undefined),
+      handler: async () => {
+        await lateCompletion;
+        return { status: 'success' as const };
+      },
     });
     const message = makeMessage(envelope('plugin-a', 'slow'));
     await dispatchTaskMessages([message], makeRuntime(['plugin-a']));
     expect(message.retry).toHaveBeenCalledTimes(1);
     expect(message.ack).not.toHaveBeenCalled();
+    release();
+    await flush();
   });
 
-  it('holds the same-task slot until a timed-out handler settles', async () => {
+  it('retries queued messages while retaining the timed-out handler task slot', async () => {
     let active = 0;
     let peak = 0;
     let release!: () => void;
@@ -202,42 +208,97 @@ describe('task dispatcher', () => {
 
     expect(first.retry).toHaveBeenCalledTimes(1);
     expect(second.ack).not.toHaveBeenCalled();
-    expect(second.retry).not.toHaveBeenCalled();
+    expect(second.retry).toHaveBeenCalledTimes(1);
     expect(active).toBe(1);
     expect(peak).toBe(1);
 
     release();
     await pending;
-    expect(second.ack).toHaveBeenCalledTimes(1);
     expect(active).toBe(0);
     expect(peak).toBe(1);
   });
 
-  it('does not let a non-cooperative timed-out handler block the batch forever', async () => {
-    vi.useFakeTimers();
+  it('prevents a later Queue batch from overlapping a non-cooperative timed-out handler', async () => {
     let calls = 0;
+    let release!: () => void;
+    const lateCompletion = new Promise<void>(resolve => { release = resolve; });
     registerAsyncTask('plugin-a', {
-      id: 'stuck-timeout',
+      id: 'cross-batch-late-timeout',
       concurrency: 1,
       timeoutSeconds: 0.01,
       handler: async () => {
         calls += 1;
-        if (calls === 1) return new Promise(() => undefined);
+        if (calls === 1) await lateCompletion;
         return { status: 'success' as const };
       },
     });
 
-    const first = makeMessage(envelope('plugin-a', 'stuck-timeout'));
-    const second = makeMessage(envelope('plugin-a', 'stuck-timeout'));
-    const pending = dispatchTaskMessages([first, second], makeRuntime(['plugin-a']));
-
-    await vi.advanceTimersByTimeAsync(10);
-    await vi.advanceTimersByTimeAsync(TASK_LATE_HANDLER_GRACE_MS);
-    await pending;
-
+    const first = makeMessage(envelope('plugin-a', 'cross-batch-late-timeout'));
+    await dispatchTaskMessages([first], makeRuntime(['plugin-a']));
     expect(first.retry).toHaveBeenCalledTimes(1);
-    expect(second.ack).toHaveBeenCalledTimes(1);
+
+    const second = makeMessage(envelope('plugin-a', 'cross-batch-late-timeout'));
+    await dispatchTaskMessages([second], makeRuntime(['plugin-a']));
+    expect(second.retry).toHaveBeenCalledTimes(1);
+    expect(second.ack).not.toHaveBeenCalled();
+    expect(calls).toBe(1);
+
+    release();
+    await flush();
+
+    const third = makeMessage(envelope('plugin-a', 'cross-batch-late-timeout'));
+    await dispatchTaskMessages([third], makeRuntime(['plugin-a']));
+    expect(third.ack).toHaveBeenCalledTimes(1);
     expect(calls).toBe(2);
+  });
+
+  it('counts late handlers against the isolate-wide in-flight limit', async () => {
+    let active = 0;
+    let release!: () => void;
+    const lateCompletion = new Promise<void>(resolve => { release = resolve; });
+    const messages: FakeMessage[] = [];
+    for (let index = 0; index < 16; index += 1) {
+      const taskId = `late-global-slot-${index}`;
+      registerAsyncTask('plugin-a', {
+        id: taskId,
+        concurrency: 1,
+        timeoutSeconds: 0.01,
+        handler: async () => {
+          active += 1;
+          await lateCompletion;
+          active -= 1;
+          return { status: 'success' as const };
+        },
+      });
+      messages.push(makeMessage(envelope('plugin-a', taskId)));
+    }
+    let extraCalls = 0;
+    registerAsyncTask('plugin-a', {
+      id: 'late-global-overflow',
+      handler: async () => {
+        extraCalls += 1;
+        return { status: 'success' as const };
+      },
+    });
+
+    try {
+      await dispatchTaskMessages(messages, makeRuntime(['plugin-a']));
+      expect(active).toBe(16);
+      expect(messages.every(message => message.retry.mock.calls.length === 1)).toBe(true);
+
+      const overflow = makeMessage(envelope('plugin-a', 'late-global-overflow'));
+      await dispatchTaskMessages([overflow], makeRuntime(['plugin-a']));
+      expect(overflow.retry).toHaveBeenCalledTimes(1);
+      expect(extraCalls).toBe(0);
+    } finally {
+      release();
+      await flush();
+    }
+
+    const afterRelease = makeMessage(envelope('plugin-a', 'late-global-overflow'));
+    await dispatchTaskMessages([afterRelease], makeRuntime(['plugin-a']));
+    expect(afterRelease.ack).toHaveBeenCalledTimes(1);
+    expect(extraCalls).toBe(1);
   });
 
   it('retries an explicit retry result with the requested delay', async () => {

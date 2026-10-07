@@ -1,4 +1,4 @@
-import { parseAttachmentMeta, parsePluginOption, resolveCapability, stripTypechoMarkers } from 'typecho/plugin-sdk';
+import { canManageResource, hasPermission, parseAttachmentMeta, parsePluginOption, resolveCapability, stripTypechoMarkers } from 'typecho/plugin-sdk';
 import type { AttachmentMeta, CapabilityRuntimeContext, I18n, PluginInitContext } from 'typecho/plugin-sdk';
 import type { Database } from 'typecho/db';
 import { schema } from 'typecho/db';
@@ -53,6 +53,11 @@ interface WriterPayload {
   body?: string;
   cid?: number | string;
   attachmentIds?: Array<number | string>;
+}
+
+interface WriterUser {
+  uid: number;
+  group?: string | null;
 }
 
 interface PluginActionResult {
@@ -569,8 +574,20 @@ async function loadAttachmentAssets(
   db: Database | undefined,
   cid: number,
   attachmentIds: number[],
+  user: WriterUser | undefined,
+  i18n?: I18n,
 ): Promise<ContentAsset[]> {
   if (!db || (!cid && attachmentIds.length === 0)) return [];
+  if (!user) throw new Error(translate(i18n, 'core.error.forbidden', 'Forbidden.'));
+  if (cid) {
+    const content = await db.query.contents.findFirst({
+      where: eq(schema.contents.cid, cid),
+      columns: { authorId: true },
+    });
+    if (!content || !canManageResource(user, content)) {
+      throw new Error(translate(i18n, 'core.error.forbidden', 'Forbidden.'));
+    }
+  }
 
   const conditions = [
     cid ? eq(schema.contents.parent, cid) : undefined,
@@ -589,6 +606,9 @@ async function loadAttachmentAssets(
     .where(and(
       eq(schema.contents.type, 'attachment'),
       conditions.length === 1 ? conditions[0] : or(...conditions),
+      hasPermission(user.group || 'visitor', 'editor')
+        ? undefined
+        : eq(schema.contents.authorId, user.uid),
     ))
     .limit(50);
 
@@ -611,6 +631,8 @@ async function loadContentAssets(
   db: Database | undefined,
   config: ScribeConfig,
   payload: WriterPayload,
+  user: WriterUser | undefined,
+  i18n?: I18n,
 ): Promise<ContentAsset[]> {
   if (!shouldIncludeBodyAssets(config)) return [];
 
@@ -619,7 +641,7 @@ async function loadContentAssets(
     ? [...new Set(payload.attachmentIds.map(parsePositiveInt).filter(Boolean))]
     : [];
   const bodyAssets = extractBodyAssets(payload.body || '');
-  const attachmentAssets = await loadAttachmentAssets(db, cid, attachmentIds);
+  const attachmentAssets = await loadAttachmentAssets(db, cid, attachmentIds, user, i18n);
   return dedupeAssets([...bodyAssets, ...attachmentAssets]);
 }
 
@@ -672,6 +694,7 @@ async function requestDraftStream(
   siteUrl: string | undefined,
   capabilityRuntime: CapabilityRuntimeContext | undefined,
   i18n?: I18n,
+  user?: WriterUser,
 ): Promise<Response> {
   if (!config.model) {
     throw new Error(translate(i18n, 'plugin.typecho-plugin-scribe.message.modelRequired', '请选择 AI 插件中可用的模型'));
@@ -719,7 +742,7 @@ async function requestDraftStream(
     try {
       const [styleSamples, assets] = await Promise.all([
         loadStyleSamples(db, Number.isFinite(Number(config.stylePostCount)) ? Number(config.stylePostCount) : 0),
-        loadContentAssets(db, config, payload),
+        loadContentAssets(db, config, payload, user, i18n),
       ]);
       const prompt = buildPrompt(mode, payload, styleSamples, config, assets);
       const content = buildUserContent(prompt, assets, siteUrl);
@@ -737,7 +760,7 @@ async function requestDraftStream(
       try {
         result = await service.generate({
           model: config.model,
-          temperature: Number(config.temperature) || 0.7,
+          temperature: Number.isFinite(Number(config.temperature)) ? Number(config.temperature) : 0.7,
           max_tokens: Number(config.maxTokens) || Number(DEFAULTS.maxTokens),
           stream: true,
           messages: [
@@ -909,6 +932,7 @@ export default function init({ addHook, pluginId, registerTranslations }: Plugin
         payload?: WriterPayload;
         options?: Record<string, unknown>;
         db?: Database;
+        user?: WriterUser;
         capabilityRuntime?: CapabilityRuntimeContext;
         i18n?: I18n;
       },
@@ -928,6 +952,7 @@ export default function init({ addHook, pluginId, registerTranslations }: Plugin
           siteUrl,
           extra?.capabilityRuntime,
           extra?.i18n,
+          extra?.user,
         );
         return {
           handled: true,

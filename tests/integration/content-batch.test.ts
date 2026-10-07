@@ -11,6 +11,7 @@ import { createTestDb, seedAdmin, makeAuthCookie, type TestDatabase } from '../h
 // ---- shared DB ref -----------------------------------------------------------
 
 let testDb: TestDatabase;
+const { mockDoHook } = vi.hoisted(() => ({ mockDoHook: vi.fn(async (_ctx: any, _hook: string, _data: any, _extra?: any) => {}) }));
 
 vi.mock('@/db', async () => {
   const actual = await vi.importActual<typeof import('@/db')>('@/db');
@@ -25,7 +26,7 @@ vi.mock('@/lib/plugin', () => ({
   parseActivatedPlugins: () => [],
   setActivatedPlugins: () => {},
   applyFilter: async (_ctx: any, _hook: string, data: any) => data,
-  doHook: async () => {},
+  doHook: mockDoHook,
 }));
 
 import { POST } from '@/pages/api/admin/content-batch';
@@ -83,6 +84,7 @@ function makeBatchRequest(
 describe('POST /api/admin/content-batch', () => {
   beforeEach(async () => {
     testDb = await createTestDb();
+    mockDoHook.mockClear();
   });
 
   // -- Auth guards --
@@ -195,6 +197,33 @@ describe('POST /api/admin/content-batch', () => {
     expect(remaining).toHaveLength(1);
   });
 
+  it.each(['delete', 'mark'])('editor can %s content owned by another user', async (action) => {
+    const editor = await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE, group: 'editor' });
+    const cookie = await makeAuthCookie(testDb, editor.uid, TEST_AUTH_CODE, TEST_SECRET);
+    const post = await seedPost(testDb, { slug: `other-editor-${action}`, authorId: 99 });
+    const request = makeBatchRequest(action, [post.cid], cookie, { status: 'hidden' });
+    expect((await POST({ request, locals: {}, url: new URL(request.url) } as any)).status).toBe(302);
+    const remaining = await testDb.select().from(schema.contents);
+    if (action === 'delete') expect(remaining).toHaveLength(0);
+    else expect(remaining[0].status).toBe('hidden');
+  });
+
+  it.each([false, true])('deletes parents and revisions without double-counting links (revision selected: %s)', async (selectRevision) => {
+    const admin = await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE });
+    const cookie = await makeAuthCookie(testDb, admin.uid, TEST_AUTH_CODE, TEST_SECRET);
+    const post = await seedPost(testDb, { slug: 'batch-parent' });
+    const revision = await seedPost(testDb, { slug: 'batch-revision', type: 'revision', status: 'draft', parent: post.cid });
+    const [category] = await testDb.insert(schema.metas).values({ name: 'Shared', slug: 'batch-shared', type: 'category', count: 2 }).returning();
+    await testDb.insert(schema.relationships).values([{ cid: post.cid, mid: category.mid }, { cid: revision.cid, mid: category.mid }]);
+    await testDb.insert(schema.fields).values({ cid: revision.cid, name: 'source', str_value: 'revision' });
+    const request = makeBatchRequest('delete', selectRevision ? [post.cid, revision.cid] : [post.cid], cookie);
+    expect((await POST({ request, locals: {}, url: new URL(request.url) } as any)).status).toBe(302);
+    expect(await testDb.select().from(schema.contents)).toHaveLength(0);
+    expect(await testDb.select().from(schema.relationships)).toHaveLength(0);
+    expect(await testDb.select().from(schema.fields)).toHaveLength(0);
+    expect((await testDb.query.metas.findFirst())!.count).toBe(1);
+  });
+
   // -- mark action --
 
   it('returns 403 when contributor tries to mark status', async () => {
@@ -218,6 +247,18 @@ describe('POST /api/admin/content-batch', () => {
 
     const updated = await testDb.query.contents.findFirst();
     expect(updated?.status).toBe('publish');
+  });
+
+  it.each(['post', 'page'])('publishes a %s draft with its canonical type and lifecycle hooks', async (type) => {
+    const editor = await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE, group: 'editor' });
+    const cookie = await makeAuthCookie(testDb, editor.uid, TEST_AUTH_CODE, TEST_SECRET);
+    const draft = await seedPost(testDb, { slug: `batch-draft-${type}`, type: `${type}_draft`, status: 'draft' });
+    const request = makeBatchRequest('mark', [draft.cid], cookie, { type, status: 'publish' });
+    expect((await POST({ request, locals: {}, url: new URL(request.url) } as any)).status).toBe(302);
+    const updated = await testDb.query.contents.findFirst();
+    expect(updated).toMatchObject({ cid: draft.cid, type, status: 'publish' });
+    expect(mockDoHook.mock.calls.map(call => call[1])).toEqual([`${type}:afterPublish`, `${type}:afterSave`]);
+    expect(mockDoHook).toHaveBeenCalledWith(expect.anything(), `${type}:afterSave`, expect.objectContaining({ cid: draft.cid, type, status: 'publish' }), expect.anything());
   });
 
   it('editor can mark post status to hidden', async () => {

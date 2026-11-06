@@ -127,7 +127,7 @@ describe('POST /api/install (G7-2 / G7-8)', () => {
   it('rolls back every install write on batch failure and permits a retry', async () => {
     // Batch 1 creates/ensures schema; fail the final installed marker in
     // batch 2, after all other installation writes have been prepared.
-    d1TestDouble = createD1TestDouble(testDb, { failBatchAt: 8, failBatchCall: 2 });
+    d1TestDouble = createD1TestDouble(testDb, { failBatchAt: -1, failBatchCall: 2 });
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     const failed = await POST({ request: buildInstallRequest(), locals: {} } as any);

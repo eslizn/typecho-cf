@@ -36,7 +36,7 @@
   "plugin.typecho-plugin-webdav.config.mounts.sessionCookie.label": "Login cookie",
   "plugin.typecho-plugin-webdav.config.mounts.sessionCookie.description": "Optional browser cookie for Tianyi Cloud Drive when password login is unavailable.",
   "plugin.typecho-plugin-webdav.config.mounts.bindingName.label": "R2 binding",
-  "plugin.typecho-plugin-webdav.config.mounts.bindingName.description": "Choose an R2 binding declared in wrangler.toml.",
+  "plugin.typecho-plugin-webdav.config.mounts.bindingName.description": "Choose an R2 binding declared in wrangler.jsonc.",
   "plugin.typecho-plugin-webdav.config.mounts.endpoint.label": "Endpoint",
   "plugin.typecho-plugin-webdav.config.mounts.bucket.label": "Bucket",
   "plugin.typecho-plugin-webdav.config.mounts.region.label": "Region",

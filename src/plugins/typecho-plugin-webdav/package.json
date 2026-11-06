@@ -149,7 +149,7 @@
               "label": "R2 绑定",
               "default": "BUCKET",
               "optionsSource": "r2Bindings",
-              "description": "选择 wrangler.toml 中 [[r2_buckets]] 声明的 binding。",
+              "description": "选择 wrangler.jsonc 中 r2_buckets 声明的 binding。",
               "showWhen": {
                 "field": "provider",
                 "value": "r2"

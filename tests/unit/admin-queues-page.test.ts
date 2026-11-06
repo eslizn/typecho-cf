@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { experimental_readRawConfig } from 'wrangler';
 
 const read = (path: string) => readFileSync(join(process.cwd(), path), 'utf8');
 
@@ -31,12 +32,13 @@ describe('admin Queue page wiring', () => {
   });
 
   it('keeps the single Queue aligned with the Wrangler resource', () => {
-    const config = read('wrangler.toml');
+    const { rawConfig: config } = experimental_readRawConfig({ config: join(process.cwd(), 'wrangler.jsonc') });
 
-    expect(config).toContain('QUEUE_NAME = "typecho-cf-tasks"');
-    expect(config).toContain('binding = "QUEUE"');
-    expect(config).not.toContain('QUEUE_DLQ_NAME');
-    expect(config).not.toContain('dead_letter_queue');
-    expect(config.match(/\[\[queues\.producers\]\]/g)).toHaveLength(1);
+    expect(config.vars?.QUEUE_NAME).toBe('typecho-cf-tasks');
+    expect(config.vars).not.toHaveProperty('QUEUE_DLQ_NAME');
+    expect(config.queues?.producers).toEqual([{ binding: 'QUEUE', queue: config.vars?.QUEUE_NAME }]);
+    expect(config.queues?.consumers).toHaveLength(1);
+    expect(config.queues?.consumers?.[0]?.queue).toBe(config.vars?.QUEUE_NAME);
+    expect(config.queues?.consumers?.[0]).not.toHaveProperty('dead_letter_queue');
   });
 });

@@ -35,7 +35,7 @@ Typecho-CF WebDAV 协议插件，通过 WebDAV 协议挂载和访问多种存储
 |------|------|--------|------|
 | `mount` | text | `/` | 挂载目录名，`/` 或空表示根目录（唯一根挂载），否则为目录名 |
 | `provider` | select | `r2` | 存储类型：R2 / S3 兼容 / 天翼云盘 |
-| `bindingName` | select (R2) | `BUCKET` | R2 Bucket 绑定名（从 wrangler.toml 自动读取） |
+| `bindingName` | select (R2) | `BUCKET` | R2 Bucket 绑定名（从 wrangler.jsonc 自动读取） |
 | `endpoint` | text (S3) | — | S3 Endpoint URL |
 | `bucket` | text (S3) | — | S3 Bucket 名称 |
 | `region` | text (S3) | `us-east-1` | S3 Region |

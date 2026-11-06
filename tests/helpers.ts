@@ -54,6 +54,9 @@ export function createD1TestDouble(
       let args: unknown[] = [];
       const statement = {
         bind(...values: unknown[]) {
+          // D1 permits 100 bound parameters per statement; SQLite itself
+          // accepts more, which would otherwise hide production failures.
+          if (values.length > 100) throw new Error('D1_ERROR: too many SQL variables');
           args = values;
           return statement;
         },
@@ -68,8 +71,9 @@ export function createD1TestDouble(
     },
     async batch(statements: Array<{ query: string; params?: unknown[] }>) {
       batchCalls += 1;
+      const failureIndex = options.failBatchAt === -1 ? statements.length - 1 : options.failBatchAt;
       const batch = statements.map((statement, index) => ({
-        sql: options.failBatchAt === index && (options.failBatchCall ?? 1) === batchCalls
+        sql: failureIndex === index && (options.failBatchCall ?? 1) === batchCalls
           ? 'THIS IS AN INJECTED D1 BATCH FAILURE'
           : statement.query,
         args: (statement.params ?? []) as never[],

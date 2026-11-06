@@ -1,8 +1,8 @@
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { isAbsolute, resolve } from 'node:path';
+import { experimental_readRawConfig } from 'wrangler';
 
 const require = createRequire(import.meta.url);
 const SCRIPT_DIR = fileURLToPath(new URL('.', import.meta.url));
@@ -74,76 +74,29 @@ export function extractWranglerContext(argv = []) {
   return { globalArgs, configPath, environment, cwd };
 }
 
-function queueSectionForHeader(header) {
-  const parts = header.split('.').map((part) => part.trim());
-  const queuesIndex = parts.indexOf('queues');
-  if (queuesIndex === -1) return null;
-
-  const kind = parts[queuesIndex + 1];
-  if (kind !== 'producers' && kind !== 'consumers') return null;
-
-  if (queuesIndex === 0) return { environment: undefined };
-  if (queuesIndex === 2 && parts[0] === 'env' && parts[1]) {
-    return { environment: parts[1] };
-  }
-  return null;
-}
-
-function parseTomlHeader(line) {
-  const match = line.match(/^\s*(\[\[|\[)([^\]]+)(\]\]|\])\s*(?:#.*)?$/);
-  if (!match) return null;
-
-  const isArrayTable = match[1] === '[[' && match[3] === ']]';
-  const isTable = match[1] === '[' && match[3] === ']';
-  if (!isArrayTable && !isTable) return null;
-  return queueSectionForHeader(match[2]);
-}
-
 /**
- * Extract Queue references from the selected Wrangler TOML config.
+ * Extract Queue references from Wrangler's parsed JSON/JSONC/TOML config.
  * The config remains the source of truth, so queue names cannot drift from
  * the bindings used by the Worker. This project intentionally does not
- * provision dead-letter queues.
+ * provision dead-letter queues. Queues are non-inheritable: a named
+ * environment must declare its own bindings, even when top-level ones exist.
  */
-export function parseQueueNamesFromWranglerConfig(configText, environment) {
-  const sections = [];
-  let currentSection = null;
-
-  for (const line of String(configText).split(/\r?\n/)) {
-    if (/^\s*\[/.test(line)) {
-      currentSection = parseTomlHeader(line);
-      if (currentSection) {
-        currentSection.names = [];
-        sections.push(currentSection);
-      }
-      continue;
-    }
-
-    if (!currentSection) continue;
-    const valueMatch = line.match(
-      /^\s*queue\s*=\s*(?:"([^"]+)"|'([^']+)')\s*(?:#.*)?$/,
-    );
-    if (valueMatch) currentSection.names.push(valueMatch[1] ?? valueMatch[2]);
-  }
-
-  const environmentSections = environment
-    ? sections.filter((section) => section.environment === environment)
-    : [];
-  const selectedSections = environment && environmentSections.length > 0
-    ? environmentSections
-    : sections.filter((section) => section.environment === undefined);
-
+export function parseQueueNamesFromWranglerConfig(rawConfig, environment) {
+  const config = environment ? rawConfig.env?.[environment] : rawConfig;
+  const queues = config?.queues;
+  const references = [...(queues?.producers ?? []), ...(queues?.consumers ?? [])];
   const names = [];
   const seen = new Set();
-  for (const section of selectedSections) {
-    for (const name of section.names) {
-      if (!name || /\s/.test(name) || name.length > 255) {
-        throw new Error(`Invalid Queue name in Wrangler config: ${JSON.stringify(name)}`);
-      }
-      if (!seen.has(name)) {
-        seen.add(name);
-        names.push(name);
-      }
+  for (const reference of references) {
+    // A legacy dead_letter_queue alone does not declare a queue to provision.
+    if (reference.queue === undefined) continue;
+    const name = reference.queue;
+    if (typeof name !== 'string' || !name || /\s/.test(name) || name.length > 255) {
+      throw new Error(`Invalid Queue name in Wrangler config: ${JSON.stringify(name)}`);
+    }
+    if (!seen.has(name)) {
+      seen.add(name);
+      names.push(name);
     }
   }
 
@@ -310,9 +263,15 @@ export async function ensureQueues({
 } = {}) {
   const context = extractWranglerContext(argv);
   const cwd = resolvedWorkingDirectory(rootDir, context.cwd);
-  const configPath = resolve(cwd, context.configPath ?? 'wrangler.toml');
-  const configText = readFileSync(configPath, 'utf8');
-  const queueNames = parseQueueNamesFromWranglerConfig(configText, context.environment);
+  // Let Wrangler handle comments, trailing commas, TOML syntax and config
+  // discovery precedence. A synthetic script anchors discovery to cwd without
+  // changing process.cwd(), which could race with another caller.
+  const { rawConfig, configPath } = experimental_readRawConfig({
+    config: context.configPath ? resolve(cwd, context.configPath) : undefined,
+    script: resolve(cwd, 'worker.js'),
+  });
+  if (!configPath) throw new Error(`No Wrangler config found in ${cwd} or its parent directories`);
+  const queueNames = parseQueueNamesFromWranglerConfig(rawConfig, context.environment);
   const log = typeof logger?.log === 'function' ? logger.log.bind(logger) : () => {};
 
   log(`[queues:ensure] checking ${queueNames.length} Queue resource(s)`);

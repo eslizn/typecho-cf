@@ -22,9 +22,15 @@
 
 ### 一键部署到 Cloudflare
 
-点击上方 **Deploy to Cloudflare** 按钮。Cloudflare 会把本仓库复制到你的 GitHub / GitLab 帐号，按 `wrangler.toml` 自动创建并绑定 D1、R2、任务 Queue，同时配置 [Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/)：之后每次推送到生产分支都会自动构建部署。
+点击上方 **Deploy to Cloudflare** 按钮。Cloudflare 会把本仓库复制到你的 GitHub / GitLab 帐号，按 `wrangler.jsonc` 自动创建并绑定 D1、R2、任务 Queue，同时配置 [Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/)：之后每次推送到生产分支都会自动构建部署。
+
+本项目使用 Cloudflare 推荐的 [`wrangler.jsonc`](https://developers.cloudflare.com/workers/wrangler/configuration/)。官方仍支持 TOML；Deploy Button 并不要求必须使用 JSONC。配置位于仓库根目录，部署脚本与 Wrangler 使用相同的配置发现和解析规则。
 
 Button/Workers Builds 中保持以下命令即可：Build command 为 `pnpm run build`，Production deploy command 为 `pnpm run deploy`；`pnpm run deploy` 会识别 Cloudflare 提供的 `WORKERS_CI=1`，自动跳过本地 Queue 检查和重复构建，仅执行部署。非生产分支使用 Cloudflare 默认的 `pnpm exec wrangler versions upload`（或等价的 `npx wrangler versions upload`），不要使用生产部署命令。
+
+Workers Builds 通过根目录的 `.node-version` 选择 Node.js LTS。若已有项目设置了构建环境变量 `NODE_VERSION`，请将其同步为 `26.13.0`，或删除该覆盖值以使用版本文件；它属于构建设置，不是 Wrangler 的运行时 `vars`。
+
+按钮读取 GitHub / GitLab 上已推送的默认分支，本地未提交或未推送的配置不会生效。若在「克隆存储库」阶段提示「无法获取存储库内容」，先确认源仓库公开，再在浏览器开发者工具的 Network 中检查失败请求的状态码和响应错误；该提示本身不能证明 Wrangler 格式有问题。
 
 部署向导会提示填写 `INSTALL_TOKEN`（推荐，可用 `openssl rand -hex 32` 生成）。设置后，打开 Worker URL 的 `/install` 完成站点与管理员初始化时必须填写同一令牌。未设置时仍可安装，但任意先访问 `/install` 的人都能成为首位管理员。
 
@@ -32,8 +38,8 @@ Button/Workers Builds 中保持以下命令即可：Build command 为 `pnpm run 
 
 ### 前置要求
 
-- Node.js **22.12+**
-- [pnpm](https://pnpm.io)（`npm install -g pnpm`）
+- Node.js **26.13.0+（26.x LTS）**，版本固定在 `.node-version`，CI 与 Cloudflare Workers Builds 读取同一文件
+- [pnpm](https://pnpm.io) **11.28.11**（`npm install -g pnpm@11.28.11`；由 `packageManager` 锁定，CI 使用同一版本）
 - Cloudflare 帐号（仅部署到 Cloudflare 时需要）
 
 ### 本地开发
@@ -54,7 +60,7 @@ pnpm run dev
 2. 填写安装表单：站点名称 / 描述、管理员用户名、密码（至少 12 位）、邮箱；若配置了 `INSTALL_TOKEN`，还需填写安装令牌
 3. 提交后完成建表与管理员创建，随后可访问 `/admin` 登录
 
-仓库中的 `wrangler.toml` 只声明绑定名（D1 `DB` / R2 `BUCKET` / Queue `QUEUE`），不含账号专属 ID。本地 `pnpm run dev` 使用 Miniflare 模拟存储，不必改这个文件。密钥写在 `.dev.vars`（已 gitignore）。
+仓库中的 `wrangler.jsonc` 只声明绑定名（D1 `DB` / R2 `BUCKET` / Queue `QUEUE`），不含账号专属 ID。本地 `pnpm run dev` 使用 Miniflare 模拟存储，不必改这个文件。密钥写在 `.dev.vars`（已 gitignore）。
 
 ### 命令行部署到 Cloudflare
 
@@ -70,10 +76,10 @@ pnpm run deploy
 Queue `typecho-cf-tasks`；缺失时通过项目锁定版本的 Wrangler 自动创建，已存在的资源
 不会删除或重建。Button/Workers Builds 路径由
 Cloudflare 负责创建配置中声明的资源，`pnpm run deploy` 在该环境只执行部署。若只想
-检查构建和部署配置，可执行 `pnpm run deploy -- --dry-run`，该模式不会创建 Queue。
+检查构建和部署配置，可执行 `pnpm run deploy --dry-run`，该模式不会创建 Queue。
 
-如需在同一 Cloudflare 账户部署多个实例，请手动修改 `wrangler.toml` 中 producer 的
-`queue`、consumer 的 `queue` 以及 `[vars]` 中的 `QUEUE_NAME`，为当前实例设置唯一名称，
+如需在同一 Cloudflare 账户部署多个实例，请手动修改 `wrangler.jsonc` 中 producer 的
+`queue`、consumer 的 `queue` 以及 `vars` 中的 `QUEUE_NAME`，为当前实例设置唯一名称，
 并保持 producer 与 consumer 使用同一个任务 Queue。`pnpm run deploy` 和 Button/Workers
 Builds 都会按修改后的 Wrangler 配置工作。
 
@@ -92,7 +98,7 @@ pnpm exec wrangler secret put CF_API_TOKEN
 
 访问 Worker URL → `/install` → 填写站点与管理员信息（及 `INSTALL_TOKEN`）→ 登录 `/admin`。
 
-首次 `wrangler deploy` 可能会把生成的 `database_id` 写回 `wrangler.toml`。不要提交这次改动（`git checkout -- wrangler.toml`）；之后部署仍会绑定到同一资源。若要用别的库名或桶名，再改 `database_name` / `bucket_name`。
+首次 `wrangler deploy` 可能会把生成的 `database_id` 写回 `wrangler.jsonc`。不要提交这次改动（`git checkout -- wrangler.jsonc`）；之后部署仍会绑定到同一资源。若要用别的库名或桶名，再改 `database_name` / `bucket_name`。
 
 ---
 
@@ -125,7 +131,7 @@ pnpm exec wrangler secret put CF_API_TOKEN
 `pnpm install --force --frozen-lockfile`，不删除源码，也不会通过 `pnpm update`
 升级无关依赖或改写锁文件。
 
-修改 `wrangler.toml` 中的绑定后，运行 `pnpm run types:workers`。生成的 `worker-configuration.d.ts` 仅供本地与 CI 使用，不纳入版本控制。
+修改 `wrangler.jsonc` 中的绑定后，运行 `pnpm run types:workers`。生成的 `worker-configuration.d.ts` 仅供本地与 CI 使用，不纳入版本控制。
 
 示例配置默认持久化可搜索 Workers Logs，并以约 1% 采样率记录调用链；生产环境可按流量与成本调整。密钥使用 `wrangler secret put`（本地可用 `.dev.vars`），不要写入已跟踪的配置文件。
 
@@ -194,7 +200,7 @@ pnpm run reset-password:cloudflare   # Cloudflare
 | ORM | [Drizzle ORM](https://orm.drizzle.team) 0.45.x |
 | 文件存储 | [Cloudflare R2](https://developers.cloudflare.com/r2/) |
 | 语言 | TypeScript 7.x |
-| 测试 | [Vitest](https://vitest.dev) 4.x |
+| 测试 | [Vitest](https://vitest.dev) 5.x |
 | 包管理 | pnpm |
 
 ---

@@ -14,6 +14,7 @@
 | 仓库 | `https://github.com/eslizn/typecho-cf` |
 | 许可证 | MIT |
 | 包管理器 | pnpm（锁定） |
+| Node.js | 26.x LTS，版本由 `.node-version` 固定；CI / Cloudflare Workers Builds 共用，升级时同步 `engines.node` 与 `@types/node` 主版本 |
 
 ### 1.1 Agent 配置约定
 
@@ -41,7 +42,7 @@
 | ORM | Drizzle ORM | 0.45.x |
 | 文件存储 | Cloudflare R2 | — |
 | 密码哈希 | PBKDF2-SHA256 | 100,000 迭代 + 16B salt（Cloudflare Workers Web Crypto 上限；更低迭代的存量 hash 在登录时机会式重哈希） |
-| 测试 | Vitest | 4.x |
+| 测试 | Vitest | 5.x |
 | 语言 | TypeScript | 7.x（ESLint / typescript-eslint 侧通过 `typescript-eslint-typescript` 别名固定使用 TS 6.0.x API） |
 
 ---
@@ -453,7 +454,7 @@ Cloudflare Workers 单个 isolate 内的模块级状态会在异步请求间交�
 
 **扩展属性**：
 - `showWhen` — 条件显示，仅适用于 `repeatable.itemFields`。格式：`{ field: "provider", value: "s3" }`，`value` 可为单值或数组
-- `optionsSource` — 动态选项源，仅适用于 `select`。支持 `"r2Bindings"`（自动读取 wrangler.toml 中的 R2 binding 名称），或 `{ capability, ownerPluginId?, minVersion? }`：由其他插件通过 capability 发布选项（能力需实现 `listOptions(): Array<{ value: string; label?: string }>`），解析失败时渲染空列表，字段值只做长度/可见字符校验，由插件在 `plugin:config:beforeSave` 中用同一 capability 复核
+- `optionsSource` — 动态选项源，仅适用于 `select`。支持 `"r2Bindings"`（自动读取 wrangler.jsonc 中的 R2 binding 名称），或 `{ capability, ownerPluginId?, minVersion? }`：由其他插件通过 capability 发布选项（能力需实现 `listOptions(): Array<{ value: string; label?: string }>`），解析失败时渲染空列表，字段值只做长度/可见字符校验，由插件在 `plugin:config:beforeSave` 中用同一 capability 复核
 
 - `optionDisabled` — 选项值数组，适用于 `select` / `radio` / `option` 型 `checkbox`。命中该数组的选项渲染为 disabled，且服务端在保存时直接丢弃该值（即使被伪造提交）。用于「能力已预留但暂未实现」这类场景，不要用文案标注代替禁用
 - `itemFields` — 嵌套字段定义，适用于 `object` 与 `repeatable`；两者允许递归嵌套
@@ -608,7 +609,7 @@ scripts/
 - Queue 是至少一次投递；不承诺精确一次、跨 PoP 强全局互斥或错过 Cron 槽位的可靠补偿。插件必须保证任务幂等。
 - `typecho-cf-tasks` 是当前唯一的账户级 Cloudflare Queue 资源；本地/手动执行 `pnpm run deploy` 必须先执行 `scripts/deploy.mjs` 的幂等资源检查，按所选 Wrangler 配置调用项目锁定版本的 `wrangler queues list/create`，缺失时创建、已存在时复用，禁止删除或重建。Deploy Button / Workers Builds 已在构建前按 Wrangler 配置自动准备资源，且已单独执行 Build command；当 `WORKERS_CI=1` 时，`pnpm run deploy` 必须跳过 Queue 检查与重复构建，仅执行 `wrangler deploy`。
 - Workers Builds 的非生产分支必须使用 `wrangler versions upload`（项目命令可写为 `pnpm exec wrangler versions upload`），不得复用会执行生产 `wrangler deploy` 的手动部署路径。
-- `pnpm run deploy -- --dry-run` 不得创建 Queue；Queue 资源创建失败必须终止部署，不能用 `|| true` 吞掉权限、认证或网络错误。
+- `pnpm run deploy --dry-run` 不得创建 Queue；Queue 资源创建失败必须终止部署，不能用 `|| true` 吞掉权限、认证或网络错误。
 
 ### 13.2 插件接口约束
 
@@ -641,6 +642,6 @@ scripts/
 ### 13.5 协作与验证约定
 
 - 任务系统属于架构级变更；实施前先更新设计规范和实施计划，文档评审通过后再写代码。
-- 可并行的工作必须按不重叠文件集合拆分；`plugin.ts`、`plugin-sdk.ts`、`wrangler.toml`、`src/worker.ts` 等共享边界由主协作者或单一子任务负责集成，避免并发冲突。
+- 可并行的工作必须按不重叠文件集合拆分；`plugin.ts`、`plugin-sdk.ts`、`wrangler.jsonc`、`src/worker.ts` 等共享边界由主协作者或单一子任务负责集成，避免并发冲突。
 - 新增模块必须配套单元/集成测试；至少覆盖 Cron 解析与时区、envelope 校验、ack/retry/discard、插件停用、任务级并发和 Worker 冷启动注册表。
 - 修改完成后运行 `pnpm run test`、`pnpm run typecheck`，涉及构建入口或 Wrangler 配置时再运行 `pnpm run build`，并执行 `git diff --check`。

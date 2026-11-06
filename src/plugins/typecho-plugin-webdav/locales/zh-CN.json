@@ -36,7 +36,7 @@
   "plugin.typecho-plugin-webdav.config.mounts.sessionCookie.label": "登录 Cookie",
   "plugin.typecho-plugin-webdav.config.mounts.sessionCookie.description": "可选的浏览器 Cookie；无法使用密码登录时可使用 Cookie 模式。",
   "plugin.typecho-plugin-webdav.config.mounts.bindingName.label": "R2 绑定",
-  "plugin.typecho-plugin-webdav.config.mounts.bindingName.description": "选择 wrangler.toml 中声明的 R2 binding。",
+  "plugin.typecho-plugin-webdav.config.mounts.bindingName.description": "选择 wrangler.jsonc 中声明的 R2 binding。",
   "plugin.typecho-plugin-webdav.config.mounts.endpoint.label": "Endpoint",
   "plugin.typecho-plugin-webdav.config.mounts.bucket.label": "Bucket",
   "plugin.typecho-plugin-webdav.config.mounts.region.label": "Region",

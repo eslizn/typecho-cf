@@ -14,6 +14,8 @@ import { textError } from '@/lib/http';
 import { sql } from 'drizzle-orm';
 
 const INSTALL_LOCK_TTL_SECONDS = 5 * 60;
+// Each option binds at most three values; D1 caps each statement at 100.
+const INSTALL_OPTIONS_PER_STATEMENT = 33;
 
 /**
  * Create all tables and indexes from Drizzle schema definitions.
@@ -277,18 +279,21 @@ export const POST: APIRoute = async ({ request }) => {
         autoSave: '0',
       };
 
-      statements.push(prepareStatement(d1, db.insert(schema.options)
-        .values(Object.entries(defaultOptions).map(([name, value]) => ({
-          name,
-          user: 0,
-          value: name === 'defaultCategory'
-            ? sql<string>`CAST((SELECT ${schema.metas.mid} FROM ${schema.metas} WHERE ${schema.metas.slug} = 'default' AND ${schema.metas.type} = 'category') AS TEXT)`
-            : value,
-        })))
-        .onConflictDoUpdate({
-          target: [schema.options.user, schema.options.name],
-          set: { value: sql`excluded.value` },
-        })));
+      const optionRows = Object.entries(defaultOptions).map(([name, value]) => ({
+        name,
+        user: 0,
+        value: name === 'defaultCategory'
+          ? sql<string>`CAST((SELECT ${schema.metas.mid} FROM ${schema.metas} WHERE ${schema.metas.slug} = 'default' AND ${schema.metas.type} = 'category') AS TEXT)`
+          : value,
+      }));
+      for (let offset = 0; offset < optionRows.length; offset += INSTALL_OPTIONS_PER_STATEMENT) {
+        statements.push(prepareStatement(d1, db.insert(schema.options)
+          .values(optionRows.slice(offset, offset + INSTALL_OPTIONS_PER_STATEMENT))
+          .onConflictDoUpdate({
+            target: [schema.options.user, schema.options.name],
+            set: { value: sql`excluded.value` },
+          })));
+      }
       statements.push(prepareStatement(d1, db.insert(schema.options)
         .values({ name: 'cacheVersion', user: 0, value: '1' })
         .onConflictDoUpdate({

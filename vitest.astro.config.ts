@@ -32,11 +32,11 @@ const astroVitestConfig: AstroViteConfigWithVitest = {
     alias: {
       // The same stubs the unit tests use, so templates that touch the Workers
       // runtime (R2 bindings, caches) can render in Node.
-      'cloudflare:workers': path.resolve(__dirname, './tests/__mocks__/cloudflare-workers.ts'),
-      'astro:middleware': path.resolve(__dirname, './tests/__mocks__/astro-middleware.ts'),
-      'virtual:typecho-plugin-registry': path.resolve(__dirname, './tests/__mocks__/plugin-registry.ts'),
-      'virtual:typecho-theme-registry': path.resolve(__dirname, './tests/__mocks__/theme-registry.ts'),
-      'virtual:theme-templates': path.resolve(__dirname, './tests/__mocks__/theme-templates.ts'),
+      'cloudflare:workers': path.resolve(import.meta.dirname, './tests/__mocks__/cloudflare-workers.ts'),
+      'astro:middleware': path.resolve(import.meta.dirname, './tests/__mocks__/astro-middleware.ts'),
+      'virtual:typecho-plugin-registry': path.resolve(import.meta.dirname, './tests/__mocks__/plugin-registry.ts'),
+      'virtual:typecho-theme-registry': path.resolve(import.meta.dirname, './tests/__mocks__/theme-registry.ts'),
+      'virtual:theme-templates': path.resolve(import.meta.dirname, './tests/__mocks__/theme-templates.ts'),
     },
   },
 };

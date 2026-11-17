@@ -26,6 +26,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Generate Workers types
+        run: pnpm exec wrangler types worker-configuration.d.ts
+
       - name: Lint
         run: pnpm run lint
 

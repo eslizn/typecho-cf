@@ -12,10 +12,10 @@ const PROGRESS_INTERVAL_MS = 100;
 const TOKEN_BYTES_PER_ESTIMATE = 4;
 
 export interface AiProgressReporter {
-  reportPhase(phase: AiTaskPhase): void;
-  reportChunk(chunk: AiChatStreamChunk): void;
-  complete(usage?: AiUsage): void;
-  fail(): void;
+  reportPhase(this: void, phase: AiTaskPhase): void;
+  reportChunk(this: void, chunk: AiChatStreamChunk): void;
+  complete(this: void, usage?: AiUsage): void;
+  fail(this: void): void;
 }
 
 function safeInteger(value: unknown): number | undefined {
@@ -135,7 +135,7 @@ export function createAiProgressReporter(
   let firstOutputAt: number | undefined;
   let outputStartedAt: number | undefined;
   let estimatedOutputTokens = 0;
-  let usage: AiUsageSummary = {};
+  const usage: AiUsageSummary = {};
   let lastEmittedAt = Number.NEGATIVE_INFINITY;
   let terminal = false;
 

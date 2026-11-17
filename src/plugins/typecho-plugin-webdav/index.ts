@@ -13,8 +13,7 @@ import { REQUEST_BODY_LIMITS } from '@/lib/constants';
 import { InputError, inputErrorMessage, readBoundedFormData, readBoundedJson } from '@/lib/input';
 import { resolveI18nMessage } from '@/lib/i18n';
 
-import { PLUGIN_ID } from './types';
-import type { WebDavConfig, WebDavStorageAdapter } from './types';
+import type { WebDavConfig } from './types';
 import {
   readPluginSettings, normalizeConfig, normalizeInteger, parseBoolean, normalizeRoutePath,
   matchConfiguredWebDavRoute,

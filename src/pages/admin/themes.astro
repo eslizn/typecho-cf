@@ -42,7 +42,7 @@ if (Astro.request.method === 'POST') {
         messageType = 'error';
       }
     }
-  } catch (e) {
+  } catch {
     message = ctx.i18n.t('admin.error.operationFailed', {}, 'Operation failed');
     messageType = 'error';
   }

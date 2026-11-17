@@ -1,5 +1,5 @@
 import type { APIRoute } from 'astro';
-import { and, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { schema } from '@/db';
 import { applyFilter, doHook } from '@/lib/plugin';
 import { isAdminActionResponse, requireAdminAction, safeAdminRedirectUrl } from '@/lib/admin-auth';

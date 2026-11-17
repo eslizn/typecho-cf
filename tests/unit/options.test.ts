@@ -4,7 +4,7 @@
  * Tests loadOptions(), getOption(), setOption(), deleteOption() and computeUrls()
  * using an in-memory libSQL database via Drizzle ORM.
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { createTestDb } from '../helpers';
 import { schema } from '@/db';
 import {

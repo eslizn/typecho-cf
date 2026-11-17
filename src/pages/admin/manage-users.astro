@@ -2,9 +2,8 @@
 import Admin from '@/layouts/Admin.astro';
 import { createContext, requireAuth } from '@/lib/context';
 import { hasPermission } from '@/lib/auth';
-import { eq, sql, desc } from 'drizzle-orm';
+import { sql, desc } from 'drizzle-orm';
 import { schema } from '@/db';
-import { formatDate } from '@/lib/content';
 import { parsePageNumber, withQueryParams } from '@/lib/input';
 
 const ctx = await createContext(Astro.locals, Astro.request);

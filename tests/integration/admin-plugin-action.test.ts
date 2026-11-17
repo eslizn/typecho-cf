@@ -4,7 +4,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as schema from '@/db/schema';
 import { createTestDb, seedAdmin, disposeTestDb, makeAuthCookie, type TestDatabase } from '../helpers';
-import { registerPlugin, addHook, HookPoints } from '@/lib/plugin';
+import { registerPlugin, addHook } from '@/lib/plugin';
 
 let testDb: TestDatabase;
 

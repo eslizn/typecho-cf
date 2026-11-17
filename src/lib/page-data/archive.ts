@@ -1,4 +1,4 @@
-import { eq, and, desc, asc, lt, gt, or, inArray, sql } from 'drizzle-orm';
+import { eq, and, desc, lt, or, inArray, sql } from 'drizzle-orm';
 import { schema } from '@/db';
 import type { SiteOptions } from '@/lib/options';
 import { buildFtsMatchExpression, contentsFtsTableRef, FTS_MIN_CHARS, isFtsAvailable } from '@/lib/fulltext';

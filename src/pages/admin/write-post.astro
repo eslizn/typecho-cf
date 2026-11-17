@@ -42,7 +42,7 @@ let attachments: PostAttachmentItem[] = [];
 
 const cidNum = cid ? parseInt(cid, 10) : 0;
 if (cidNum > 0) {
-  let [postRows, rels, tagRows, fieldRows, categoryRows, attachmentRows] = await db.batch([
+  const [postRows, batchRels, batchTagRows, batchFieldRows, categoryRows, attachmentRows] = await db.batch([
     db.select().from(schema.contents).where(eq(schema.contents.cid, cidNum)).limit(1),
     db.select({ mid: schema.relationships.mid }).from(schema.relationships)
       .where(eq(schema.relationships.cid, cidNum)),
@@ -57,6 +57,9 @@ if (cidNum > 0) {
       .where(and(eq(schema.contents.type, 'attachment'), eq(schema.contents.parent, cidNum)))
       .orderBy(schema.contents.created),
   ]);
+  let rels = batchRels;
+  let tagRows = batchTagRows;
+  let fieldRows = batchFieldRows;
   post = postRows[0] || null;
   // Row-level ownership: a contributor may only open their own drafts.
   // Without this the page leaks another author's body/password to any
@@ -129,7 +132,6 @@ const writePostOptionHtml = await applyFilterSafely(ctx, 'admin:writePost:option
 const writePostAdvanceOptionHtml = await applyFilterSafely(ctx, 'admin:writePost:advanceOption', '', writePostHookExtra);
 const writePostBottomHtml = await applyFilterSafely(ctx, 'admin:writePost:bottom', '', writePostHookExtra);
 const t = ctx.i18n.t.bind(ctx.i18n);
-const tPlural = ctx.i18n.tPlural.bind(ctx.i18n);
 const formatAttachmentSize = (size: number): string => {
   if (size < 1024) return `${size} ${t('admin.unit.bytes', {}, 'B')}`;
   if (size < 1024 * 1024) return `${Math.ceil(size / 1024)} ${t('admin.unit.kilobytes', {}, 'KB')}`;

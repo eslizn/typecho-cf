@@ -1,9 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTestDb, disposeTestDb, type TestDatabase } from '../helpers';
-import { schema } from '@/db';
+import { getPrimaryDb, schema } from '@/db';
 import type { SiteOptions } from '@/lib/options';
 import { loadPluginSecurityOptions } from '@/lib/security-options';
-import { getPrimaryDb } from '@/db';
 
 let db: TestDatabase;
 beforeEach(async () => { db = await createTestDb(); });

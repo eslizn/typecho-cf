@@ -687,7 +687,7 @@ describe('typecho-plugin-wechat-publisher', () => {
     const attachments = [
       { cid: 8, text: JSON.stringify({ url: '/usr/uploads/cover.jpg', name: 'cover.jpg', type: 'image/jpeg', size: 51200 }) },
     ];
-    const { db, inserted } = mockDb(null, attachments, postText);
+    const { db } = mockDb(null, attachments, postText);
 
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       const target = String(url);

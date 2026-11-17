@@ -1,5 +1,5 @@
 import type { APIRoute } from 'astro';
-import { getDb, schema } from '@/db';
+import { schema } from '@/db';
 import { hashPassword, generateRandomString } from '@/lib/auth';
 import { PASSWORD_MIN_LENGTH } from '@/lib/constants';
 import { isAdminActionResponse, requireAdminAction } from '@/lib/admin-auth';
@@ -9,7 +9,7 @@ import { and, eq, ne, sql } from 'drizzle-orm';
 import { i18nMessage } from '@/lib/i18n';
 import { textError } from '@/lib/http';
 
-export const POST: APIRoute = async ({ request, locals }) => {
+export const POST: APIRoute = async ({ request }) => {
   const auth = await requireAdminAction(request, 'administrator');
   if (isAdminActionResponse(auth)) return auth;
   const db = auth.db;

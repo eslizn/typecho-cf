@@ -24,9 +24,6 @@ import {
   beginPluginTranslationStage,
   commitPluginTranslationStage,
   discardPluginTranslationStage,
-  getAvailableTranslationLocales,
-  getGlobalTranslationCatalogs,
-  getTranslationCatalogVersion,
   resetPluginTranslationRegistry,
   stagePluginTranslation,
 } from '@/lib/i18n-registry';
@@ -59,8 +56,7 @@ import {
   setCapabilityActivation,
   unregisterCapabilityOwner,
 } from '@/lib/capability';
-import type { CapabilityRegistration } from '@/lib/capability';
-import type { CapabilityRuntimeContext } from '@/lib/capability';
+import type { CapabilityRegistration, CapabilityRuntimeContext } from '@/lib/capability';
 import type { addHook, HookPoints } from '@/lib/hooks';
 import { applyFilterSafely, removePluginHooks } from '@/lib/hooks';
 import {
@@ -726,8 +722,8 @@ export async function getClientSnippets(
     resolvedLocale: ctx.resolvedLocale,
     capabilityRuntime: ctx.capabilityRuntime,
   };
-  let headHtml = await applyFilterSafely(ctx, 'frontend:head', '', extra);
-  let bodyHtml = await applyFilterSafely(ctx, 'frontend:footer', '', extra);
+  const headHtml = await applyFilterSafely(ctx, 'frontend:head', '', extra);
+  const bodyHtml = await applyFilterSafely(ctx, 'frontend:footer', '', extra);
   return { headHtml, bodyHtml };
 }
 

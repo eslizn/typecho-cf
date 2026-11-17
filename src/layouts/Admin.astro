@@ -1,6 +1,5 @@
 ---
-import type { SiteOptions } from '@/lib/options';
-import type { computeUrls } from '@/lib/options';
+import type { SiteOptions, computeUrls } from '@/lib/options';
 import type { UserRow } from '@/lib/context';
 import { hasPermission } from '@/lib/auth';
 import { applyFilterSafely, doHook, type HookContext } from '@/lib/plugin';
@@ -357,7 +356,7 @@ const adminClientMessageJson = safeJsonForScript({
           ul.on('click touchend', '.parent a', function (e) {
             nav.removeClass('noexpanded').addClass('expanded');
             setGroupExpanded(true);
-            if ($(window).width() < 576 && e.type == 'click') {
+            if ($(window).width() < 576 && e.type === 'click') {
               return false;
             }
           }).find('.child')
@@ -500,10 +499,10 @@ const adminClientMessageJson = safeJsonForScript({
         });
 
         // 外部链接新窗口打开
-        if ($('.typecho-login').length == 0) {
+        if ($('.typecho-login').length === 0) {
           $('a').each(function () {
             var t = $(this), href = t.attr('href');
-            if (href && href[0] == '#') return;
+            if (href && href[0] === '#') return;
             if (href && (href.indexOf('/admin') >= 0 || href.indexOf('/api') >= 0)) return;
             if (href && href.indexOf('://') > 0) {
               t.attr('target', '_blank').attr('rel', 'noopener noreferrer');

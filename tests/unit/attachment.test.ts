@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseAttachmentMeta, type AttachmentMeta } from '@/lib/attachment';
+import { parseAttachmentMeta } from '@/lib/attachment';
 
 describe('parseAttachmentMeta', () => {
   it('returns empty object for null/undefined/empty', () => {

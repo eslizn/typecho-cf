@@ -400,7 +400,7 @@ async function tianyiApiCall(mount: StorageMount, endpoint: string, params: Reco
 
   let json: Record<string, unknown> = {};
   let rawText = '';
-  try { rawText = await response.text(); json = safeParseJSON(rawText); } catch (ex) {
+  try { rawText = await response.text(); json = safeParseJSON(rawText); } catch {
     if (!response.ok) throw new Error(`天翼云盘 API 请求失败 (${response.status})${rawText ? ': ' + rawText.slice(0, 200) : ''}`);
     return json;
   }
@@ -955,7 +955,7 @@ function createR2Ops(mount: StorageMount): StorageOps {
 
 function createS3Ops(mount: StorageMount): StorageOps {
   return {
-    async read(k, method, workerEnv) {
+    async read(k, method, _workerEnv) {
       const response = await s3Fetch(mount, method, pk(mount, k));
       if (response.status === 404 || response.status === 403) {
         return new Response('Not Found', { status: 404 });
@@ -963,7 +963,7 @@ function createS3Ops(mount: StorageMount): StorageOps {
       return response;
     },
 
-    async write(k, body, contentType, workerEnv) {
+    async write(k, body, contentType, _workerEnv) {
       const headers: Record<string, string> = {};
       if (contentType) headers['content-type'] = contentType;
       const response = await s3Fetch(mount, 'PUT', pk(mount, k), {}, headers, body);
@@ -971,27 +971,27 @@ function createS3Ops(mount: StorageMount): StorageOps {
       return new Response(null, { status: 201 });
     },
 
-    async mkdir(k, workerEnv) {
+    async mkdir(k, _workerEnv) {
       const dirKey = k.endsWith('/') ? pk(mount, k) : `${pk(mount, k)}/`;
       const response = await s3Fetch(mount, 'PUT', dirKey, {}, { 'content-type': 'application/x-directory' }, '');
       if (!response.ok) return new Response(`Storage write failed (${response.status})`, { status: 502 });
       return new Response(null, { status: 201 });
     },
 
-    async delete(k, workerEnv) {
+    async delete(k, _workerEnv) {
       const response = await s3Fetch(mount, 'DELETE', pk(mount, k));
       if (!response.ok && response.status !== 404) return new Response(`Storage delete failed (${response.status})`, { status: 502 });
       return new Response(null, { status: 204 });
     },
 
-    async copy(srcK, destK, workerEnv) {
+    async copy(srcK, destK, _workerEnv) {
       const copySource = `/${encodePathSegment(mount.bucket)}/${encodeKeyPath(pk(mount, srcK))}`;
       const response = await s3Fetch(mount, 'PUT', pk(mount, destK), {}, { 'x-amz-copy-source': copySource });
       if (!response.ok) return new Response(`Storage copy failed (${response.status})`, { status: 502 });
       return new Response(null, { status: 201 });
     },
 
-    async move(srcK, destK, workerEnv) {
+    async move(srcK, destK, _workerEnv) {
       const copySource = `/${encodePathSegment(mount.bucket)}/${encodeKeyPath(pk(mount, srcK))}`;
       const copyResponse = await s3Fetch(mount, 'PUT', pk(mount, destK), {}, { 'x-amz-copy-source': copySource });
       if (!copyResponse.ok) return new Response(`Storage copy failed (${copyResponse.status})`, { status: 502 });
@@ -1014,7 +1014,7 @@ function createS3Ops(mount: StorageMount): StorageOps {
       return collectionExists(mount, pkd(mount, prefix), workerEnv);
     },
 
-    async isEmpty(dirK, workerEnv) {
+    async isEmpty(dirK, _workerEnv) {
       const prefix = pkd(mount, dirK);
       const response = await s3Fetch(mount, 'GET', '', {
         'delimiter': '/', 'list-type': '2', 'max-keys': '2', 'prefix': prefix,
@@ -1051,7 +1051,7 @@ async function tianyiPollAndRename(
 
 function createTianyiOps(mount: StorageMount): StorageOps {
   return {
-    async read(k, method, workerEnv) {
+    async read(k, method, _workerEnv) {
       const fullKey = pk(mount, k);
       const cleanKey = fullKey.replace(/\/+$/, '');
       const resolved = await tianyiResolvePath(mount, cleanKey);
@@ -1064,7 +1064,7 @@ function createTianyiOps(mount: StorageMount): StorageOps {
       return downloadResp;
     },
 
-    async write(k, body, contentType, workerEnv) {
+    async write(k, body, _contentType, _workerEnv) {
       const fullKey = pk(mount, k);
       const lastSlash = fullKey.lastIndexOf('/');
       const parentPath = lastSlash >= 0 ? fullKey.slice(0, lastSlash) : '';
@@ -1084,7 +1084,7 @@ function createTianyiOps(mount: StorageMount): StorageOps {
       return new Response(null, { status: 201 });
     },
 
-    async mkdir(k, workerEnv) {
+    async mkdir(k, _workerEnv) {
       const dirKey = (k.endsWith('/') ? pk(mount, k) : `${pk(mount, k)}/`).replace(/\/+$/, '');
       const segments = dirKey.split('/').filter(Boolean);
       const folderName = segments.pop() || dirKey;
@@ -1095,7 +1095,7 @@ function createTianyiOps(mount: StorageMount): StorageOps {
       return new Response(null, { status: 201 });
     },
 
-    async delete(k, workerEnv) {
+    async delete(k, _workerEnv) {
       const cleanKey = pk(mount, k).replace(/\/+$/, '');
       const resolved = await tianyiResolvePath(mount, cleanKey);
       if (!resolved) return new Response('Not Found', { status: 404 });
@@ -1107,7 +1107,7 @@ function createTianyiOps(mount: StorageMount): StorageOps {
       return new Response(null, { status: 204 });
     },
 
-    async copy(srcK, destK, workerEnv) {
+    async copy(srcK, destK, _workerEnv) {
       const cleanSource = pk(mount, srcK).replace(/\/+$/, '');
       const cleanDest = pk(mount, destK).replace(/\/+$/, '');
       const source = await tianyiResolvePath(mount, cleanSource);
@@ -1125,7 +1125,7 @@ function createTianyiOps(mount: StorageMount): StorageOps {
       return new Response(null, { status: 201 });
     },
 
-    async move(srcK, destK, workerEnv) {
+    async move(srcK, destK, _workerEnv) {
       const cleanSource = pk(mount, srcK).replace(/\/+$/, '');
       const cleanDest = pk(mount, destK).replace(/\/+$/, '');
       const source = await tianyiResolvePath(mount, cleanSource);
@@ -1175,6 +1175,7 @@ export function getStorageOps(mount: StorageMount): StorageOps {
   switch (mount.provider) {
     case 'r2': return createR2Ops(mount);
     case 'tianyi': return createTianyiOps(mount);
+    case 's3': return createS3Ops(mount);
     default: return createS3Ops(mount);
   }
 }

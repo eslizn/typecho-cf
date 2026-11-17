@@ -111,7 +111,7 @@ pnpm exec wrangler secret put CF_API_TOKEN
 | `pnpm run deploy` | 本地：幂等创建任务 Queue + 构建 + 部署；Workers Builds：仅部署 |
 | `pnpm run queues:ensure` | 按当前 Wrangler 配置幂等创建任务 Queue |
 | `pnpm run reinstall:extensions` | 刷新所有已声明插件和主题的本地依赖快照 |
-| `pnpm run lint` | 类型感知静态检查（含浮空 Promise） |
+| `pnpm run lint` | 类型感知静态检查（TS / Astro 含内联脚本 / 测试 / 脚本） |
 | `pnpm run types:workers` | 按 Wrangler 配置生成 Worker 绑定与运行时类型 |
 | `pnpm run typecheck` | 生成 Workers / Astro 类型并运行 TypeScript 检查 |
 | `pnpm run test` | 运行所有测试 |

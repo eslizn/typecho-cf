@@ -269,7 +269,7 @@ async function purgeContentAndRelatedCache(
   await invalidateSiteCache(db);
 }
 
-export const POST: APIRoute = async ({ request, locals }) => {
+export const POST: APIRoute = async ({ request }) => {
   const admin = await requireAdminAction(request, 'contributor');
   if (isAdminActionResponse(admin)) return admin;
   const db = admin.db;

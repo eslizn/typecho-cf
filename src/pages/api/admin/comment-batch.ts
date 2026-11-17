@@ -16,7 +16,7 @@ export const GET: APIRoute = async ({ request }) =>
   textError(405, i18nMessage('core.error.methodNotAllowed', 'Method Not Allowed'), undefined, createCoreRequestI18n(request).i18n);
 export const POST: APIRoute = handler;
 
-async function handler({ request, locals, url }: { request: Request; locals: App.Locals; url: URL }) {
+async function handler({ request, url }: { request: Request; url: URL }) {
   const auth = await requireAdminAction(request, 'contributor');
   if (isAdminActionResponse(auth)) return auth;
 

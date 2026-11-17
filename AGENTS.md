@@ -510,6 +510,13 @@ vi.mock('cloudflare:workers', () => ({ env: { DB: null, BUCKET: { delete: mockFn
 - 安全修复必须包含负向回归用例（例如跨 origin、协议不一致、前缀匹配伪造、非法 enum/type、路径穿越）
 - 每个插件必须包含 `index.test.ts`，覆盖：Hook 注册、守卫分支、正常路径、拒绝路径、边界情况、配置验证
 
+### 10.5 静态检查（ESLint）
+
+- `pnpm run lint` 覆盖 `src/**/*.ts`、`src/**/*.astro`、`tests/**/*.ts`、`scripts/**/*.ts`；`.astro` 同时检查 frontmatter 与内联 `<script>`（Astro processor 生成的虚拟块）
+- 内联客户端脚本按浏览器环境检查（声明 `$`、`HyperDown`、`Markdown`、`DOMPurify` 等 vendor 全局），保留历史 `var` 写法，不套用 Workers 运行时约束
+- 规则以 `eslint.config.mjs` 为准；`no-explicit-any` 因 D1 batch 与插件/主题动态配置边界保持关闭，新增例外需在配置中说明原因
+- Workers 运行时边界由 lint 强制检查：运行时代码禁止 `node:*` 导入与 Node 全局，客户端 IP 只能经 `getClientIp(request)` 读取，禁止 `Astro.locals.runtime.env`；例外仅限 `src/integrations/`、测试与脚本
+
 ---
 
 ## 11. 参考示例

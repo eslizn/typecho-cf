@@ -1,6 +1,5 @@
-import { sql, inArray } from 'drizzle-orm';
+import { inArray } from 'drizzle-orm';
 import { schema, type Database } from '@/db';
-import type { SiteOptions } from '@/lib/options';
 import { loadSidebarData, loadNavPages, type SidebarData } from '@/lib/sidebar';
 import { createThemeI18n, loadThemeConfig } from '@/lib/theme';
 import { buildPermalink, buildCategoryLink } from '@/lib/content';

@@ -1,5 +1,5 @@
 import { canManageResource, hasPermission, parseAttachmentMeta, parsePluginOption, resolveCapability, stripTypechoMarkers } from 'typecho/plugin-sdk';
-import type { AttachmentMeta, CapabilityRuntimeContext, I18n, PluginInitContext } from 'typecho/plugin-sdk';
+import type { CapabilityRuntimeContext, I18n, PluginInitContext } from 'typecho/plugin-sdk';
 import type { Database } from 'typecho/db';
 import { schema } from 'typecho/db';
 import { and, desc, eq, inArray, or } from 'drizzle-orm';

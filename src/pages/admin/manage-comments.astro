@@ -2,7 +2,7 @@
 import Admin from '@/layouts/Admin.astro';
 import { createContext, requirePermission } from '@/lib/context';
 import { buildGravatarUrl } from '@/lib/gravatar';
-import { eq, and, desc, sql } from 'drizzle-orm';
+import { eq, desc, sql } from 'drizzle-orm';
 import { schema } from '@/db';
 import { buildPermalink, formatDate } from '@/lib/content';
 import { parsePageNumber, parsePositiveInteger, withQueryParams } from '@/lib/input';
@@ -78,7 +78,6 @@ const [countResult, commentsList, statusCounts] = await db.batch([
 const totalComments = Number(countResult?.[0]?.count ?? 0);
 const totalPages = Math.max(1, Math.ceil(totalComments / pageSize));
 // Keep the legacy row-array shape so the tab balloons render unchanged.
-const approvedCount = statusCounts.filter(row => row.status === 'approved');
 const waitingCount = statusCounts.filter(row => row.status === 'waiting');
 const spamCount = statusCounts.filter(row => row.status === 'spam');
 

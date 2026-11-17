@@ -470,7 +470,7 @@ describe('typecho-plugin-ai', () => {
       { choices: [], usage: { prompt_tokens: 12 } },
       { choices: [], usage: { completion_tokens: 3, total_tokens: 15 } },
     ].map(item => `data: ${JSON.stringify(item)}\n\n`).join('') + 'data: [DONE]\n\n';
-    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => new Response(
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(
       new ReadableStream<Uint8Array>({
         start(controller) {
           controller.enqueue(encoder.encode(events));
@@ -608,7 +608,7 @@ describe('typecho-plugin-ai', () => {
   it('retries a stream once without include_usage when the provider rejects that option', async () => {
     const encoder = new TextEncoder();
     let call = 0;
-    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
       call += 1;
       if (call === 1) return upstreamJson({ error: { message: 'include_usage is not supported' } }, 400);
       return new Response(

@@ -31,7 +31,7 @@ function isImageType(mime: string): boolean {
   return mime.startsWith('image/');
 }
 
-export const POST: APIRoute = async ({ request, locals }) => {
+export const POST: APIRoute = async ({ request }) => {
   const ctx = await requireAdminAction(request, 'contributor', { maxBodyBytes: REQUEST_BODY_LIMITS.uploadEnvelope });
   if (isAdminActionResponse(ctx)) return jsonAdminActionError(request, ctx);
   const { db, options, pluginCtx } = ctx;
@@ -130,7 +130,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
 /**
  * DELETE /api/admin/upload?cid=xxx - Delete an attachment
  */
-export const DELETE: APIRoute = async ({ request, locals, url }) => {
+export const DELETE: APIRoute = async ({ request, url }) => {
   const ctx = await requireAdminAction(request, 'contributor');
   if (isAdminActionResponse(ctx)) return jsonAdminActionError(request, ctx);
   const cid = parseInt(url.searchParams.get('cid') || '0', 10);
@@ -150,7 +150,7 @@ export const DELETE: APIRoute = async ({ request, locals, url }) => {
     if (result.missing.includes(cid)) return jsonError(404, i18nMessage('admin.upload.attachmentNotFound', 'The attachment does not exist.'), undefined, ctx.i18n);
     if (result.forbidden.includes(cid)) return jsonError(403, i18nMessage('admin.upload.attachmentForbidden', 'You do not have permission to delete this attachment.'), undefined, ctx.i18n);
     return jsonOk({ success: true, orphanRisk: result.orphanRisk });
-  } catch (error) {
+  } catch {
     return jsonError(500, i18nMessage('admin.upload.deleteFailed', 'The attachment could not be deleted.'), undefined, ctx.i18n);
   }
 };

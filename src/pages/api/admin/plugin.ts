@@ -19,7 +19,7 @@ import { REQUEST_BODY_LIMITS } from '@/lib/constants';
 import { readBoundedJson } from '@/lib/input';
 import { i18nMessage } from '@/lib/i18n';
 
-export const POST: APIRoute = async ({ request, locals }) => {
+export const POST: APIRoute = async ({ request }) => {
   const auth = await requireAdminAction(request, 'administrator');
   if (isAdminActionResponse(auth)) {
     return jsonAdminActionError(request, auth);
@@ -87,7 +87,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       diagnostics: activationPlan.diagnostics,
       cleanedPlugins: currentIds.filter(id => !newIds.includes(id)),
     });
-  } catch (err) {
+  } catch {
     return jsonError(400, i18nMessage('admin.error.invalidRequest', 'Invalid request.'), undefined, auth.i18n);
   }
 };
@@ -95,7 +95,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
 /**
  * GET: List all available plugins and their activation status
  */
-export const GET: APIRoute = async ({ request, locals }) => {
+export const GET: APIRoute = async ({ request }) => {
   const auth = await requireAdminAction(request, 'administrator', { csrf: false, plugins: true });
   if (isAdminActionResponse(auth)) {
     return jsonAdminActionError(request, auth);

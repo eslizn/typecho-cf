@@ -265,7 +265,7 @@ const configScope = `${entityName}.${entityId}.config`;
       area.style.opacity = '0';
       document.body.appendChild(area);
       area.select();
-      try { document.execCommand('copy'); done(); } catch (error) { /* clipboard unavailable */ }
+      try { document.execCommand('copy'); done(); } catch { /* clipboard unavailable */ }
       area.remove();
     }
 

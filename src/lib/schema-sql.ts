@@ -5,8 +5,7 @@
  * The single source of truth is `src/db/schema.ts`.
  */
 
-import { getTableConfig } from 'drizzle-orm/sqlite-core';
-import { SQLiteSyncDialect, type SQLiteTable, type SQLiteColumn } from 'drizzle-orm/sqlite-core';
+import { getTableConfig, SQLiteSyncDialect, type SQLiteTable, type SQLiteColumn } from 'drizzle-orm/sqlite-core';
 import * as schema from '@/db/schema';
 import { contentsFtsSql } from '@/lib/fulltext';
 

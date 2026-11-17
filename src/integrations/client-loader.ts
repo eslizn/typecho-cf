@@ -13,7 +13,7 @@
  * no runtime overhead beyond <script src="...">.
  */
 import type { AstroIntegration } from 'astro';
-import { existsSync, readdirSync, mkdirSync, writeFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, mkdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { discoverPlugins, type DiscoveredPlugin } from './plugin-loader';
 
@@ -134,15 +134,17 @@ export default function clientLoaderIntegration(): AstroIntegration {
 
         const schedule = () => {
           clearTimeout(timer);
-          timer = setTimeout(async () => {
-            const paths = [...changed];
-            changed.clear();
-            const affected = allSources.filter(s => paths.some(p => s.sourcePath === p));
-            if (affected.length > 0) {
-              console.log('[client-loader] Recompiling due to changes...');
-              await compileAll(affected, true);
-              console.log('[client-loader] Done. Refresh your browser.');
-            }
+          timer = setTimeout(() => {
+            void (async () => {
+              const paths = [...changed];
+              changed.clear();
+              const affected = allSources.filter(s => paths.some(p => s.sourcePath === p));
+              if (affected.length > 0) {
+                console.log('[client-loader] Recompiling due to changes...');
+                await compileAll(affected, true);
+                console.log('[client-loader] Done. Refresh your browser.');
+              }
+            })();
           }, 300);
         };
 

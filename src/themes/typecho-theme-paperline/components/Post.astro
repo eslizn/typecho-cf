@@ -209,7 +209,7 @@ const totalComments = commentPagination.totalComments;
                       parentInput.value = coid;
                       comment.appendChild(respond);
                       if (cancelLink) cancelLink.style.display = '';
-                      try { this.dom('textarea').focus(); } catch (e) {}
+                      try { this.dom('textarea').focus(); } catch {}
                       return false;
                     },
                     cancelReply: function () {

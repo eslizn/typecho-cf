@@ -116,7 +116,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
   }
 
   let userId = 0;
-  let ownerId = content.authorId || 0;
+  const ownerId = content.authorId || 0;
 
   if (authResult) {
     userId = authResult.uid;

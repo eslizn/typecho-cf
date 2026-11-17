@@ -48,7 +48,7 @@ beforeEach(async () => {
     name: 'activatedPlugins', user: 0, value: JSON.stringify(['typecho-plugin-test']),
   });
   mockPluginCtx = { activatedPlugins: new Set<string>() };
-  setActivatedPlugins(mockPluginCtx, ['typecho-plugin-test']);
+  await setActivatedPlugins(mockPluginCtx, ['typecho-plugin-test']);
 });
 
 afterEach(async () => {

@@ -11,7 +11,7 @@ import { readBoundedJson } from '@/lib/input';
 import { i18nMessage } from '@/lib/i18n';
 import { jsonError, jsonOk } from '@/lib/http';
 
-export const POST: APIRoute = async ({ request, locals }) => {
+export const POST: APIRoute = async ({ request }) => {
   const auth = await requireAdminAction(request, 'administrator');
   if (isAdminActionResponse(auth)) {
     return jsonAdminActionError(request, auth);
@@ -41,7 +41,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       message: auth.i18n.t('admin.theme.activated', { id: themeId }, 'Theme switched to "{id}"'),
       theme: themeId,
     });
-  } catch (err) {
+  } catch {
     return jsonError(400, i18nMessage('admin.error.invalidRequest', 'Invalid request.'), undefined, auth.i18n);
   }
 };

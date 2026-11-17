@@ -4,7 +4,7 @@
  * Sends real GET requests through the middleware to verify that no path
  * produces a 302 redirect when the DB is seeded and ready.
  */
-import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, vi } from 'vitest';
 import { createTestDb, type TestDatabase } from '../helpers';
 import { resetIsolateBoot } from '@/lib/isolate-boot';
 

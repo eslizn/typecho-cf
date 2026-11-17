@@ -14,7 +14,7 @@ import { textError } from '@/lib/http';
 export const GET: APIRoute = async ({ request }) =>
   textError(405, i18nMessage('core.error.methodNotAllowed', 'Method Not Allowed'), undefined, createCoreRequestI18n(request).i18n);
 
-export const POST: APIRoute = async ({ request, locals, url }) => {
+export const POST: APIRoute = async ({ request, url }) => {
   const auth = await requireAdminAction(request, 'contributor');
   if (isAdminActionResponse(auth)) return auth;
   const error = (status: number, key: string, variables: Record<string, string | number> = {}, fallback = key) =>

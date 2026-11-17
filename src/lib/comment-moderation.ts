@@ -2,7 +2,6 @@ import { and, eq, sql } from 'drizzle-orm';
 import { schema, type Database } from '@/db';
 import { hasPermission } from '@/lib/auth';
 import { invalidateSiteCache } from '@/lib/cache';
-import type { SiteOptions } from '@/lib/options';
 import { doHook, type HookContext } from '@/lib/plugin';
 import type { I18n } from '@/lib/i18n';
 

@@ -1,4 +1,4 @@
-import { eq, and } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import type { Database } from '@/db';
 import { schema } from '@/db';
 import { i18nMessage, type I18n } from '@/lib/i18n';

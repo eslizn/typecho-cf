@@ -9,8 +9,7 @@
 import Admin from '@/layouts/Admin.astro';
 import { createContext, requireAuth } from '@/lib/context';
 import { hasPermission } from '@/lib/auth';
-import { getTheme, themeHasConfig } from '@/lib/theme';
-import { createThemeI18n } from '@/lib/theme';
+import { createThemeI18n, getTheme, themeHasConfig } from '@/lib/theme';
 import { getThemeConfigurationView } from '@/lib/theme-config';
 import ConfigForm from '@/components/admin/ConfigForm.astro';
 

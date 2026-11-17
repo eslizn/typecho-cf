@@ -10,7 +10,7 @@ export interface TaskQueueSendOptions {
 }
 
 export interface TaskQueueBinding {
-  send(body: unknown, options?: TaskQueueSendOptions): Promise<unknown> | unknown;
+  send(body: unknown, options?: TaskQueueSendOptions): unknown;
 }
 
 /** Options shared by request and scheduled task enqueue operations. */

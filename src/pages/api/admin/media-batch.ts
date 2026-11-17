@@ -8,7 +8,7 @@ import { textError } from '@/lib/http';
 
 export const POST: APIRoute = handler;
 
-async function handler({ request, locals, url }: { request: Request; locals: App.Locals; url: URL }) {
+async function handler({ request, url }: { request: Request; url: URL }) {
   const auth = await requireAdminAction(request, 'editor');
   if (isAdminActionResponse(auth)) return auth;
 

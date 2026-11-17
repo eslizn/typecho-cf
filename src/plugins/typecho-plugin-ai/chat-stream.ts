@@ -7,11 +7,10 @@ import { readWithDeadline, aiTimeoutError, decodeBase64, isRecord } from './io';
 import { AiCapabilityError, AI_ERROR_CODES } from './errors';
 import type {
   AiAudioOutput,
-  AiNormalizedMessage,
+  AiChatStreamChunk,
   AiToolCall,
   AiUsage,
 } from './types';
-import type { AiChatStreamChunk } from './types';
 import type { AiModelCandidate } from './provider';
 export function numberOr(fallback: number, value: unknown): number {
   return Number.isSafeInteger(value) ? value as number : fallback;

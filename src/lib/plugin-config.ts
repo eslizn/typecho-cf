@@ -17,13 +17,9 @@ import {
   allowlistConfigSettings as allowlistSettings,
   findTokenLimitOverflow,
   isRecord,
-  maskConfigDefinition as maskFieldDefinition,
   maskConfigDefinitions as maskedDefinitions,
-  maskConfigValue as maskValue,
   maskConfigValues as maskValues,
   restoreConfigSecrets as restoreSecrets,
-  restoreConfigValue as restoreValue,
-  sanitizeConfigValue as sanitizeValue,
   stripConfigRowIds,
 } from '@/lib/config';
 

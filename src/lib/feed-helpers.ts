@@ -4,11 +4,10 @@
  */
 
 import type { FeedItem } from '@/lib/feed';
-import type { I18n, ResolvedLocale } from '@/lib/i18n';
+import type { I18n } from '@/lib/i18n';
 import type { TimezoneSetting } from '@/lib/timezone';
 import { createRequestI18n } from '@/lib/i18n-runtime';
 import { buildPermalink } from '@/lib/content';
-import { generateRss2, generateAtom, generateRss1 } from '@/lib/feed';
 import { renderContent } from '@/lib/markdown';
 import {
   applyFilterSafely,

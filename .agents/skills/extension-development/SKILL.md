@@ -24,5 +24,5 @@ Cover the requested behavior with loader or unit tests where relevant. For templ
 ## Verify and deliver
 
 - Iterate with focused cases using `pnpm run test <path>` or `pnpm run test:astro <path>`. Map each acceptance criterion to coverage and include applicable rejection or fallback paths. Reuse existing fixtures and helpers.
-- Run `pnpm run test` and `pnpm run typecheck` on the finished changes as required by `AGENTS.md`. Run `pnpm run lint` for TypeScript changes, `pnpm run test:astro` for template behavior changes, and `pnpm run build` for new packages or changes to discovery, generated assets, or build entry points. For discovery changes, confirm the build finds the extension and emits its expected artifacts where applicable.
+- Run `pnpm run test` and `pnpm run typecheck` on the finished changes as required by `AGENTS.md`. Run `pnpm run lint` for source changes, `pnpm run test:astro` for template behavior changes, and `pnpm run build` for new packages or changes to discovery, generated assets, or build entry points. For discovery changes, confirm the build finds the extension and emits its expected artifacts where applicable.
 - Summarize delivered behavior, integration, tests, and any checks that could not run. Update extension usage or configuration docs when the operator needs new setup information.

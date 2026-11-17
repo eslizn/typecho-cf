@@ -9,7 +9,7 @@
 import type { HookContext } from './plugin';
 
 export type CallHandler = (...args: any[]) => void | Promise<void>;
-export type FilterHandler = (value: any, ...args: any[]) => any | Promise<any>;
+export type FilterHandler = (value: any, ...args: any[]) => any;
 interface HookRegistration {
   pluginId: string;
   handler: CallHandler | FilterHandler;

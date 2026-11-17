@@ -130,7 +130,7 @@ describe('POST /api/admin/plugin', () => {
     await testDb.insert(schema.options).values({
       name: 'activatedPlugins', user: 0, value: JSON.stringify(['typecho-plugin-test']),
     });
-    setActivatedPlugins(mockPluginCtx, ['typecho-plugin-test']);
+    await setActivatedPlugins(mockPluginCtx, ['typecho-plugin-test']);
 
     const cookie = await makeAuthCookie(testDb, 1, AUTH_CODE, SECRET);
     const req = new Request('https://example.com/api/admin/plugin', {

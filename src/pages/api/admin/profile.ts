@@ -14,7 +14,7 @@ import { eq, and, ne } from 'drizzle-orm';
 import { i18nMessage } from '@/lib/i18n';
 import { textError } from '@/lib/http';
 
-export const POST: APIRoute = async ({ request, locals }) => {
+export const POST: APIRoute = async ({ request }) => {
   const auth = await requireAdminAction(request, 'visitor');
   if (isAdminActionResponse(auth)) return auth;
 

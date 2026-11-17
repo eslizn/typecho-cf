@@ -10,7 +10,7 @@ import { env } from 'cloudflare:workers';
 import { i18nMessage } from '@/lib/i18n';
 import { textError } from '@/lib/http';
 
-export const POST: APIRoute = async ({ request, locals }) => {
+export const POST: APIRoute = async ({ request }) => {
   const auth = await requireAdminAction(request, 'editor');
   if (isAdminActionResponse(auth)) return auth;
 

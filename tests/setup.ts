@@ -12,7 +12,7 @@ import { resetPluginInitState } from '@/lib/plugin';
 import { resetCommentRootCountCache } from '@/lib/comment-page';
 import { resetArchiveCountCache } from '@/lib/page-data';
 
-// @ts-ignore - Make caches global for tests
+// @ts-expect-error - Make caches global for tests
 globalThis.caches = caches;
 
 // Reset cache before each test to prevent cross-test pollution

@@ -1,6 +1,5 @@
 ---
-import type { SiteOptions } from '@/lib/options';
-import type { computeUrls } from '@/lib/options';
+import type { SiteOptions, computeUrls } from '@/lib/options';
 import type { UserRow } from '@/lib/context';
 import { getThemeStylesheets } from '@/lib/theme';
 import { getClientSnippets, type PageContext, type HookContext } from '@/lib/plugin';
@@ -27,8 +26,6 @@ const {
   keywords,
   options,
   urls,
-  user,
-  isLoggedIn = false,
   bodyClass = '',
   pageContext,
   pluginCtx,
@@ -67,7 +64,7 @@ const pluginSnippets = await getClientSnippets(pluginCtx ?? { activatedPlugins: 
   <Fragment set:html={pluginSnippets.bodyHtml} />
   {previewTheme && (
     <script is:inline data-preview-theme={previewTheme} data-preview-query={THEME_PREVIEW_QUERY_PARAM}>
-      {`(() => {
+      (() => {
         const script = document.currentScript;
         const theme = script?.dataset.previewTheme;
         const query = script?.dataset.previewQuery;
@@ -99,7 +96,7 @@ const pluginSnippets = await getClientSnippets(pluginCtx ?? { activatedPlugins: 
         } else {
           applyPreviewNavigation();
         }
-      })();`}
+      })();
     </script>
   )}
 </body>

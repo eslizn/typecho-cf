@@ -12,7 +12,7 @@ import {
 import { eq, and, inArray } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 import { isCacheablePublicPath, matchCacheSafely, normalizeCacheKeyUrl } from '@/lib/cache';
-import { CONTENT_ROUTE_PATHS, isContentPathAllowed } from '@/lib/content-path';
+import { isContentPathAllowed } from '@/lib/content-path';
 import type { I18nMessage } from '@/lib/i18n';
 import { i18nMessage, normalizeI18nMessage } from '@/lib/i18n';
 import { getThemeTranslationCatalogVersion } from '@/lib/theme';

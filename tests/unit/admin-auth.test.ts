@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { canUseContentEditor, jsonAdminActionError, safeAdminRedirectUrl } from '@/lib/admin-auth';
 import { setRequestCoreContext } from '@/lib/context';
 import { createI18n } from '@/lib/i18n';

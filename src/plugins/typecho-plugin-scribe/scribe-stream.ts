@@ -267,7 +267,7 @@ export function createScribeLocalProgressReporter(
   let requestingAt: number | undefined;
   let firstOutputAt: number | undefined;
   let outputTokens = 0;
-  let usage: ScribeUsageSummary = inputEstimate > 0
+  const usage: ScribeUsageSummary = inputEstimate > 0
     ? { inputTokens: inputEstimate, inputTokensEstimated: true }
     : {};
   let terminal = false;

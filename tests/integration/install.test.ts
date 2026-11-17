@@ -2,15 +2,13 @@
  * Integration tests for POST /api/install
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import * as schema from '@/db/schema';
 import { createTestDb, disposeTestDb, type TestDatabase } from '../helpers';
-import { eq } from 'drizzle-orm';
 
 let testDb: TestDatabase;
 
 const mockD1 = {
   batch: vi.fn(async (stmts: any[]) => {
-    for (const stmt of stmts) {
+    for (const _stmt of stmts) {
       // Each stmt is { query: string, params: any[] } from d1.prepare()
     }
   }),
@@ -20,8 +18,6 @@ vi.mock('@/db', async () => {
   const actual = await vi.importActual<typeof import('@/db')>('@/db');
   return { ...actual, getDb: (_d1: any) => testDb, schema: actual.schema };
 });
-
-const { mockFn } = vi.hoisted(() => ({ mockFn: vi.fn() }));
 
 vi.mock('cloudflare:workers', () => ({
   env: { DB: null, BUCKET: null },

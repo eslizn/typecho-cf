@@ -8,7 +8,6 @@
 import Base from '@/layouts/Base.astro';
 import CommentList from './CommentList.astro';
 import type { ThemePageProps } from '@/lib/theme-props';
-import { formatDate } from '@/lib/content';
 
 type Props = ThemePageProps;
 
@@ -164,7 +163,7 @@ const totalComments = commentPagination.totalComments;
                     parentInput.value = coid;
                     comment.appendChild(respond);
                     if (cancelLink) cancelLink.style.display = '';
-                    try { this.dom('textarea').focus(); } catch (e) {}
+                    try { this.dom('textarea').focus(); } catch {}
                     return false;
                   },
                   cancelReply: function () {

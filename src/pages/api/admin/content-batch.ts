@@ -33,7 +33,7 @@ async function loadContentsChunked(db: any, cids: number[]): Promise<ContentRow[
   return rows;
 }
 
-async function handler({ request, locals, url }: { request: Request; locals: App.Locals; url: URL }) {
+async function handler({ request, url }: { request: Request; url: URL }) {
   const auth = await requireAdminAction(request, 'contributor');
   if (isAdminActionResponse(auth)) return auth;
 

@@ -8,7 +8,7 @@ import { textError } from '@/lib/http';
 import { i18nMessage, matchSupportedLocale } from '@/lib/i18n';
 import { getAvailableTranslationLocales } from '@/lib/i18n-registry';
 
-export const POST: APIRoute = async ({ request, locals }) => {
+export const POST: APIRoute = async ({ request }) => {
   const auth = await requireAdminAction(request, 'administrator');
   if (isAdminActionResponse(auth)) return auth;
 

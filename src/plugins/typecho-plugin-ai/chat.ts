@@ -6,8 +6,8 @@ import {
   type AiModelCandidate,
 } from './provider';
 import { AiCapabilityError, AI_ERROR_CODES } from './errors';
-import { aiTimeoutError, decodeBase64, encodeBase64, isRecord, readBoundedBytes, readWithDeadline } from './io';
-import { binaryBase64, binaryDataUrl, isStringOrBinary, readBinary } from './chat-binary';
+import { aiTimeoutError, isRecord, readBoundedBytes, readWithDeadline } from './io';
+import { binaryBase64, binaryDataUrl, isStringOrBinary } from './chat-binary';
 import {
   createChatStream,
   normalizeAudio,
@@ -18,24 +18,21 @@ import {
 } from './chat-stream';
 import { createAiProgressReporter } from './telemetry';
 import type {
-  AiAudioOutput,
-  AiBinary,
   AiChatGenerationService,
   AiChatMessage,
   AiChatRequest,
   AiChatResponse,
   AiChatResult,
   AiChatStreamChunk,
+  AiConfig,
   AiContentPart,
   AiGenerationOptions,
   AiFunctionCall,
   AiNormalizedMessage,
   AiToolCall,
-  AiUsage,
   AiRuntimeContext,
   AiTool,
 } from './types';
-import type { AiConfig } from './types';
 
 const MAX_UPSTREAM_RETRIES = 3;
 const DEFAULT_RETRY_BACKOFF_MS = [100, 200, 400] as const;
@@ -207,13 +204,12 @@ function retryDelayMs(delays: readonly number[], retryCount: number): number {
 async function waitBeforeRetry(delayMs: number, signal: AbortSignal): Promise<void> {
   if (delayMs <= 0 || signal.aborted) return;
   await new Promise<void>(resolve => {
-    let timer: ReturnType<typeof setTimeout> | undefined;
     const finish = () => {
-      if (timer !== undefined) clearTimeout(timer);
+      clearTimeout(timer);
       signal.removeEventListener('abort', finish);
       resolve();
     };
-    timer = setTimeout(finish, delayMs);
+    const timer = setTimeout(finish, delayMs);
     signal.addEventListener('abort', finish, { once: true });
   });
 }

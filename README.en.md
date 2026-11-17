@@ -96,7 +96,7 @@ The first `wrangler deploy` may write a generated `database_id` back into `wrang
 | `pnpm run dev` | Start local dev server |
 | `pnpm run build` | Production build |
 | `pnpm run deploy` | Local: task Queue preflight + build + deploy; Workers Builds: deploy only |
-| `pnpm run lint` | Type-aware static checks, including floating Promises |
+| `pnpm run lint` | Type-aware checks for TS, Astro (frontmatter and inline scripts), tests, and scripts |
 | `pnpm run types:workers` | Generate Worker binding and runtime types from Wrangler config |
 | `pnpm run typecheck` | Generate Workers / Astro types and run the TypeScript check |
 | `pnpm run test` | Run all tests |

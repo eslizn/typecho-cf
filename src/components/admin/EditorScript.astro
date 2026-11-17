@@ -35,7 +35,6 @@ const { messagesJson } = Astro.props;
 
       $(document).ready(function () {
       var textarea = $('#text'),
-          isFullScreen = false,
           toolbar = $('<div class="editor" id="wmd-button-bar" />').insertBefore(textarea.parent()),
           preview = $('<div id="wmd-preview" class="wmd-hidetab" />').insertAfter('.editor');
 
@@ -91,7 +90,7 @@ const { messagesJson } = Astro.props;
               + '<div class="details">' + details + '</div>';
         }
         html = html.replace(/<(iframe|embed)\s+([^>]*)>/ig, function (all, tag, src) {
-          if (src[src.length - 1] == '/') { src = src.substring(0, src.length - 1); }
+          if (src[src.length - 1] === '/') { src = src.substring(0, src.length - 1); }
           return '<div class="embed"><strong>' + tag + '</strong> : ' + $.trim(src) + '</div>';
         });
         return DOMPurify.sanitize(html, {USE_PROFILES: {html: true}});
@@ -99,11 +98,11 @@ const { messagesJson } = Astro.props;
 
       editor.hooks.chain('onPreviewRefresh', function () {
         var images = $('img', preview), count = images.length;
-        if (count == 0) { reloadScroll(true); }
+        if (count === 0) { reloadScroll(true); }
         else {
           images.bind('load error', function () {
             count--;
-            if (count == 0) { reloadScroll(true); }
+            if (count === 0) { reloadScroll(true); }
           });
         }
       });
@@ -115,20 +114,17 @@ const { messagesJson } = Astro.props;
         $(document.body).addClass('fullscreen');
         var h = $(window).height() - toolbar.outerHeight();
         textarea.css('height', h); preview.css('height', h);
-        isFullScreen = true;
       });
 
       editor.hooks.chain('enterFullScreen', function () {
         $(document.body).addClass('fullscreen');
         var h = window.screen.height - toolbar.outerHeight();
         textarea.css('height', h); preview.css('height', h);
-        isFullScreen = true;
       });
 
       editor.hooks.chain('exitFullScreen', function () {
         $(document.body).removeClass('fullscreen');
         textarea.height(th); preview.height(ph);
-        isFullScreen = false;
       });
 
       editor.hooks.chain('commandExecuted', function () {
@@ -138,8 +134,8 @@ const { messagesJson } = Astro.props;
       editor.run();
 
       // 编辑预览切换
-      var edittab = $('<div class="wmd-edittab"><a href="#wmd-editarea" class="active"></a><a href="#wmd-preview"></a></div>'),
-          editarea = $(textarea.parent()).attr("id", "wmd-editarea");
+      var edittab = $('<div class="wmd-edittab"><a href="#wmd-editarea" class="active"></a><a href="#wmd-preview"></a></div>');
+      $(textarea.parent()).attr("id", "wmd-editarea");
       edittab.find('a[href="#wmd-editarea"]').text(editorMessages.compose);
       edittab.find('a[href="#wmd-preview"]').text(editorMessages.preview);
       $('.editor').prepend(edittab);
@@ -148,9 +144,9 @@ const { messagesJson } = Astro.props;
         $(".wmd-edittab a").removeClass('active');
         $(this).addClass("active");
         $("#wmd-editarea, #wmd-preview").addClass("wmd-hidetab");
-        var selected_tab = $(this).attr("href"),
-            selected_el = $(selected_tab).removeClass("wmd-hidetab");
-        if (selected_tab == "#wmd-preview") {
+        var selectedTab = $(this).attr("href");
+        $(selectedTab).removeClass("wmd-hidetab");
+        if (selectedTab === "#wmd-preview") {
           $("#wmd-button-row").addClass("wmd-visualhide");
         } else {
           $("#wmd-button-row").removeClass("wmd-visualhide");
@@ -171,7 +167,7 @@ const { messagesJson } = Astro.props;
 
       // 公开度切换密码保护
       $('#visibility').change(function () {
-        if ($(this).val() == 'password') {
+        if ($(this).val() === 'password') {
           $('#post-password').removeClass('hidden');
         } else {
           $('#post-password').addClass('hidden');
@@ -455,9 +451,9 @@ const { messagesJson } = Astro.props;
           try {
             var u = new URL(url, location.origin);
             relUrl = u.pathname;
-          } catch (e) {}
+          } catch {}
           var md;
-          if (isImage == 1 || isImage === true) {
+          if (isImage === 1 || isImage === true) {
             md = '![' + title + '](' + relUrl + ')';
           } else {
             md = '[' + title + '](' + relUrl + ')';

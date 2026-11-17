@@ -27,13 +27,14 @@ let attachments: AttachmentItem[] = [];
 
 const cidNum = cid ? parseInt(cid, 10) : 0;
 if (cidNum > 0) {
-  let [pageRows, fieldRows, attachmentRows] = await db.batch([
+  const [pageRows, batchFieldRows, attachmentRows] = await db.batch([
     db.select().from(schema.contents).where(eq(schema.contents.cid, cidNum)).limit(1),
     db.select().from(schema.fields).where(eq(schema.fields.cid, cidNum)),
     db.select().from(schema.contents)
       .where(and(eq(schema.contents.type, 'attachment'), eq(schema.contents.parent, cidNum)))
       .orderBy(schema.contents.created),
   ]);
+  let fieldRows = batchFieldRows;
   page = pageRows[0] || null;
   if (page && page.type !== 'page' && page.type !== 'page_draft') {
     if (page.type === 'post' || page.type === 'post_draft') {
@@ -82,7 +83,6 @@ const writePageOptionHtml = await applyFilterSafely(ctx, 'admin:writePage:option
 const writePageAdvanceOptionHtml = await applyFilterSafely(ctx, 'admin:writePage:advanceOption', '', writePageHookExtra);
 const writePageBottomHtml = await applyFilterSafely(ctx, 'admin:writePage:bottom', '', writePageHookExtra);
 const t = ctx.i18n.t.bind(ctx.i18n);
-const tPlural = ctx.i18n.tPlural.bind(ctx.i18n);
 const formatAttachmentSize = (size: number): string => {
   if (size < 1024) return `${size} ${t('admin.unit.bytes', {}, 'B')}`;
   if (size < 1024 * 1024) return `${Math.ceil(size / 1024)} ${t('admin.unit.kilobytes', {}, 'KB')}`;

@@ -14,7 +14,7 @@
 | 仓库 | `https://github.com/eslizn/typecho-cf` |
 | 许可证 | MIT |
 | 包管理器 | pnpm（锁定） |
-| Node.js | 26.x LTS，版本由 `.node-version` 固定；CI / Cloudflare Workers Builds 共用，升级时同步 `engines.node` 与 `@types/node` 主版本 |
+| Node.js | 26.x LTS，`.node-version` 使用主版本 `26`；CI / Cloudflare Workers Builds 共用，升级 LTS 主版本时同步 `engines.node` 与 `@types/node` 主版本 |
 
 ### 1.1 Agent 配置约定
 
@@ -43,7 +43,7 @@
 | 文件存储 | Cloudflare R2 | — |
 | 密码哈希 | PBKDF2-SHA256 | 100,000 迭代 + 16B salt（Cloudflare Workers Web Crypto 上限；更低迭代的存量 hash 在登录时机会式重哈希） |
 | 测试 | Vitest | 5.x |
-| 语言 | TypeScript | 7.x（ESLint / typescript-eslint 侧通过 `typescript-eslint-typescript` 别名固定使用 TS 6.0.x API） |
+| 语言 | TypeScript | 6.x（保持与 ESLint / typescript-eslint 的官方支持范围一致；升级前确认上游 peer 范围） |
 
 ---
 

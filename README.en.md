@@ -28,7 +28,7 @@ This project uses Cloudflare’s recommended [`wrangler.jsonc`](https://develope
 
 Keep these commands in Button/Workers Builds: Build command `pnpm run build` and Production deploy command `pnpm run deploy`. The deploy wrapper detects Cloudflare's `WORKERS_CI=1`, skips the local Queue check and duplicate build, and only deploys. Non-production branches should use Cloudflare's default `pnpm exec wrangler versions upload` (or the equivalent `npx wrangler versions upload`) rather than the production deploy command.
 
-Workers Builds selects Node.js LTS from the root `.node-version`. If an existing project has a `NODE_VERSION` build variable, set it to `26.13.0` or remove that override to use the version file. This is a build setting, not a Wrangler runtime `vars` entry.
+Workers Builds selects Node.js LTS from the root `.node-version`. If an existing project has a `NODE_VERSION` build variable, set it to `26` or remove that override to use the version file. This is a build setting, not a Wrangler runtime `vars` entry.
 
 The button reads the pushed default branch on GitHub / GitLab; uncommitted or unpushed local configuration does not take effect. If the clone step reports that repository contents cannot be fetched, confirm the source repository is public and inspect the failed request's status and error response in the browser Network panel. This message alone does not establish a Wrangler format problem.
 
@@ -38,8 +38,8 @@ Tables are created by the install wizard on first submit — you do not need a s
 
 ### Prerequisites
 
-- Node.js **26.13.0+ (26.x LTS)**; `.node-version` pins the version used by CI and Cloudflare Workers Builds
-- [pnpm](https://pnpm.io) **11.28.11** (`npm install -g pnpm@11.28.11`; pinned by `packageManager`; CI uses the same version)
+- Node.js **26.x LTS**; `.node-version` selects major version `26` for CI and Cloudflare Workers Builds
+- [pnpm](https://pnpm.io) **12.21.0** (`npm install -g pnpm@12.21.0`; pinned by `packageManager`; CI uses the same version)
 - A Cloudflare account (only required for Cloudflare deployment)
 
 ### Local development (zero to running)
@@ -178,7 +178,7 @@ See [Theme Development Guide](src/themes/README.en.md).
 | Database | [Cloudflare D1](https://developers.cloudflare.com/d1/) (SQLite) |
 | ORM | [Drizzle ORM](https://orm.drizzle.team) 0.45.x |
 | File Storage | [Cloudflare R2](https://developers.cloudflare.com/r2/) |
-| Language | TypeScript 7.x |
+| Language | TypeScript 6.x |
 | Testing | [Vitest](https://vitest.dev) 5.x |
 | Package Manager | pnpm |
 

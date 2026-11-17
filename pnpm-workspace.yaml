@@ -25,6 +25,7 @@ minimumReleaseAgeExclude:
   - wrangler
   - '@types/node@26.5.0'
   - marked@18.0.12
+  - marked@18.2.1
   - '@cloudflare/workerd-darwin-64@1.20260921.1'
   - '@cloudflare/workerd-darwin-arm64@1.20260921.1'
   - '@cloudflare/workerd-linux-64@1.20260921.1'
@@ -37,3 +38,13 @@ minimumReleaseAgeExclude:
   - '@astrojs/markdown-satteri@0.4.7'
   - '@isaacs/nonrecursive-glob-match@1.1.0'
   - minimatch@11.0.5
+  - '@typescript-eslint/eslint-plugin@8.73.0'
+  - '@typescript-eslint/parser@8.73.0'
+  - '@typescript-eslint/project-service@8.73.0'
+  - '@typescript-eslint/scope-manager@8.73.0'
+  - '@typescript-eslint/tsconfig-utils@8.73.0'
+  - '@typescript-eslint/type-utils@8.73.0'
+  - '@typescript-eslint/types@8.73.0'
+  - '@typescript-eslint/typescript-estree@8.73.0'
+  - '@typescript-eslint/utils@8.73.0'
+  - '@typescript-eslint/visitor-keys@8.73.0'

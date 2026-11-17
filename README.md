@@ -28,7 +28,7 @@
 
 Button/Workers Builds 中保持以下命令即可：Build command 为 `pnpm run build`，Production deploy command 为 `pnpm run deploy`；`pnpm run deploy` 会识别 Cloudflare 提供的 `WORKERS_CI=1`，自动跳过本地 Queue 检查和重复构建，仅执行部署。非生产分支使用 Cloudflare 默认的 `pnpm exec wrangler versions upload`（或等价的 `npx wrangler versions upload`），不要使用生产部署命令。
 
-Workers Builds 通过根目录的 `.node-version` 选择 Node.js LTS。若已有项目设置了构建环境变量 `NODE_VERSION`，请将其同步为 `26.13.0`，或删除该覆盖值以使用版本文件；它属于构建设置，不是 Wrangler 的运行时 `vars`。
+Workers Builds 通过根目录的 `.node-version` 选择 Node.js LTS。若已有项目设置了构建环境变量 `NODE_VERSION`，请将其同步为 `26`，或删除该覆盖值以使用版本文件；它属于构建设置，不是 Wrangler 的运行时 `vars`。
 
 按钮读取 GitHub / GitLab 上已推送的默认分支，本地未提交或未推送的配置不会生效。若在「克隆存储库」阶段提示「无法获取存储库内容」，先确认源仓库公开，再在浏览器开发者工具的 Network 中检查失败请求的状态码和响应错误；该提示本身不能证明 Wrangler 格式有问题。
 
@@ -38,8 +38,8 @@ Workers Builds 通过根目录的 `.node-version` 选择 Node.js LTS。若已有
 
 ### 前置要求
 
-- Node.js **26.13.0+（26.x LTS）**，版本固定在 `.node-version`，CI 与 Cloudflare Workers Builds 读取同一文件
-- [pnpm](https://pnpm.io) **11.28.11**（`npm install -g pnpm@11.28.11`；由 `packageManager` 锁定，CI 使用同一版本）
+- Node.js **26.x LTS**，`.node-version` 固定主版本 `26`，CI 与 Cloudflare Workers Builds 读取同一文件
+- [pnpm](https://pnpm.io) **12.21.0**（`npm install -g pnpm@12.21.0`；由 `packageManager` 锁定，CI 使用同一版本）
 - Cloudflare 帐号（仅部署到 Cloudflare 时需要）
 
 ### 本地开发
@@ -199,7 +199,7 @@ pnpm run reset-password:cloudflare   # Cloudflare
 | 数据库 | [Cloudflare D1](https://developers.cloudflare.com/d1/) (SQLite) |
 | ORM | [Drizzle ORM](https://orm.drizzle.team) 0.45.x |
 | 文件存储 | [Cloudflare R2](https://developers.cloudflare.com/r2/) |
-| 语言 | TypeScript 7.x |
+| 语言 | TypeScript 6.x |
 | 测试 | [Vitest](https://vitest.dev) 5.x |
 | 包管理 | pnpm |
 

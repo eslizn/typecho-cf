@@ -15,8 +15,7 @@ describe('Workers configuration and static checks', () => {
     expect(config.d1_databases).toEqual([{ binding: 'DB', database_name: 'typecho-cf-db', migrations_dir: 'drizzle' }]);
     expect(config.queues?.producers).toEqual([{ binding: 'QUEUE', queue: 'typecho-cf-tasks' }]);
     expect(config.queues?.consumers?.[0]).not.toHaveProperty('dead_letter_queue');
-    expect(pkg.scripts['types:workers']).toContain('scripts/generate-worker-types.mjs');
-    expect(pkg.scripts.typecheck).toContain('pnpm run types:workers');
+    expect(pkg.scripts.typecheck).toContain('wrangler types worker-configuration.d.ts');
     expect(pkg.scripts.typecheck).toContain('tsc --noEmit');
     expect(ci).toContain('pnpm run typecheck');
     expect(read('.gitignore')).toContain('worker-configuration.d.ts');
@@ -53,8 +52,7 @@ describe('Workers configuration and static checks', () => {
   it('provides repeatable generated-type and floating-Promise checks', () => {
     const pkg = JSON.parse(read('package.json')) as { scripts: Record<string, string> };
     const eslint = read('eslint.config.mjs');
-    const generator = read('scripts/generate-worker-types.mjs');
-    expect(generator).toContain("['types', 'worker-configuration.d.ts'");
+    expect(pkg.scripts.typecheck).toContain('wrangler types worker-configuration.d.ts');
     expect(pkg.scripts.lint).toContain('eslint');
     expect(eslint).toContain("'@typescript-eslint/no-floating-promises': 'error'");
     expect(eslint).toContain("'worker-configuration.d.ts'");

@@ -274,23 +274,23 @@ export async function ensureQueues({
   const queueNames = parseQueueNamesFromWranglerConfig(rawConfig, context.environment);
   const log = typeof logger?.log === 'function' ? logger.log.bind(logger) : () => {};
 
-  log(`[queues:ensure] checking ${queueNames.length} Queue resource(s)`);
+  log(`[queues] checking ${queueNames.length} Queue resource(s)`);
   let existing = await listExistingQueueNames({ runner, cwd, globalArgs: context.globalArgs });
   const created = [];
 
   for (const queueName of queueNames) {
     if (existing.has(queueName)) {
-      log(`[queues:ensure] exists: ${queueName}`);
+      log(`[queues] exists: ${queueName}`);
       continue;
     }
 
-    log(`[queues:ensure] creating: ${queueName}`);
+    log(`[queues] creating: ${queueName}`);
     const createArgs = ['queues', 'create', queueName, ...context.globalArgs];
     const result = await runner(createArgs, { cwd, capture: true });
     if (result?.status === 0) {
       existing.add(queueName);
       created.push(queueName);
-      log(`[queues:ensure] created: ${queueName}`);
+      log(`[queues] created: ${queueName}`);
       continue;
     }
 
@@ -303,7 +303,7 @@ export async function ensureQueues({
       );
     }
     if (existing.has(queueName)) {
-      log(`[queues:ensure] exists after concurrent create: ${queueName}`);
+      log(`[queues] exists after concurrent create: ${queueName}`);
       continue;
     }
     throw new Error(`wrangler queues create failed for '${queueName}' (${commandStatus(result)}); deployment was stopped`);
@@ -315,7 +315,7 @@ export async function ensureQueues({
 const invokedScript = process.argv[1] ? resolve(process.argv[1]) : '';
 if (invokedScript === fileURLToPath(import.meta.url)) {
   ensureQueues({ rootDir: process.cwd(), argv: process.argv.slice(2) }).catch((error) => {
-    console.error(`[queues:ensure] ${error.message}`);
+    console.error(`[queues] ${error.message}`);
     process.exitCode = 1;
   });
 }

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -58,6 +58,23 @@ describe('theme loader local file dependencies', () => {
     expect(theme.manifest.config).toEqual({
       footerText: { type: 'text', label: 'Footer text' },
     });
+  });
+
+  it('resolves workspace dependencies through the linked source package', () => {
+    const root = mkdtempSync(join(tmpdir(), 'typecho-theme-loader-'));
+    temporaryRoots.push(root);
+
+    const themeName = 'typecho-theme-fixture';
+    writeTheme(join(root, 'src', 'themes', themeName), undefined);
+    mkdirSync(join(root, 'node_modules'), { recursive: true });
+    symlinkSync(join(root, 'src', 'themes', themeName), join(root, 'node_modules', themeName), 'dir');
+    writeFileSync(join(root, 'package.json'), JSON.stringify({
+      dependencies: { [themeName]: 'workspace:*' },
+    }));
+
+    const [theme] = discoverThemes(root);
+
+    expect(theme.packageDir).toBe(join(realpathSync(root), 'src', 'themes', themeName));
   });
 
   it('ignores an unlisted theme that only exists in node_modules', () => {

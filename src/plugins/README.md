@@ -580,7 +580,7 @@ import { schema } from 'typecho/db';
 ### 本地开发（工作区包）
 
 1. 将插件目录放在 `src/plugins/` 下
-2. 在根 `package.json` 的 `dependencies` 中添加 `"<packageName>": "file:src/plugins/<packageName>"`
+2. 在根 `package.json` 的 `dependencies` 中添加 `"<packageName>": "workspace:*"`
 3. 运行 `pnpm install`
 4. 重新执行 `pnpm run build`
 

@@ -8,19 +8,19 @@
  *
  * Usage:
  *   # Migrate to Cloudflare (remote)
- *   npx tsx scripts/migrate.ts --source /path/to/typecho.db --uploads /path/to/usr/uploads --target cloudflare
+ *   pnpm run ops db migrate --source /path/to/typecho.db --uploads /path/to/usr/uploads --target cloudflare
  *
  *   # Migrate to local (wrangler dev uses .wrangler/)
- *   npx tsx scripts/migrate.ts --source /path/to/typecho.db --uploads /path/to/usr/uploads --target local
+ *   pnpm run ops db migrate --source /path/to/typecho.db --uploads /path/to/usr/uploads --target local
  *
  *   # Dry run (preview only, no writes)
- *   npx tsx scripts/migrate.ts --source /path/to/typecho.db --uploads /path/to/usr/uploads --target local --dry-run
+ *   pnpm run ops db migrate --source /path/to/typecho.db --uploads /path/to/usr/uploads --target local --dry-run
  *
  *   # Specify table prefix (default: typecho_)
- *   npx tsx scripts/migrate.ts --source /path/to/typecho.db --uploads /path/to/usr/uploads --target local --prefix typecho_
+ *   pnpm run ops db migrate --source /path/to/typecho.db --uploads /path/to/usr/uploads --target local --prefix typecho_
  *
  *   # Specify site URL for attachment URL rewriting
- *   npx tsx scripts/migrate.ts --source /path/to/typecho.db --uploads /path/to/usr/uploads --target cloudflare --site-url https://example.com
+ *   pnpm run ops db migrate --source /path/to/typecho.db --uploads /path/to/usr/uploads --target cloudflare --site-url https://example.com
  */
 
 import { createClient, type Client } from '@libsql/client/node';
@@ -103,7 +103,7 @@ Typecho Migration Tool
 ======================
 
 Usage:
-  npx tsx scripts/migrate.ts [options]
+  pnpm run ops db migrate [options]
 
 Options:
   --source, -s <path>     Source Typecho SQLite database path (required)
@@ -118,13 +118,13 @@ Options:
 
 Examples:
   # Local migration (for wrangler dev)
-  npx tsx scripts/migrate.ts -s ./old-typecho.db -u ./old-uploads -t local
+  pnpm run ops db migrate -s ./old-typecho.db -u ./old-uploads -t local
 
   # Cloudflare migration (production)
-  npx tsx scripts/migrate.ts -s ./old-typecho.db -u ./old-uploads -t cloudflare --site-url https://blog.example.com
+  pnpm run ops db migrate -s ./old-typecho.db -u ./old-uploads -t cloudflare --site-url https://blog.example.com
 
   # Dry run
-  npx tsx scripts/migrate.ts -s ./old-typecho.db -u ./old-uploads -t local -n
+  pnpm run ops db migrate -s ./old-typecho.db -u ./old-uploads -t local -n
 `);
 }
 

@@ -7,7 +7,7 @@ description: Build or extend Typecho-CF plugins and themes, integrate them throu
 
 Start from the requested behavior and identify observable acceptance criteria. Read the applicable sections of [AGENTS.md](../../../AGENTS.md) (§6 for plugins, §7 for themes, §10 for tests) and the selected extension guide below. Use one similar in-tree extension as a reference and open further examples only for the integration points involved. Ask only when a missing product decision would change the result materially.
 
-For a new in-tree package, put it under `src/plugins/` or `src/themes/` and add its `file:` dependency in the root `package.json`. When package metadata changes dependency resolution, refresh `pnpm-lock.yaml` with the pinned pnpm version. Keep implementation in the extension when the existing SDK or theme Props cover the requirement. If a core contract must change, follow the applicable `AGENTS.md` requirements and verify the affected callers.
+For a new in-tree package, put it under `src/plugins/` or `src/themes/` and add its `workspace:*` dependency in the root `package.json`. When package metadata changes dependency resolution, refresh `pnpm-lock.yaml` with the pinned pnpm version. Keep implementation in the extension when the existing SDK or theme Props cover the requirement. If a core contract must change, follow the applicable `AGENTS.md` requirements and verify the affected callers.
 
 ## Plugin
 

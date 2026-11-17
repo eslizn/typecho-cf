@@ -32,6 +32,9 @@ jobs:
       - name: Generate Workers types and type-check
         run: pnpm run typecheck
 
+      - name: Check migration consistency
+        run: pnpm exec drizzle-kit check
+
       - name: Test
         run: pnpm run test
 
@@ -40,3 +43,6 @@ jobs:
 
       - name: Build
         run: pnpm run build
+
+      - name: Validate Wrangler deploy config
+        run: pnpm exec wrangler deploy --dry-run

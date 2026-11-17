@@ -24,9 +24,9 @@
 
 点击上方 **Deploy to Cloudflare** 按钮。Cloudflare 会把本仓库复制到你的 GitHub / GitLab 帐号，按 `wrangler.jsonc` 自动创建并绑定 D1、R2、任务 Queue，同时配置 [Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/)：之后每次推送到生产分支都会自动构建部署。
 
-本项目使用 Cloudflare 推荐的 [`wrangler.jsonc`](https://developers.cloudflare.com/workers/wrangler/configuration/)。官方仍支持 TOML；Deploy Button 并不要求必须使用 JSONC。配置位于仓库根目录，部署脚本与 Wrangler 使用相同的配置发现和解析规则。
+本项目使用 Cloudflare 推荐的 [`wrangler.jsonc`](https://developers.cloudflare.com/workers/wrangler/configuration/)。官方仍支持 TOML；Deploy Button 并不要求必须使用 JSONC。配置位于仓库根目录，Queue 预检与 Wrangler 使用相同的配置发现和解析规则。
 
-Button/Workers Builds 中保持以下命令即可：Build command 为 `pnpm run build`，Production deploy command 为 `pnpm run deploy`；`pnpm run deploy` 会识别 Cloudflare 提供的 `WORKERS_CI=1`，自动跳过本地 Queue 检查和重复构建，仅执行部署。非生产分支使用 Cloudflare 默认的 `pnpm exec wrangler versions upload`（或等价的 `npx wrangler versions upload`），不要使用生产部署命令。
+Button/Workers Builds 中保持以下命令即可：Build command 为 `pnpm run build`，Production deploy command 为 `pnpm run deploy:ci`（等价于 `pnpm exec wrangler deploy`）。Cloudflare 已在构建前准备资源并单独执行 Build command，因此 `deploy:ci` 只负责部署，不再重复构建或创建 Queue。非生产分支使用 Cloudflare 默认的 `pnpm exec wrangler versions upload`（或等价的 `npx wrangler versions upload`），不要使用生产部署命令。
 
 Workers Builds 通过根目录的 `.node-version` 选择 Node.js LTS。若已有项目设置了构建环境变量 `NODE_VERSION`，请将其同步为 `26`，或删除该覆盖值以使用版本文件；它属于构建设置，不是 Wrangler 的运行时 `vars`。
 
@@ -72,16 +72,21 @@ pnpm exec wrangler secret put INSTALL_TOKEN   # 推荐；未设置时任意先�
 pnpm run deploy
 ```
 
-本地执行 `pnpm run deploy` 会在构建和部署前读取当前 Wrangler 配置，幂等确认任务
-Queue `typecho-cf-tasks`；缺失时通过项目锁定版本的 Wrangler 自动创建，已存在的资源
-不会删除或重建。Button/Workers Builds 路径由
-Cloudflare 负责创建配置中声明的资源，`pnpm run deploy` 在该环境只执行部署。若只想
-检查构建和部署配置，可执行 `pnpm run deploy --dry-run`，该模式不会创建 Queue。
+本地执行 `pnpm run deploy` 会依次执行 `node scripts/ensure-queues.mjs`、`pnpm run build` 和
+`pnpm exec wrangler deploy`。Queue 预检按当前 Wrangler 配置幂等确认任务 Queue
+`typecho-cf-tasks`；缺失时通过项目锁定版本的 Wrangler 自动创建，已存在的资源不会删除
+或重建。Button/Workers Builds 路径由 Cloudflare 负责创建资源，生产部署命令使用
+`pnpm run deploy:ci`。若只想检查构建和部署配置，可执行 `pnpm run deploy:dry-run`，
+该命令只构建并运行 `wrangler deploy --dry-run`，不会创建 Queue。
+
+`pnpm run deploy` 使用默认 Wrangler 配置；需要 `--env`、`--config` 或 `--cwd` 时，请分别
+对 `node scripts/ensure-queues.mjs` 和 `pnpm exec wrangler deploy` 传入参数，因为组合命令
+只会把参数传给最后一个命令。
 
 如需在同一 Cloudflare 账户部署多个实例，请手动修改 `wrangler.jsonc` 中 producer 的
 `queue`、consumer 的 `queue` 以及 `vars` 中的 `QUEUE_NAME`，为当前实例设置唯一名称，
-并保持 producer 与 consumer 使用同一个任务 Queue。`pnpm run deploy` 和 Button/Workers
-Builds 都会按修改后的 Wrangler 配置工作。
+并保持 producer 与 consumer 使用同一个任务 Queue。本地 `pnpm run deploy`、Workers
+Builds 的 `pnpm run deploy:ci` 和 Button 都会按修改后的 Wrangler 配置工作。
 
 登录后台后，管理员可在「管理 → 队列」查看任务 Queue 的近实时积压指标。默认通过 Worker
 `QUEUE` binding 读取，不需要 API 凭据。若要查看账户级 Queue 配置和 consumer 配置，可在
@@ -108,30 +113,25 @@ pnpm exec wrangler secret put CF_API_TOKEN
 |------|------|
 | `pnpm run dev` | 本地开发服务器 |
 | `pnpm run build` | 生产构建 |
-| `pnpm run deploy` | 本地：幂等创建任务 Queue + 构建 + 部署；Workers Builds：仅部署 |
-| `pnpm run queues:ensure` | 按当前 Wrangler 配置幂等创建任务 Queue |
-| `pnpm run reinstall:extensions` | 刷新所有已声明插件和主题的本地依赖快照 |
+| `pnpm run deploy` | 本地：Queue 预检 + 构建 + 部署（默认 Wrangler 配置） |
+| `pnpm run deploy:dry-run` | 构建并检查 Wrangler 部署配置，不创建 Queue |
+| `pnpm run deploy:ci` | Workers Builds 生产部署（Cloudflare 已完成构建与资源准备） |
+| `pnpm run ops` | 运营工具入口，列出子命令 |
+| `pnpm run ops db generate` | 生成 Drizzle 数据库迁移 |
+| `pnpm run ops db studio` | 启动 Drizzle Studio |
+| `pnpm run ops db migrate` | 迁移 PHP Typecho 数据（`--target local\|cloudflare`、`--dry-run`） |
+| `pnpm run ops user reset-password` | 重置用户密码（`--target local\|cloudflare`） |
 | `pnpm run lint` | 类型感知静态检查（TS / Astro 含内联脚本 / 测试 / 脚本） |
-| `pnpm run types:workers` | 按 Wrangler 配置生成 Worker 绑定与运行时类型 |
 | `pnpm run typecheck` | 生成 Workers / Astro 类型并运行 TypeScript 检查 |
 | `pnpm run test` | 运行所有测试 |
 | `pnpm run test:watch` | 监听模式运行测试 |
 | `pnpm run test:coverage` | 生成覆盖率报告 |
-| `pnpm run db:generate` | 生成 Drizzle 数据库迁移 |
-| `pnpm run db:studio` | 启动 Drizzle Studio |
-| `pnpm run db:migrate:local` | 迁移 PHP Typecho 数据到本地 |
-| `pnpm run db:migrate:cloudflare` | 迁移 PHP Typecho 数据到 Cloudflare D1 |
-| `pnpm run db:migrate:dry-run` | 预览迁移（不写入） |
-| `pnpm run reset-password` | 重置用户密码（本地） |
-| `pnpm run reset-password:cloudflare` | 重置用户密码（Cloudflare） |
 
-修改 `src/plugins/` 或 `src/themes/` 下的源码后，如果对应依赖使用 `file:` 协议，运行
-`pnpm run reinstall:extensions` 刷新已声明的插件/主题依赖快照，再运行
-`pnpm run build`。该命令只删除项目生成的 `node_modules`，然后执行
-`pnpm install --force --frozen-lockfile`，不删除源码，也不会通过 `pnpm update`
-升级无关依赖或改写锁文件。
+`src/plugins/*` 和 `src/themes/*` 是 pnpm workspace 包，本地插件/主题源码由 loader 直接读取，
+修改后重新运行 `pnpm run dev` 或 `pnpm run build` 即可。新增或删除本地扩展时，同步更新根
+`package.json` 中的 `workspace:*` 依赖并运行 `pnpm install`。
 
-修改 `wrangler.jsonc` 中的绑定后，运行 `pnpm run types:workers`。生成的 `worker-configuration.d.ts` 仅供本地与 CI 使用，不纳入版本控制。
+修改 `wrangler.jsonc` 中的绑定后，运行 `pnpm exec wrangler types worker-configuration.d.ts`（`pnpm run typecheck` 也会自动执行）。生成的 `worker-configuration.d.ts` 仅供本地与 CI 使用，不纳入版本控制。
 
 示例配置默认持久化可搜索 Workers Logs，并以约 1% 采样率记录调用链；生产环境可按流量与成本调整。密钥使用 `wrangler secret put`（本地可用 `.dev.vars`），不要写入已跟踪的配置文件。
 
@@ -141,17 +141,17 @@ pnpm exec wrangler secret put CF_API_TOKEN
 
 ```bash
 # 迁移到 Cloudflare（生产）
-pnpm run db:migrate:cloudflare \
+pnpm run ops db migrate --target cloudflare \
   --source /path/to/typecho.db \
   --uploads /path/to/usr/uploads
 
 # 迁移到本地（开发）
-pnpm run db:migrate:local \
+pnpm run ops db migrate --target local \
   --source /path/to/typecho.db \
   --uploads /path/to/usr/uploads
 
 # 预览（不写入）
-pnpm run db:migrate:dry-run \
+pnpm run ops db migrate --target local --dry-run \
   --source /path/to/typecho.db \
   --uploads /path/to/usr/uploads
 ```
@@ -169,8 +169,8 @@ pnpm run db:migrate:dry-run \
 密码哈希算法不兼容（PHP phpass → PBKDF2-SHA256），迁移后需重置密码：
 
 ```bash
-pnpm run reset-password              # 本地
-pnpm run reset-password:cloudflare   # Cloudflare
+pnpm run ops user reset-password                    # 本地
+pnpm run ops user reset-password --target cloudflare # Cloudflare
 ```
 
 ---

@@ -7,7 +7,8 @@ declare module '*.sql?raw' {
 }
 
 // Worker runtime and binding declarations are generated at the repository root
-// by `pnpm run types:workers`. Keep only application-owned declarations here.
+// by `wrangler types worker-configuration.d.ts` (also run by `pnpm run typecheck`).
+// Keep only application-owned declarations here.
 
 // Astro's DOM library contributes CacheStorage without the Workers-only
 // `default` cache. Merge that platform extension back into the generated type.

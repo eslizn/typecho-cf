@@ -24,9 +24,9 @@ A modern rewrite of [Typecho](https://typecho.org) in TypeScript, running on **A
 
 Click the **Deploy to Cloudflare** button above. Cloudflare will copy this repository to your GitHub / GitLab account, provision and bind the D1, R2, task Queue declared in `wrangler.jsonc`, and set up [Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/) so every push to the production branch builds and deploys automatically.
 
-This project uses Cloudflare’s recommended [`wrangler.jsonc`](https://developers.cloudflare.com/workers/wrangler/configuration/). TOML remains supported; Deploy to Cloudflare does not require JSONC. The configuration lives at the repository root, and the deployment helper uses Wrangler’s own configuration discovery and parser.
+This project uses Cloudflare’s recommended [`wrangler.jsonc`](https://developers.cloudflare.com/workers/wrangler/configuration/). TOML remains supported; Deploy to Cloudflare does not require JSONC. The configuration lives at the repository root, and the Queue preflight uses Wrangler’s own configuration discovery and parser.
 
-Keep these commands in Button/Workers Builds: Build command `pnpm run build` and Production deploy command `pnpm run deploy`. The deploy wrapper detects Cloudflare's `WORKERS_CI=1`, skips the local Queue check and duplicate build, and only deploys. Non-production branches should use Cloudflare's default `pnpm exec wrangler versions upload` (or the equivalent `npx wrangler versions upload`) rather than the production deploy command.
+Keep these commands in Button/Workers Builds: Build command `pnpm run build` and Production deploy command `pnpm run deploy:ci` (equivalent to `pnpm exec wrangler deploy`). Cloudflare provisions resources before the build and runs the Build command separately, so `deploy:ci` only deploys; it does not repeat the build or Queue preflight. Non-production branches should use Cloudflare's default `pnpm exec wrangler versions upload` (or the equivalent `npx wrangler versions upload`) rather than the production deploy command.
 
 Workers Builds selects Node.js LTS from the root `.node-version`. If an existing project has a `NODE_VERSION` build variable, set it to `26` or remove that override to use the version file. This is a build setting, not a Wrangler runtime `vars` entry.
 
@@ -72,9 +72,9 @@ pnpm exec wrangler secret put INSTALL_TOKEN   # recommended; without it, anyone 
 pnpm run deploy
 ```
 
-The local `pnpm run deploy` command still performs an idempotent task Queue preflight, builds, and deploys. The Button/Workers Builds path relies on Cloudflare's resource provisioning and separate Build command. Visit the Worker URL → `/install` → submit site + admin details (and `INSTALL_TOKEN`) → sign in at `/admin`.
+The local `pnpm run deploy` command runs `node scripts/ensure-queues.mjs`, `pnpm run build`, and `pnpm exec wrangler deploy` in sequence. The Queue preflight idempotently confirms the task Queue declared by the current Wrangler configuration. The Button/Workers Builds path relies on Cloudflare's resource provisioning and separate Build command, with `pnpm run deploy:ci` as the production deploy command. To validate the build and deploy configuration only, run `pnpm run deploy:dry-run`; it builds and runs `wrangler deploy --dry-run` without creating Queues. `pnpm run deploy` uses the default Wrangler configuration; pass `--env`, `--config`, or `--cwd` to `node scripts/ensure-queues.mjs` and `pnpm exec wrangler deploy` separately when needed, because chained scripts only forward arguments to the last command. Visit the Worker URL → `/install` → submit site + admin details (and `INSTALL_TOKEN`) → sign in at `/admin`.
 
-If you deploy multiple instances in one Cloudflare account, manually change the producer `queue`, consumer `queue`, and the `vars` value `QUEUE_NAME` in `wrangler.jsonc` to a unique name for the current instance, keeping the producer and consumer on the same task Queue. Both `pnpm run deploy` and Button/Workers Builds use the updated Wrangler configuration.
+If you deploy multiple instances in one Cloudflare account, manually change the producer `queue`, consumer `queue`, and the `vars` value `QUEUE_NAME` in `wrangler.jsonc` to a unique name for the current instance, keeping the producer and consumer on the same task Queue. Local `pnpm run deploy`, Workers Builds `pnpm run deploy:ci`, and the Button all use the updated Wrangler configuration.
 
 After signing in, administrators can open **Manage → Queues** to view near-realtime backlog metrics for the task Queue through the Worker `QUEUE` binding, without API credentials. To also show account-level Queue settings and consumer settings, create a Cloudflare API Token with only the **Queues Read** permission and configure the account ID and token as secrets:
 
@@ -95,22 +95,23 @@ The first `wrangler deploy` may write a generated `database_id` back into `wrang
 |---------|-------------|
 | `pnpm run dev` | Start local dev server |
 | `pnpm run build` | Production build |
-| `pnpm run deploy` | Local: task Queue preflight + build + deploy; Workers Builds: deploy only |
+| `pnpm run deploy` | Local: task Queue preflight + build + deploy (default Wrangler config) |
+| `pnpm run deploy:dry-run` | Build and validate Wrangler deploy config without creating Queues |
+| `pnpm run deploy:ci` | Workers Builds production deploy (build/resources already prepared) |
+| `pnpm run ops` | Operational tooling entry point; lists subcommands |
+| `pnpm run ops db generate` | Generate Drizzle migrations |
+| `pnpm run ops db studio` | Launch Drizzle Studio |
+| `pnpm run ops db migrate` | Migrate PHP Typecho data (`--target local\|cloudflare`, `--dry-run`) |
+| `pnpm run ops user reset-password` | Reset user password (`--target local\|cloudflare`) |
 | `pnpm run lint` | Type-aware checks for TS, Astro (frontmatter and inline scripts), tests, and scripts |
-| `pnpm run types:workers` | Generate Worker binding and runtime types from Wrangler config |
 | `pnpm run typecheck` | Generate Workers / Astro types and run the TypeScript check |
 | `pnpm run test` | Run all tests |
 | `pnpm run test:watch` | Watch mode |
 | `pnpm run test:coverage` | Generate coverage report |
-| `pnpm run db:generate` | Generate Drizzle migrations |
-| `pnpm run db:studio` | Launch Drizzle Studio |
-| `pnpm run db:migrate:local` | Migrate PHP Typecho data to local |
-| `pnpm run db:migrate:cloudflare` | Migrate PHP Typecho data to Cloudflare D1 |
-| `pnpm run db:migrate:dry-run` | Preview migration (no writes) |
-| `pnpm run reset-password` | Reset user password (local) |
-| `pnpm run reset-password:cloudflare` | Reset user password (Cloudflare) |
 
-After changing bindings in `wrangler.jsonc`, run `pnpm run types:workers`. Generated `worker-configuration.d.ts` is for local/CI use only and is not committed.
+`src/plugins/*` and `src/themes/*` are pnpm workspace packages. The loaders read local extension sources directly, so rerun `pnpm run dev` or `pnpm run build` after editing them. When adding or removing an in-tree extension, update its `workspace:*` dependency in the root `package.json` and run `pnpm install`.
+
+After changing bindings in `wrangler.jsonc`, run `pnpm exec wrangler types worker-configuration.d.ts` (`pnpm run typecheck` also does this). Generated `worker-configuration.d.ts` is for local/CI use only and is not committed.
 
 The example config persists searchable Workers Logs and records traces at about 1% sampling; tune for production traffic and cost. Put secrets via `wrangler secret put` (or `.dev.vars` locally), never in tracked config files.
 
@@ -120,17 +121,17 @@ The example config persists searchable Workers Logs and records traces at about 
 
 ```bash
 # Cloudflare (production)
-pnpm run db:migrate:cloudflare \
+pnpm run ops db migrate --target cloudflare \
   --source /path/to/typecho.db \
   --uploads /path/to/usr/uploads
 
 # Local (development)
-pnpm run db:migrate:local \
+pnpm run ops db migrate --target local \
   --source /path/to/typecho.db \
   --uploads /path/to/usr/uploads
 
 # Preview (no writes)
-pnpm run db:migrate:dry-run \
+pnpm run ops db migrate --target local --dry-run \
   --source /path/to/typecho.db \
   --uploads /path/to/usr/uploads
 ```
@@ -148,8 +149,8 @@ pnpm run db:migrate:dry-run \
 Password hashing is incompatible (PHP phpass → PBKDF2-SHA256), so reset passwords after migration:
 
 ```bash
-pnpm run reset-password              # local
-pnpm run reset-password:cloudflare   # Cloudflare
+pnpm run ops user reset-password                     # local
+pnpm run ops user reset-password --target cloudflare # Cloudflare
 ```
 
 ---

@@ -6,20 +6,20 @@
  *
  * Usage:
  *   # Reset password for local D1 (wrangler dev)
- *   pnpm reset-password --user admin --password newpass123
+ *   pnpm run ops user reset-password --user admin --password newpass123
  *
  *   # Reset password for remote D1 (Cloudflare)
- *   pnpm reset-password:remote --user admin --password newpass123
+ *   pnpm run ops user reset-password --user admin --password newpass123 --target cloudflare
  *
- *   # Using npx directly
- *   npx tsx scripts/reset-password.ts --user admin --password newpass123 --target local
- *   npx tsx scripts/reset-password.ts --user admin --password newpass123 --target cloudflare
+ *   # Direct invocation
+ *   pnpm exec tsx scripts/reset-password.ts --user admin --password newpass123 --target local
+ *   pnpm exec tsx scripts/reset-password.ts --user admin --password newpass123 --target cloudflare
  *
  *   # List all users
- *   npx tsx scripts/reset-password.ts --list --target local
+ *   pnpm run ops user reset-password --list --target local
  *
  *   # Auto-generate a random password
- *   npx tsx scripts/reset-password.ts --user admin --target local
+ *   pnpm run ops user reset-password --user admin --target local
  */
 
 import { execSync } from 'node:child_process';
@@ -88,7 +88,7 @@ Typecho-CF Password Reset Tool
 ===============================
 
 Usage:
-  npx tsx scripts/reset-password.ts [options]
+  pnpm run ops user reset-password [options]
 
 Options:
   --user, -u <name>       Username to reset password for (required unless --list)
@@ -100,19 +100,19 @@ Options:
 
 Examples:
   # Reset admin password (local)
-  pnpm reset-password --user admin --password newpass123
+  pnpm run ops user reset-password --user admin --password newpass123
 
   # Reset admin password (remote/Cloudflare)
-  pnpm reset-password:remote --user admin --password newpass123
+  pnpm run ops user reset-password --user admin --password newpass123 --target cloudflare
 
   # Auto-generate password (local)
-  pnpm reset-password --user admin
+  pnpm run ops user reset-password --user admin
 
   # List all users (local)
-  pnpm reset-password --list
+  pnpm run ops user reset-password --list
 
   # List all users (remote)
-  pnpm reset-password:remote --list
+  pnpm run ops user reset-password --list --target cloudflare
 `);
 }
 

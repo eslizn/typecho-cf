@@ -584,7 +584,7 @@ The host project supplies the `typecho` package at install time, and `typecho/pl
 ### Local development (workspace package)
 
 1. Place the plugin directory under `src/plugins/`
-2. Add `"<packageName>": "file:src/plugins/<packageName>"` to the root `package.json` `dependencies`
+2. Add `"<packageName>": "workspace:*"` to the root `package.json` `dependencies`
 3. Run `pnpm install`
 4. Rebuild with `pnpm run build`
 

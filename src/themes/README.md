@@ -380,7 +380,7 @@ const { options, posts, pagination, urls, isLoggedIn, user, pluginCtx, i18n } = 
 ### 本地开发（工作区包）
 
 1. 将主题目录放在 `src/themes/` 下
-2. 在根 `package.json` 的 `dependencies` 中添加 `"<packageName>": "file:src/themes/<packageName>"`
+2. 在根 `package.json` 的 `dependencies` 中添加 `"<packageName>": "workspace:*"`
 3. 运行 `pnpm install`
 4. 重新执行 `pnpm run build`
 5. 在管理后台「外观」页面切换到新主题

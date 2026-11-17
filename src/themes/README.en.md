@@ -380,7 +380,7 @@ The system `Base.astro` injects the following `<link>` tags into `<head>` (based
 ### Local development (workspace package)
 
 1. Place the theme directory under `src/themes/`
-2. Add `"<packageName>": "file:src/themes/<packageName>"` to the root `package.json` `dependencies`
+2. Add `"<packageName>": "workspace:*"` to the root `package.json` `dependencies`
 3. Run `pnpm install`
 4. Rebuild with `pnpm run build`
 5. Switch to the new theme in the admin panel under "Appearance"

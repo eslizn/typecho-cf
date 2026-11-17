@@ -207,29 +207,29 @@ importers:
         specifier: ^7.8.6
         version: 7.8.6
       typecho-plugin-ai:
-        specifier: file:src/plugins/typecho-plugin-ai
-        version: file:src/plugins/typecho-plugin-ai
+        specifier: workspace:*
+        version: link:src/plugins/typecho-plugin-ai
       typecho-plugin-antispam:
-        specifier: file:src/plugins/typecho-plugin-antispam
-        version: file:src/plugins/typecho-plugin-antispam
+        specifier: workspace:*
+        version: link:src/plugins/typecho-plugin-antispam
       typecho-plugin-scribe:
-        specifier: file:src/plugins/typecho-plugin-scribe
-        version: file:src/plugins/typecho-plugin-scribe
+        specifier: workspace:*
+        version: link:src/plugins/typecho-plugin-scribe
       typecho-plugin-turnstile:
-        specifier: file:src/plugins/typecho-plugin-turnstile
-        version: file:src/plugins/typecho-plugin-turnstile
+        specifier: workspace:*
+        version: link:src/plugins/typecho-plugin-turnstile
       typecho-plugin-webdav:
-        specifier: file:src/plugins/typecho-plugin-webdav
-        version: file:src/plugins/typecho-plugin-webdav
+        specifier: workspace:*
+        version: link:src/plugins/typecho-plugin-webdav
       typecho-plugin-wechat-publisher:
-        specifier: file:src/plugins/typecho-plugin-wechat-publisher
-        version: file:src/plugins/typecho-plugin-wechat-publisher
+        specifier: workspace:*
+        version: link:src/plugins/typecho-plugin-wechat-publisher
       typecho-theme-minimal:
-        specifier: file:src/themes/typecho-theme-minimal
-        version: file:src/themes/typecho-theme-minimal
+        specifier: workspace:*
+        version: link:src/themes/typecho-theme-minimal
       typecho-theme-paperline:
-        specifier: file:src/themes/typecho-theme-paperline
-        version: file:src/themes/typecho-theme-paperline
+        specifier: workspace:*
+        version: link:src/themes/typecho-theme-paperline
     devDependencies:
       '@libsql/client':
         specifier: ^0.18.0
@@ -276,6 +276,22 @@ importers:
       wrangler:
         specifier: ^4.163.0
         version: 4.163.0(@types/node@26.6.6)
+
+  src/plugins/typecho-plugin-ai: {}
+
+  src/plugins/typecho-plugin-antispam: {}
+
+  src/plugins/typecho-plugin-scribe: {}
+
+  src/plugins/typecho-plugin-turnstile: {}
+
+  src/plugins/typecho-plugin-webdav: {}
+
+  src/plugins/typecho-plugin-wechat-publisher: {}
+
+  src/themes/typecho-theme-minimal: {}
+
+  src/themes/typecho-theme-paperline: {}
 
 packages:
 
@@ -2538,30 +2554,6 @@ packages:
   type-check@0.4.0:
     resolution: {integrity: sha512-XleUoc9uwGXqjWwXaUTZAmzMcFZ5858QA2vvx1Ur5xIcixXIP+8LnFDgRplU30us6teqdlskFfu+ae4K79Ooew==}
     engines: {node: '>= 0.8.0'}
-
-  typecho-plugin-ai@file:src/plugins/typecho-plugin-ai:
-    resolution: {directory: src/plugins/typecho-plugin-ai, type: directory}
-
-  typecho-plugin-antispam@file:src/plugins/typecho-plugin-antispam:
-    resolution: {directory: src/plugins/typecho-plugin-antispam, type: directory}
-
-  typecho-plugin-scribe@file:src/plugins/typecho-plugin-scribe:
-    resolution: {directory: src/plugins/typecho-plugin-scribe, type: directory}
-
-  typecho-plugin-turnstile@file:src/plugins/typecho-plugin-turnstile:
-    resolution: {directory: src/plugins/typecho-plugin-turnstile, type: directory}
-
-  typecho-plugin-webdav@file:src/plugins/typecho-plugin-webdav:
-    resolution: {directory: src/plugins/typecho-plugin-webdav, type: directory}
-
-  typecho-plugin-wechat-publisher@file:src/plugins/typecho-plugin-wechat-publisher:
-    resolution: {directory: src/plugins/typecho-plugin-wechat-publisher, type: directory}
-
-  typecho-theme-minimal@file:src/themes/typecho-theme-minimal:
-    resolution: {directory: src/themes/typecho-theme-minimal, type: directory}
-
-  typecho-theme-paperline@file:src/themes/typecho-theme-paperline:
-    resolution: {directory: src/themes/typecho-theme-paperline, type: directory}
 
   typescript@6.0.3:
     resolution: {integrity: sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw==}
@@ -4948,22 +4940,6 @@ snapshots:
   type-check@0.4.0:
     dependencies:
       prelude-ls: 1.2.1
-
-  typecho-plugin-ai@file:src/plugins/typecho-plugin-ai: {}
-
-  typecho-plugin-antispam@file:src/plugins/typecho-plugin-antispam: {}
-
-  typecho-plugin-scribe@file:src/plugins/typecho-plugin-scribe: {}
-
-  typecho-plugin-turnstile@file:src/plugins/typecho-plugin-turnstile: {}
-
-  typecho-plugin-webdav@file:src/plugins/typecho-plugin-webdav: {}
-
-  typecho-plugin-wechat-publisher@file:src/plugins/typecho-plugin-wechat-publisher: {}
-
-  typecho-theme-minimal@file:src/themes/typecho-theme-minimal: {}
-
-  typecho-theme-paperline@file:src/themes/typecho-theme-paperline: {}
 
   typescript@6.0.3: {}
 

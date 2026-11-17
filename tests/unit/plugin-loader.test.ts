@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -50,6 +50,25 @@ describe('plugin loader declared dependencies', () => {
       `/src/plugins/${local}/index.ts`,
       `/src/plugins/${local}/node_modules/${nested}/index.ts`,
     ]);
+  });
+
+  it('resolves workspace dependencies through the linked source package', () => {
+    const root = mkdtempSync(join(tmpdir(), 'typecho-plugin-loader-'));
+    temporaryRoots.push(root);
+
+    const local = 'typecho-plugin-workspace';
+    writePlugin(join(root, 'src', 'plugins', local), local);
+    mkdirSync(join(root, 'node_modules'), { recursive: true });
+    symlinkSync(join(root, 'src', 'plugins', local), join(root, 'node_modules', local), 'dir');
+    writeFileSync(join(root, 'package.json'), JSON.stringify({
+      dependencies: { [local]: 'workspace:*' },
+    }));
+
+    const plugins = discoverPlugins(root);
+
+    expect(plugins.map(plugin => plugin.packageName)).toEqual([local]);
+    expect(plugins[0].packageDir).toBe(join(realpathSync(root), 'src', 'plugins', local));
+    expect(plugins[0].importPath).toBe(`/src/plugins/${local}/index.ts`);
   });
 
   it('ignores a typecho plugin that is only present in node_modules', () => {

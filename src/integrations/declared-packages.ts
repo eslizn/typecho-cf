@@ -84,10 +84,12 @@ export function discoverRuntimePackages(rootDir: string): RuntimePackage[] {
       packageDir,
       packageJson,
       // Direct registry packages can use normal package resolution from the
-      // generated virtual module. A transitive registry plugin may only be
-      // visible from its parent's nested node_modules (notably with pnpm's
-      // isolated linker), so retain a root-relative import path for it.
-      importBase: item.specifier.startsWith('file:') || !item.direct
+      // generated virtual module. Local file/workspace packages and transitive
+      // registry plugins are imported from a root-relative source path so they
+      // stay resolvable from the generated virtual module.
+      importBase: item.specifier.startsWith('file:')
+        || item.specifier.startsWith('workspace:')
+        || !item.direct
         ? toViteRootPath(rootDir, packageDir)
         : undefined,
       direct: item.direct,

@@ -58,7 +58,7 @@ export function resetIsolateBoot(): void {
 // runtime password-reset upgrade or generated index set changes. A stable
 // database needs one indexed point lookup per cold isolate instead of probing
 // every table, column and index.
-const RUNTIME_SCHEMA_VERSION = '20261007';
+const RUNTIME_SCHEMA_VERSION = '20261117';
 const RUNTIME_SCHEMA_VERSION_KEY = 'runtimeSchemaVersion';
 const METAS_TYPE_SLUG_INDEX = 'typecho_metas_type_slug';
 const OPTIONS_USER_NAME_INDEX = 'typecho_options_user_name';

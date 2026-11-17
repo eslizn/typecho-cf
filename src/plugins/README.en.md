@@ -172,6 +172,13 @@ current `pluginId` automatically, and the claims are released when the plugin is
 disabled, fails to initialize, or the registry is reset. The old global
 `registerPluginAdminPath(path)` export has been removed from the SDK.
 
+Registration normalizes trailing slashes and stores paths without them. The
+following reserved paths cannot be claimed and only produce a warning:
+`/install`, `/api/install`, `/admin`, `/api/admin`, `/admin/login`,
+`/admin/reset-password`, `/api/users/login`, `/api/users/logout`,
+`/api/users/register`, and `/api/users/reset-password`. Paths containing `?`,
+`#`, `\`, `.`, `..`, or starting with `//` are rejected as well.
+
 ---
 
 ## Capability sharing

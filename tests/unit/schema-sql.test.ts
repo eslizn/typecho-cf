@@ -78,8 +78,10 @@ describe('generateCreateSQL', () => {
     for (const stmt of stmts) {
       expect(stmt).not.toMatch(/,\s*,/); // no consecutive commas
       expect(stmt).not.toMatch(/,\s*\)/); // no trailing comma before closing paren
-      expect(stmt).toMatch(/^CREATE/); // starts with CREATE
-      expect(stmt).toMatch(/\(/); // has opening paren for columns
+      expect(stmt).toMatch(/^(CREATE|DROP TRIGGER)/);
+      if (stmt.startsWith('CREATE')) {
+        expect(stmt).toMatch(/\(/); // has opening paren for columns
+      }
     }
   });
 });

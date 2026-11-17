@@ -1,5 +1,5 @@
 import { buildPermalink, escapeAttr, escapeHtml, fetchWithTimeout, getOption, hasPermission, normalizeHttpUrl, parseAttachmentMeta, parsePluginOption, renderMarkdown, safeJsonForScript, setOption, stripHtmlTags, stripTypechoMarkers } from 'typecho/plugin-sdk';
-import type { I18n, PluginInitContext } from 'typecho/plugin-sdk';
+import type { I18n, PluginInitContext, TimezoneSetting } from 'typecho/plugin-sdk';
 import type { Database } from 'typecho/db';
 import { schema } from 'typecho/db';
 import { env } from 'cloudflare:workers';
@@ -609,7 +609,8 @@ async function syncPostToWeChat(
         slug: post.slug,
         type: post.type,
         created: post.created,
-      }, siteUrl, options?.permalinkPattern as string | undefined, options?.pagePattern as string | undefined)
+      }, siteUrl, options?.permalinkPattern as string | undefined, options?.pagePattern as string | undefined,
+        typeof options?.timezone === 'string' ? options.timezone as TimezoneSetting : undefined)
     : '';
 
   const article: WeChatArticle = {

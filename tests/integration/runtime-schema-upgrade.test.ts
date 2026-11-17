@@ -75,7 +75,7 @@ describe('legacy metadata schema upgrade', () => {
     expect(await db.query.options.findFirst({ where: sql`name = 'defaultCategory'` }))
       .toMatchObject({ value: '1' });
     expect(await db.query.options.findFirst({ where: sql`name = 'runtimeSchemaVersion'` }))
-      .toMatchObject({ value: '20261007' });
+      .toMatchObject({ value: '20261117' });
     await expect(db.insert(schema.metas).values({ type: 'category', slug: 'news' })).rejects.toThrow();
   });
 

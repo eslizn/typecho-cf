@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   compilePermalinkPattern,
+  decodePathnameForMatching,
   renderPermalinkPattern,
 } from '@/lib/permalink-pattern';
 
@@ -33,5 +34,24 @@ describe('permalink pattern grammar', () => {
     const regex = compilePermalinkPattern('/docs+/{slug}.html', 'page')!;
     expect(regex.test('/docs+/about.html')).toBe(true);
     expect(regex.test('/docss/about.html')).toBe(false);
+  });
+
+  it('matches Unicode slugs after decoding percent-encoded pathnames', () => {
+    const regex = compilePermalinkPattern('/post/{slug}/', 'post')!;
+    const encoded = `/post/${encodeURIComponent('中文-文章')}/`;
+    // The raw pathname matches the pattern, but captures the encoded slug,
+    // which would miss every Unicode row in the DB lookup.
+    expect(encoded.match(regex)?.groups?.slug).toBe(encodeURIComponent('中文-文章'));
+    const decoded = decodePathnameForMatching(encoded);
+    expect(decoded).toBe('/post/中文-文章/');
+    expect(decoded.match(regex)?.groups?.slug).toBe('中文-文章');
+  });
+
+  it('leaves malformed escapes and encoded separators untouched', () => {
+    expect(decodePathnameForMatching('/bad/%E0%A4%A/')).toBe('/bad/%E0%A4%A/');
+    // Decoding %2F would turn one requested segment into several and create
+    // an alias for a canonical URL.
+    expect(decodePathnameForMatching('/posts%2Fslug/')).toBe('/posts%2Fslug/');
+    expect(decodePathnameForMatching('/a/%5Cb/')).toBe('/a/%5Cb/');
   });
 });

@@ -8,6 +8,7 @@ import { schema } from '@/db';
 import { buildPermalink } from '@/lib/content';
 import { applyFilterSafely } from '@/lib/plugin';
 import { escapeHtml, safeJsonForScript } from '@/lib/escape';
+import { formatDateTimeLocal } from '@/lib/timezone';
 import EditorScript from '@/components/admin/EditorScript.astro';
 
 const ctx = await createContext(Astro.locals, Astro.request);
@@ -64,6 +65,18 @@ if (cidNum > 0) {
   if (post && !canUseContentEditor(user!, post)) {
     return new Response(ctx.i18n.t('core.error.forbidden', {}, 'Forbidden'), { status: 403 });
   }
+  if (post) {
+    if (post.type === 'page' || post.type === 'page_draft') {
+      if (!hasPermission(user!.group || 'visitor', 'editor')) {
+        return new Response(ctx.i18n.t('core.error.forbidden', {}, 'Forbidden'), { status: 403 });
+      }
+      return Astro.redirect(`/admin/write-page?cid=${post.cid}`);
+    }
+    // Attachments and revisions are not posts; only post rows belong here.
+    if (post.type !== 'post' && post.type !== 'post_draft') {
+      return new Response(ctx.i18n.t('core.error.notFound', {}, 'Not Found'), { status: 404 });
+    }
+  }
   if (post?.type === 'post') {
     const revision = await db.query.contents.findFirst({
       where: and(eq(schema.contents.parent, post.cid), eq(schema.contents.type, 'revision')),
@@ -110,7 +123,7 @@ if (cidNum > 0) {
 const isMarkdown = !post || (post.text && post.text.indexOf('<!--markdown-->') >= 0);
 
 // Build preview URL using permalink pattern
-const previewUrl = isEdit && post ? buildPermalink(post, urls.siteUrl, options.permalinkPattern) : '';
+const previewUrl = isEdit && post ? buildPermalink(post, urls.siteUrl, options.permalinkPattern, undefined, options.timezone) : '';
 const writePostHookExtra = { options, post, user, isEdit, i18n: ctx.i18n, capabilityRuntime: ctx.capabilityRuntime };
 const writePostOptionHtml = await applyFilterSafely(ctx, 'admin:writePost:option', '', writePostHookExtra);
 const writePostAdvanceOptionHtml = await applyFilterSafely(ctx, 'admin:writePost:advanceOption', '', writePostHookExtra);
@@ -218,6 +231,7 @@ const editorMessagesJson = safeJsonForScript({
           <button type="submit" formaction="/admin/content-preview" formmethod="post" formtarget="_blank" id="btn-preview" class="btn">{t('admin.action.preview', {}, 'Preview')}</button>
           <button type="submit" name="status" value="draft" id="btn-save" class="btn">{t('admin.action.saveDraft', {}, 'Save draft')}</button>
           <button type="submit" name="status" value="publish" class="btn primary" id="btn-submit">{t('admin.option.publish', {}, 'Publish')} {t('admin.field.post', {}, 'post')}</button>
+          {!isEditor && <span class="description">{t('admin.description.contributorReview', {}, 'Your post will be submitted for review.')}</span>}
           {isMarkdown && <input type="hidden" name="markdown" value="1" />}
         </span>
       </p>
@@ -256,8 +270,8 @@ const editorMessagesJson = safeJsonForScript({
         <section class="typecho-post-option">
            <label for="schedule-date" class="typecho-label">{t('admin.field.date', {}, 'Publication date')}</label>
           <p class="admin-date-actions">
-            <input type="datetime-local" id="schedule-date" name="date" value={post?.created ? new Date(post.created * 1000).toISOString().slice(0, 16) : ''} class="text" />
-             <button type="button" class="btn btn-xs" onclick="var d=new Date();this.form.date.value=d.toISOString().slice(0,16)">{t('admin.action.now', {}, 'Now')}</button>
+            <input type="datetime-local" id="schedule-date" name="date" data-site-timezone={options.timezone} value={post?.created ? formatDateTimeLocal(post.created, options.timezone) : ''} class="text" />
+             <button type="button" class="btn btn-xs" id="schedule-now">{t('admin.action.now', {}, 'Now')}</button>
              <button type="button" class="btn btn-xs" onclick="this.form.date.value=''">{t('admin.action.clear', {}, 'Clear')}</button>
           </p>
            <small class="description">{t('admin.description.scheduleDate', {}, 'Leave blank to publish immediately; a future time schedules publication.')}</small>
@@ -370,5 +384,34 @@ const editorMessagesJson = safeJsonForScript({
 
   <Fragment slot="footer">
     <EditorScript messagesJson={editorMessagesJson} />
+    <script is:inline>
+      (function () {
+        var button = document.getElementById('schedule-now');
+        var input = document.getElementById('schedule-date');
+        if (!button || !input) return;
+        button.addEventListener('click', function () {
+          var zone = input.getAttribute('data-site-timezone');
+          if (!zone) return;
+          try {
+            var parts = new Intl.DateTimeFormat('en-US', {
+              timeZone: zone,
+              year: 'numeric',
+              month: '2-digit',
+              day: '2-digit',
+              hour: '2-digit',
+              minute: '2-digit',
+              hourCycle: 'h23'
+            }).formatToParts(new Date());
+            var values = {};
+            parts.forEach(function (part) {
+              if (part.type !== 'literal') values[part.type] = part.value;
+            });
+            input.value = values.year + '-' + values.month + '-' + values.day + 'T' + values.hour + ':' + values.minute;
+          } catch (error) {
+            console.warn('Unable to resolve the site-local time.', error);
+          }
+        });
+      })();
+    </script>
     </Fragment>
 </Admin>

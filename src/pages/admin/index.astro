@@ -107,7 +107,7 @@ const isContributor = hasPermission(user!.group || 'visitor', 'contributor');
           recentPosts.map((post) => (
             <li>
               <span>{formatDate(post.created || 0, 'n.j', options.timezone, ctx.i18n.locale)}</span>
-              <a href={buildPermalink({ cid: post.cid, slug: post.slug, type: post.type, created: post.created }, urls.siteUrl, options.permalinkPattern as string | undefined)} class="title">
+              <a href={buildPermalink({ cid: post.cid, slug: post.slug, type: post.type, created: post.created }, urls.siteUrl, options.permalinkPattern as string | undefined, undefined, options.timezone)} class="title">
                 {post.title || ctx.i18n.t('core.content.untitled', {}, 'Untitled')}
               </a>
             </li>
@@ -132,6 +132,7 @@ const isContributor = hasPermission(user!.group || 'visitor', 'contributor');
                 urls.siteUrl,
                 options.permalinkPattern as string | undefined,
                 options.pagePattern as string | undefined,
+                options.timezone,
               )}#comment-${comment.coid}`} class="title">
                 {comment.author || ctx.i18n.t('core.comment.anonymous', {}, 'Anonymous')}
               </a>:

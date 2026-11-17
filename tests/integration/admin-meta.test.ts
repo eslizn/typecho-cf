@@ -220,6 +220,51 @@ describe('POST /api/admin/meta batch + default', () => {
     expect(remaining).toHaveLength(0);
   });
 
+  it('deletes more than 99 selected tags under the D1 parameter cap', async () => {
+    const rows = Array.from({ length: 101 }, (_, index) => ({
+      name: `Tag ${index}`, slug: `bulk-tag-${index}`, type: 'tag', count: 0,
+    }));
+    await testDb.insert(schema.metas).values(rows.slice(0, 100));
+    await testDb.insert(schema.metas).values(rows.slice(100));
+    const tags = await testDb.select({ mid: schema.metas.mid })
+      .from(schema.metas)
+      .where(eq(schema.metas.type, 'tag'));
+    expect(tags).toHaveLength(101);
+
+    const cookie = await makeAuthCookie(testDb, 1, AUTH_CODE, SECRET);
+    const body = new URLSearchParams();
+    body.append('action', 'delete');
+    body.append('type', 'tag');
+    for (const tag of tags) body.append('mid[]', String(tag.mid));
+
+    const batches: unknown[][] = [];
+    const originalBatch = testDb.batch.bind(testDb);
+    const batchSpy = vi.spyOn(testDb, 'batch').mockImplementation((async (statements: unknown[]) => {
+      batches.push(statements);
+      return originalBatch(statements as any);
+    }) as any);
+    try {
+      const req = new Request('https://example.com/api/admin/meta', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/x-www-form-urlencoded',
+          cookie,
+          origin: 'https://example.com',
+        },
+        body: body.toString(),
+      });
+      expect((await POST({ request: req, locals: {}, url: new URL(req.url) } as any)).status).toBe(302);
+    } finally {
+      batchSpy.mockRestore();
+    }
+
+    const statements = batches.flat() as Array<{ toSQL(): { params: unknown[] } }>;
+    const paramCounts = statements.map(statement => statement.toSQL().params.length);
+    expect(paramCounts.length).toBeGreaterThan(0);
+    expect(Math.max(...paramCounts)).toBeLessThanOrEqual(100);
+    expect(await testDb.select().from(schema.metas).where(eq(schema.metas.type, 'tag'))).toHaveLength(0);
+  });
+
   it('sets the default category via POST', async () => {
     await testDb.insert(schema.metas).values({ name: 'Primary', slug: 'primary', type: 'category', count: 0 });
     const cookie = await makeAuthCookie(testDb, 1, AUTH_CODE, SECRET);

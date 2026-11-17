@@ -1,7 +1,7 @@
 import type { APIRoute } from 'astro';
 import { schema } from '@/db';
 import { type SiteOptions } from '@/lib/options';
-import { canManageResource } from '@/lib/auth';
+import { canManageResource, hasPermission } from '@/lib/auth';
 import { isAdminActionResponse, requireAdminAction } from '@/lib/admin-auth';
 import { normalizeSlug, readAdminFormOrError } from '@/lib/input';
 import { resolveUniqueMetaSlug, writeWithUniqueContentSlug } from '@/lib/slug';
@@ -9,18 +9,21 @@ import { applyFilter, doHook } from '@/lib/plugin';
 import { invalidateSiteCache } from '@/lib/cache';
 import { jsonError, jsonOk } from '@/lib/http';
 import { i18nMessage } from '@/lib/i18n';
+import { chunkArray, chunkInsertRows, D1_INSERT_ROW_PARAMS, D1_SAFE_IN_LIST_SIZE } from '@/lib/d1-limits';
+import { resolveContentWritePolicy } from '@/lib/content-status';
+import { formatDateTimeLocal, parseDateTimeLocalToTimestamp } from '@/lib/timezone';
 import { eq, and, sql, inArray, type SQL } from 'drizzle-orm';
 import { validateFilteredContent, WriteFilterError } from '@/lib/write-filter';
 
-// Typecho convention: visibility dropdown maps to db status column.
-// 'password' visibility stores the password in a separate column, status falls back to 'publish'.
-const VISIBILITY_TO_STATUS: Record<string, string> = {
-  publish: 'publish',
-  hidden: 'hidden',
-  password: 'publish',
-  private: 'private',
-  waiting: 'waiting',
-};
+const WRITABLE_CONTENT_TYPES = new Set(['post', 'post_draft', 'page', 'page_draft']);
+
+function isWritableContentType(type: string | null | undefined): boolean {
+  return !!type && WRITABLE_CONTENT_TYPES.has(type);
+}
+
+function isPageContentType(type: string | null | undefined): boolean {
+  return type === 'page' || type === 'page_draft';
+}
 
 /**
  * Save custom fields for a content item.
@@ -70,15 +73,19 @@ async function prepareTagPlan(db: any, tags: string): Promise<TagPlan[]> {
   })).values()];
   if (desired.length === 0) return [];
 
-  const slugs = desired.map((tag) => tag.slug);
-  const existing = await db
-    .select({ slug: schema.metas.slug })
-    .from(schema.metas)
-    .where(and(
-      eq(schema.metas.type, 'tag'),
-      sql`${schema.metas.slug} IN (${sql.join(slugs.map((slug) => sql`${slug}`), sql`, `)})`,
-    ));
-  const existingSlugs = new Set(existing.map((row: { slug: string | null }) => row.slug));
+  const existingSlugs = new Set<string>();
+  for (const chunk of chunkArray(desired.map((tag) => tag.slug), D1_SAFE_IN_LIST_SIZE)) {
+    const existing = await db
+      .select({ slug: schema.metas.slug })
+      .from(schema.metas)
+      .where(and(
+        eq(schema.metas.type, 'tag'),
+        inArray(schema.metas.slug, chunk),
+      ));
+    for (const row of existing as Array<{ slug: string | null }>) {
+      if (row.slug) existingSlugs.add(row.slug);
+    }
+  }
 
   const plan: TagPlan[] = [];
   for (const tag of desired) {
@@ -93,21 +100,36 @@ async function prepareTagPlan(db: any, tags: string): Promise<TagPlan[]> {
 }
 
 function buildTagMetaStatements(db: any, tagPlan: TagPlan[]): any[] {
-  if (tagPlan.length === 0) return [];
-  return [db.insert(schema.metas).values(tagPlan.map((tag) => ({
-    name: tag.name,
-    slug: tag.slug,
-    type: 'tag',
-    count: 0,
-  }))).onConflictDoNothing()];
+  return chunkInsertRows(tagPlan, D1_INSERT_ROW_PARAMS.metas).map((chunk) =>
+    db.insert(schema.metas).values(chunk.map((tag) => ({
+      name: tag.name,
+      slug: tag.slug,
+      type: 'tag',
+      count: 0,
+    }))).onConflictDoNothing()
+  );
+}
+
+// A relationship row normally binds `cid` plus the mid (or the tag-slug
+// lookup). When cid is a correlated subquery — the new-revision path — that
+// subquery binds two values in every row, so the per-row budget grows by one.
+function relationshipRowParams(cid: number | SQL): number {
+  return D1_INSERT_ROW_PARAMS.relationships + (typeof cid === 'number' ? 0 : 1);
 }
 
 function buildTagRelationshipStatements(db: any, cid: number | SQL, tagPlan: TagPlan[]): any[] {
-  if (tagPlan.length === 0) return [];
-  return [db.insert(schema.relationships).values(tagPlan.map((tag) => ({
-    cid,
-    mid: sql<number>`(SELECT ${schema.metas.mid} FROM ${schema.metas} WHERE ${schema.metas.type} = 'tag' AND ${schema.metas.slug} = ${tag.slug})`,
-  }))).onConflictDoNothing()];
+  return chunkInsertRows(tagPlan, relationshipRowParams(cid)).map((chunk) =>
+    db.insert(schema.relationships).values(chunk.map((tag) => ({
+      cid,
+      mid: sql<number>`(SELECT ${schema.metas.mid} FROM ${schema.metas} WHERE ${schema.metas.type} = 'tag' AND ${schema.metas.slug} = ${tag.slug})`,
+    }))).onConflictDoNothing()
+  );
+}
+
+function buildContentCategoryStatements(db: any, cid: number | SQL, categoryIds: number[]): any[] {
+  return chunkInsertRows(categoryIds, relationshipRowParams(cid)).map((chunk) =>
+    db.insert(schema.relationships).values(chunk.map((mid) => ({ cid, mid }))),
+  );
 }
 
 /**
@@ -115,51 +137,80 @@ function buildTagRelationshipStatements(db: any, cid: number | SQL, tagPlan: Tag
  * set. This runs before relationship replacement in the same atomic batch:
  * its correlated count excludes this content and adds its requested links,
  * avoiding any dependence on an earlier request snapshot.
+ *
+ * D1 caps a statement at 100 bound parameters, so the update is split by meta
+ * type and into chunks. The first chunk of each type also covers the live old
+ * relationship set; a type whose new set is empty still gets a cleanup
+ * statement so removed links are recounted.
  */
-function buildContentMetaCountStatement(
+function buildContentMetaCountStatements(
   db: any,
   cid: number,
   categoryIds: number[],
   tagPlan: TagPlan[],
   resultingType: string,
-): any | null {
-  const newTargets: SQL[] = [];
-  if (categoryIds.length > 0) {
-    newTargets.push(sql`${schema.metas.mid} IN (${sql.join(categoryIds.map((mid) => sql`${mid}`), sql`, `)})`);
-  }
-  if (tagPlan.length > 0) {
-    newTargets.push(and(
-      eq(schema.metas.type, 'tag'),
-      inArray(schema.metas.slug, tagPlan.map((tag) => tag.slug)),
-    )!);
-  }
-  const newTargetCondition = newTargets.length > 0
-    ? sql`(${sql.join(newTargets, sql` OR `)})`
-    : sql`0 = 1`;
+): any[] {
+  if (resultingType === 'revision') return [];
+
+  const countExpression = sql`(
+    SELECT COUNT(*)
+    FROM ${schema.relationships}
+    INNER JOIN ${schema.contents} ON ${schema.relationships.cid} = ${schema.contents.cid}
+    WHERE ${schema.relationships.mid} = ${schema.metas.mid}
+      AND ${schema.relationships.cid} <> ${cid}
+      AND ${schema.contents.type} <> 'revision'
+  )`;
   const oldTargetCondition = sql`${schema.metas.mid} IN (
     SELECT ${schema.relationships.mid}
     FROM ${schema.relationships}
     WHERE ${schema.relationships.cid} = ${cid}
   )`;
-  const contributes = resultingType === 'revision'
-    ? sql`0`
-    : sql`CASE WHEN ${newTargetCondition} THEN 1 ELSE 0 END`;
 
-  return db.update(schema.metas)
-    .set({
-      count: sql`(
-        SELECT COUNT(*)
-        FROM ${schema.relationships}
-        INNER JOIN ${schema.contents} ON ${schema.relationships.cid} = ${schema.contents.cid}
-        WHERE ${schema.relationships.mid} = ${schema.metas.mid}
-          AND ${schema.relationships.cid} <> ${cid}
-          AND ${schema.contents.type} <> 'revision'
-      ) + ${contributes}`,
-    })
-    .where(and(
-      inArray(schema.metas.type, ['category', 'tag']),
-      sql`(${oldTargetCondition} OR ${newTargetCondition})`,
-    ));
+  const buildUpdate = (
+    type: 'category' | 'tag',
+    newTargetCondition: SQL | null,
+    includeOldTargets: boolean,
+  ) => {
+    const contributes = newTargetCondition
+      ? sql`CASE WHEN ${newTargetCondition} THEN 1 ELSE 0 END`
+      : sql`0`;
+    const conditions: SQL[] = [eq(schema.metas.type, type)];
+    if (includeOldTargets && newTargetCondition) {
+      conditions.push(sql`(${oldTargetCondition} OR ${newTargetCondition})`);
+    } else if (includeOldTargets) {
+      conditions.push(oldTargetCondition);
+    } else if (newTargetCondition) {
+      conditions.push(newTargetCondition);
+    }
+    return db.update(schema.metas)
+      .set({ count: sql`${countExpression} + ${contributes}` })
+      .where(and(...conditions));
+  };
+
+  const statements: any[] = [];
+  const countChunkSize = 45;
+
+  const categoryChunks = chunkArray(categoryIds, countChunkSize);
+  if (categoryChunks.length === 0) {
+    statements.push(buildUpdate('category', null, true));
+  } else {
+    categoryChunks.forEach((chunk, index) => {
+      const condition = sql`${schema.metas.mid} IN (${sql.join(chunk.map((mid) => sql`${mid}`), sql`, `)})`;
+      statements.push(buildUpdate('category', condition, index === 0));
+    });
+  }
+
+  const tagChunks = chunkArray(tagPlan.map((tag) => tag.slug), countChunkSize);
+  if (tagChunks.length === 0) {
+    statements.push(buildUpdate('tag', null, true));
+  } else {
+    tagChunks.forEach((chunk, index) => {
+      const condition = sql`${schema.metas.slug} IN (${sql.join(chunk.map((slug) => sql`${slug}`), sql`, `)})`;
+      statements.push(buildUpdate('tag', condition, index === 0));
+    });
+  }
+
+  return statements;
 }
 
 function isContentPrimaryKeyConflict(error: unknown): boolean {
@@ -233,7 +284,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const action = formData.get('do')?.toString() || 'create';
   const typeInput = formData.get('type')?.toString() || 'post';
   const VALID_TYPES = ['post', 'page'];
-  const type = VALID_TYPES.includes(typeInput) ? typeInput : 'post';
+  const type = (VALID_TYPES.includes(typeInput) ? typeInput : 'post') as 'post' | 'page';
+  const isEditor = hasPermission(auth.user.group || 'visitor', 'editor');
   const cid = parseInt(formData.get('cid')?.toString() || '0', 10);
   const title = formData.get('title')?.toString()?.trim() || '';
   const isMarkdown = formData.get('markdown') === '1';
@@ -246,8 +298,15 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const slugInput = normalizeSlug(formData.get('slug')?.toString() || '');
   const submitAction = formData.get('status')?.toString() || 'publish'; // 'draft' or 'publish' from submit button
   const isDraft = submitAction === 'draft';
-  const status = VISIBILITY_TO_STATUS[formData.get('visibility')?.toString() || ''] || 'publish';
-  const password = formData.get('password')?.toString()?.trim() || null;
+  const visibilityInput = formData.get('visibility')?.toString() || '';
+  // `undefined` means the form did not carry the field: an update must keep
+  // the existing value (pages do not render date/password inputs).
+  const passwordInput = formData.has('password')
+    ? (formData.get('password')?.toString()?.trim() || null)
+    : undefined;
+  const createdInput = formData.has('date')
+    ? formData.get('date')?.toString()?.trim() ?? ''
+    : undefined;
   const allowComment = formData.get('allowComment') ? '1' : '0';
   const allowPing = formData.get('allowPing') ? '1' : '0';
   const allowFeed = formData.get('allowFeed') ? '1' : '0';
@@ -258,13 +317,16 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
   const now = Math.floor(Date.now() / 1000);
 
-  // ── Schedule: accept optional datetime from the editor ──
-  const scheduleDate = formData.get('date')?.toString()?.trim();
-  let created = now;
-  if (scheduleDate) {
-    const parsed = Math.floor(new Date(scheduleDate).getTime() / 1000);
-    if (Number.isFinite(parsed) && parsed > 0) created = Math.max(parsed, 1);
+  // Pages are editor-only in Typecho (menu, write-page and Page\Edit all
+  // require editor). Enforce it at the API boundary too.
+  if (type === 'page' && !isEditor) {
+    return error(403, 'core.error.forbidden', {}, 'Forbidden');
   }
+
+  // ── Schedule: accept optional datetime from the editor ──
+  const createCreated = createdInput === undefined || createdInput === ''
+    ? now
+    : (parseDateTimeLocalToTimestamp(createdInput, options.timezone) ?? now);
 
   // ── Autosave: only allowed for draft-mode content ──
   const isAutosave = formData.get('autosave') === '1';
@@ -275,26 +337,48 @@ export const POST: APIRoute = async ({ request, locals }) => {
     if (cid) {
       const existing = await db.query.contents.findFirst({ where: eq(schema.contents.cid, cid) });
       if (!existing) return error(404, 'admin.content.notFound', {}, 'Not Found');
+      if (!isWritableContentType(existing.type)) {
+        return error(404, 'admin.content.notFound', {}, 'Not Found');
+      }
+      if (isPageContentType(existing.type) && !isEditor) {
+        return error(403, 'core.error.forbidden', {}, 'Forbidden');
+      }
       if (existing.status === 'publish') return error(400, 'admin.content.autosaveNotAllowed', {}, 'Autosave is not allowed for published content.');
       if (!canManageResource(auth.user, existing)) return error(403, 'core.error.forbidden', {}, 'Forbidden');
-      await db.update(schema.contents).set({
+      const patch: Record<string, unknown> = {
         title: title || existing.title,
         text: text || existing.text,
         modified: now,
-      } satisfies Record<string, unknown>).where(eq(schema.contents.cid, cid));
+      };
+      if (!isEditor && !isPageContentType(existing.type)) {
+        // Typecho forces contributor saves to the review queue.
+        patch.status = 'waiting';
+        patch.password = null;
+      }
+      await db.update(schema.contents).set(patch).where(eq(schema.contents.cid, cid));
+      // `hidden` is publicly viewable, so changing its title/text or moving a
+      // contributor's row to `waiting` must retire the cached public copy.
+      if (existing.status === 'hidden') {
+        await purgeContentAndRelatedCache(
+          db,
+          options,
+          cid,
+          { ...existing, ...patch } as typeof schema.contents.$inferSelect,
+        );
+      }
       return jsonOk({ cid, autosaved: true });
     }
     // New draft: create a post_draft row
     const inserted = await db.insert(schema.contents).values({
       title,
       slug: `autosave-${crypto.randomUUID()}`,
-      created,
+      created: createCreated,
       modified: now,
       text,
       order: 0,
       authorId: auth.uid,
       type: type === 'page' ? 'page_draft' : 'post_draft',
-      status: 'draft',
+      status: isEditor ? 'draft' : 'waiting',
     } satisfies Record<string, unknown>).returning({ cid: schema.contents.cid });
     if (!inserted.length) return error(500, 'admin.content.createFailed', {}, 'Content could not be created.');
     const newCid = inserted[0].cid;
@@ -306,26 +390,38 @@ export const POST: APIRoute = async ({ request, locals }) => {
   // increment metas.count, so an unvalidated mid both fabricates relationships
   // and inflates unrelated counters.
   if (categoryIds.length > 0) {
-    const writableCategories = await db
-      .select({ mid: schema.metas.mid })
-      .from(schema.metas)
-      .where(and(eq(schema.metas.type, 'category'), inArray(schema.metas.mid, categoryIds)));
-    categoryIds = writableCategories.map((row) => row.mid);
+    const writable: number[] = [];
+    for (const chunk of chunkArray(categoryIds, D1_SAFE_IN_LIST_SIZE)) {
+      const rows = await db
+        .select({ mid: schema.metas.mid })
+        .from(schema.metas)
+        .where(and(eq(schema.metas.type, 'category'), inArray(schema.metas.mid, chunk)));
+      writable.push(...rows.map((row: { mid: number }) => row.mid));
+    }
+    categoryIds = [...new Set(writable)];
   }
 
   if (action === 'create') {
+    const initialPassword = passwordInput ?? null;
+    const policy = resolveContentWritePolicy({
+      kind: type,
+      isEditor,
+      isDraft,
+      visibility: visibilityInput,
+      password: initialPassword,
+    });
     const protectedContentData: Record<string, unknown> = {
       title,
       slug: slugInput,
-      created,
+      created: createCreated,
       modified: now,
       text,
       order,
       authorId: auth.uid,
       template,
       type: contentType,
-      status,
-      password,
+      status: policy.status,
+      password: policy.password,
       allowComment,
       allowPing,
       allowFeed,
@@ -344,6 +440,15 @@ export const POST: APIRoute = async ({ request, locals }) => {
       if (error instanceof WriteFilterError) return jsonError(400, error.message);
       throw error;
     }
+    const finalPolicy = resolveContentWritePolicy({
+      kind: type,
+      isEditor,
+      isDraft,
+      visibility: visibilityInput,
+      password: contentData.password as string | null,
+    });
+    contentData.status = finalPolicy.status;
+    contentData.password = finalPolicy.password;
 
     const tagPlan = await prepareTagPlan(db, tags);
     const desiredSlug = contentData.slug as string;
@@ -370,36 +475,30 @@ export const POST: APIRoute = async ({ request, locals }) => {
               ...buildCustomFieldStatements(db, candidateCid, formData),
             ];
             if (tagPlan.length > 0) {
-              createStatements.push(db.insert(schema.metas).values(tagPlan.map((tag) => ({
-                name: tag.name,
-                slug: tag.slug,
-                type: 'tag',
-                count: 0,
-              }))).onConflictDoNothing());
+              createStatements.push(...buildTagMetaStatements(db, tagPlan));
             }
             if (categoryIds.length > 0) {
-              createStatements.push(
-                db.insert(schema.relationships).values(
-                  categoryIds.map((mid) => ({ cid: candidateCid, mid })),
-                ),
-                db.update(schema.metas)
-                  .set({ count: sql`${schema.metas.count} + 1` })
-                  .where(inArray(schema.metas.mid, categoryIds)),
-              );
+              createStatements.push(...buildContentCategoryStatements(db, candidateCid, categoryIds));
+              for (const chunk of chunkArray(categoryIds, D1_SAFE_IN_LIST_SIZE)) {
+                createStatements.push(
+                  db.update(schema.metas)
+                    .set({ count: sql`${schema.metas.count} + 1` })
+                    .where(inArray(schema.metas.mid, chunk)),
+                );
+              }
             }
             if (tagPlan.length > 0) {
-              createStatements.push(
-                db.insert(schema.relationships).values(tagPlan.map((tag) => ({
-                  cid: candidateCid,
-                  mid: sql<number>`(SELECT ${schema.metas.mid} FROM ${schema.metas} WHERE ${schema.metas.type} = 'tag' AND ${schema.metas.slug} = ${tag.slug})`,
-                }))).onConflictDoNothing(),
-                db.update(schema.metas)
-                  .set({ count: sql`${schema.metas.count} + 1` })
-                  .where(and(
-                    eq(schema.metas.type, 'tag'),
-                    inArray(schema.metas.slug, tagPlan.map((tag) => tag.slug)),
-                  )),
-              );
+              createStatements.push(...buildTagRelationshipStatements(db, candidateCid, tagPlan));
+              for (const chunk of chunkArray(tagPlan.map((tag) => tag.slug), D1_SAFE_IN_LIST_SIZE)) {
+                createStatements.push(
+                  db.update(schema.metas)
+                    .set({ count: sql`${schema.metas.count} + 1` })
+                    .where(and(
+                      eq(schema.metas.type, 'tag'),
+                      inArray(schema.metas.slug, chunk),
+                    )),
+                );
+              }
             }
 
             const [inserted] = await db.batch(createStatements as [any, ...any[]]);
@@ -446,11 +545,33 @@ export const POST: APIRoute = async ({ request, locals }) => {
     });
     if (!existing) return error(404, 'admin.content.notFound', {}, 'Not Found');
 
+    // Attachments and revisions are not editable through the post/page editor.
+    if (!isWritableContentType(existing.type)) {
+      return error(404, 'admin.content.notFound', {}, 'Not Found');
+    }
+
     if (!canManageResource(auth.user, existing)) {
       return error(403, 'core.error.forbidden', {}, 'Forbidden');
     }
 
-    const existingBaseType = existing.type?.startsWith('page') ? 'page' : 'post';
+    const existingBaseType = isPageContentType(existing.type) ? 'page' : 'post';
+    if (existingBaseType === 'page' && !isEditor) {
+      return error(403, 'core.error.forbidden', {}, 'Forbidden');
+    }
+    const existingCreated = existing.created || now;
+    const updateCreated = createdInput === undefined
+      ? existingCreated
+      : createdInput === ''
+        ? now
+        // The editor renders the stored instant at minute precision. Keep the
+        // exact original when the field was not changed: an ambiguous DST
+        // fall-back wall time cannot be uniquely round-tripped.
+        : createdInput === formatDateTimeLocal(existingCreated, options.timezone)
+          ? existingCreated
+          : (parseDateTimeLocalToTimestamp(createdInput, options.timezone) ?? now);
+    const updatePassword = passwordInput !== undefined
+      ? passwordInput
+      : (existing.password ?? null);
     const savingRevision = isDraft && (existing.type === existingBaseType);
 
     // Typecho keeps a published row immutable while editing and stores the
@@ -460,18 +581,25 @@ export const POST: APIRoute = async ({ request, locals }) => {
       const revision = await db.query.contents.findFirst({
         where: and(eq(schema.contents.parent, cid), eq(schema.contents.type, 'revision')),
       });
+      const revisionInitialPolicy = resolveContentWritePolicy({
+        kind: existingBaseType,
+        isEditor,
+        isDraft: true,
+        visibility: visibilityInput,
+        password: updatePassword,
+      });
       const revisionBaseline: Record<string, unknown> = {
         title,
         slug: slugInput || existing.slug || String(cid),
-        created: existing.created || created,
+        created: existing.created || updateCreated,
         modified: now,
         text,
         order,
         authorId: existing.authorId,
         template,
         type: 'revision',
-        status: 'draft',
-        password,
+        status: revisionInitialPolicy.status,
+        password: revisionInitialPolicy.password,
         allowComment,
         allowPing,
         allowFeed,
@@ -484,9 +612,17 @@ export const POST: APIRoute = async ({ request, locals }) => {
           capabilityRuntime: pluginCtx.capabilityRuntime,
         });
         revisionData = validateFilteredContent(revisionBaseline, filtered);
+        const revisionPolicy = resolveContentWritePolicy({
+          kind: existingBaseType,
+          isEditor,
+          isDraft: true,
+          visibility: visibilityInput,
+          password: revisionData.password as string | null,
+        });
         revisionData.parent = cid;
         revisionData.type = 'revision';
-        revisionData.status = 'draft';
+        revisionData.status = revisionPolicy.status;
+        revisionData.password = revisionPolicy.password;
       } catch (error) {
         if (error instanceof WriteFilterError) return jsonError(400, error.message);
         throw error;
@@ -511,8 +647,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
           : db.delete(schema.relationships).where(sql`${schema.relationships.cid} = ${revisionCidRef}`),
       ];
       if (categoryIds.length) {
-        revisionStatements.push(db.insert(schema.relationships).values(
-          categoryIds.map(mid => ({ cid: revisionCidRef, mid }))));
+        revisionStatements.push(...buildContentCategoryStatements(db, revisionCidRef, categoryIds));
       }
       revisionStatements.push(...buildTagRelationshipStatements(db, revisionCidRef, tagPlan));
       if (temporarySlug) {
@@ -529,18 +664,29 @@ export const POST: APIRoute = async ({ request, locals }) => {
       return new Response(null, { status: 302, headers: { Location: `/admin/write-${existingBaseType}?cid=${cid}` } });
     }
     const protectedType = isDraft ? `${existingBaseType}_draft` : existingBaseType;
+    // Give the write filter the same status/password the create path exposes,
+    // so plugins branching on visibility see the submitted hidden/private/
+    // waiting state rather than a placeholder. The final policy below still
+    // overrides whatever the filter returns.
+    const initialPolicy = resolveContentWritePolicy({
+      kind: existingBaseType,
+      isEditor,
+      isDraft,
+      visibility: visibilityInput,
+      password: updatePassword,
+    });
     const protectedContentData: Record<string, unknown> = {
       title,
       slug: slugInput || existing.slug || String(cid),
-      created,
+      created: updateCreated,
       modified: now,
       text,
       order,
       authorId: existing.authorId,
       template,
       type: protectedType,
-      status,
-      password,
+      status: initialPolicy.status,
+      password: initialPolicy.password,
       allowComment,
       allowPing,
       allowFeed,
@@ -557,6 +703,15 @@ export const POST: APIRoute = async ({ request, locals }) => {
       if (error instanceof WriteFilterError) return jsonError(400, error.message);
       throw error;
     }
+    const finalPolicy = resolveContentWritePolicy({
+      kind: existingBaseType,
+      isEditor,
+      isDraft,
+      visibility: visibilityInput,
+      password: contentData.password as string | null,
+    });
+    contentData.status = finalPolicy.status;
+    contentData.password = finalPolicy.password;
     const tagPlan = await prepareTagPlan(db, tags);
     // Read the active revision before the main write. Its removal can then
     // share the same atomic publish batch as the parent update.
@@ -572,21 +727,18 @@ export const POST: APIRoute = async ({ request, locals }) => {
         db.update(schema.contents).set(contentData as any).where(eq(schema.contents.cid, cid)),
         ...buildCustomFieldStatements(db, cid, formData),
         ...buildTagMetaStatements(db, tagPlan),
+        ...buildContentMetaCountStatements(
+          db,
+          cid,
+          categoryIds,
+          tagPlan,
+          String(contentData.type || ''),
+        ),
       ];
-      const countStatement = buildContentMetaCountStatement(
-        db,
-        cid,
-        categoryIds,
-        tagPlan,
-        String(contentData.type || ''),
-      );
-      if (countStatement) updateStatements.push(countStatement);
       updateStatements.push(db.delete(schema.relationships).where(eq(schema.relationships.cid, cid)));
 
       if (categoryIds.length > 0) {
-        updateStatements.push(db.insert(schema.relationships).values(
-          categoryIds.map((mid) => ({ cid, mid })),
-        ));
+        updateStatements.push(...buildContentCategoryStatements(db, cid, categoryIds));
       }
       updateStatements.push(...buildTagRelationshipStatements(db, cid, tagPlan));
       if (activeRevision) {
@@ -626,13 +778,20 @@ export const POST: APIRoute = async ({ request, locals }) => {
       where: eq(schema.contents.cid, cid),
     });
     if (!existing) return error(404, 'admin.content.notFound', {}, 'Not Found');
+    if (!isWritableContentType(existing.type)) {
+      return error(404, 'admin.content.notFound', {}, 'Not Found');
+    }
 
     if (!canManageResource(auth.user, existing)) {
       return error(403, 'core.error.forbidden', {}, 'Forbidden');
     }
 
+    const isPage = isPageContentType(existing.type);
+    if (isPage && !isEditor) {
+      return error(403, 'core.error.forbidden', {}, 'Forbidden');
+    }
+
     // Trigger pre-delete hook
-    const isPage = existing.type?.startsWith('page');
     await doHook(pluginCtx, isPage ? 'page:beforeDelete' : 'post:beforeDelete', existing, {
       capabilityRuntime: pluginCtx.capabilityRuntime,
     });

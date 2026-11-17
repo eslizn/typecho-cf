@@ -17,7 +17,7 @@ function createD1Stub(_db: TestDatabase) {
   const stmt = {
     first: (sql?: string) => Promise.resolve(
       typeof sql === 'string' && sql.includes('runtimeSchemaVersion')
-        ? { value: '20261007' }
+        ? { value: '20261117' }
         : { name: 'typecho_options' } as any,
     ),
     all: () => Promise.resolve({
@@ -37,7 +37,7 @@ function createD1Stub(_db: TestDatabase) {
       ...stmt,
       first: () => Promise.resolve(
         sql.includes('runtimeSchemaVersion')
-          ? { value: '20261007' }
+          ? { value: '20261117' }
           : { name: 'typecho_options' } as any,
       ),
       bind() { return this; },
@@ -688,6 +688,32 @@ describe('Middleware: content path whitelist (default URLs rejected once custom 
     const response = await onRequest(ctx, next) as Response;
     expect(response.status).toBe(200);
     expect(next).toHaveBeenCalledWith('/contents/123/');
+    expect(ctx.locals._permalinkRewrite).toBe(true);
+  });
+
+  it('rewrites percent-encoded Unicode post slugs through the custom pattern', async () => {
+    const author = (await testDb.query.users.findFirst())!;
+    await testDb.insert(schema.contents).values({
+      cid: 901, title: '中文文章', slug: '中文-文章', type: 'post', status: 'publish',
+      authorId: author.uid, created: Math.floor(Date.now() / 1000),
+    });
+    const next = vi.fn(async () => new Response('rendered', { status: 200 }));
+    const ctx = makeCtx(`/post/${encodeURIComponent('中文-文章')}/`);
+    const response = await onRequest(ctx, next) as Response;
+    expect(response.status).toBe(200);
+    expect(next).toHaveBeenCalledWith('/contents/901/');
+    expect(ctx.locals._permalinkRewrite).toBe(true);
+  });
+
+  it('rewrites percent-encoded Unicode category slugs to the encoded category route', async () => {
+    await testDb.insert(schema.metas).values({
+      mid: 902, name: '技术', slug: '技术', type: 'category',
+    });
+    const next = vi.fn(async () => new Response('rendered', { status: 200 }));
+    const ctx = makeCtx(`/topics/${encodeURIComponent('技术')}/`);
+    const response = await onRequest(ctx, next) as Response;
+    expect(response.status).toBe(200);
+    expect(next).toHaveBeenCalledWith(`/category/${encodeURIComponent('技术')}/`);
     expect(ctx.locals._permalinkRewrite).toBe(true);
   });
 

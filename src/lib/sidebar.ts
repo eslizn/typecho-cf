@@ -9,6 +9,7 @@ import { schema } from '@/db';
 import { buildPermalink, buildCategoryLink, buildDateLink } from '@/lib/content';
 import { applyFilterSafely, type HookContext } from '@/lib/plugin';
 import { publishedPostCondition, nowSeconds } from '@/lib/content-visibility';
+import type { TimezoneSetting } from '@/lib/timezone';
 
 type SidebarDatabase = Pick<Database, 'batch' | 'select'>;
 // Snapshots are version-keyed, so content/options writes invalidate them by
@@ -60,6 +61,7 @@ export async function loadSidebarData(
   pagePattern?: string | null,
   cacheVersion: string | number = 0,
   bundleName = '',
+  timezone: TimezoneSetting = 'UTC',
 ): Promise<SidebarData> {
   const cacheKey = `${cacheVersion}\0${bundleName}\0${siteUrl}\0${permalinkPattern || ''}\0${categoryPattern || ''}\0${pagePattern || ''}`;
   const cached = sidebarSnapshot;
@@ -162,6 +164,8 @@ export async function loadSidebarData(
       { cid: p.cid, slug: p.slug, type: p.type, created: p.created },
       siteUrl,
       permalinkPattern,
+      undefined,
+      timezone,
     ),
   }));
 
@@ -173,6 +177,7 @@ export async function loadSidebarData(
       siteUrl,
       permalinkPattern,
       pagePattern,
+      timezone,
     )}#comment-${c.coid}`,
   }));
 
@@ -216,8 +221,9 @@ export async function loadNavPages(
   cacheVersion: string | number = 0,
   i18n?: HookContext['i18n'],
   bundleName = '',
+  timezone?: TimezoneSetting,
 ): Promise<NavPage[]> {
-  const cacheKey = `${cacheVersion}\0${bundleName}\0${siteUrl}\0${pagePattern || ''}`;
+  const cacheKey = `${cacheVersion}\0${bundleName}\0${siteUrl}\0${pagePattern || ''}\0${timezone || 'UTC'}`;
   const cached = navSnapshot;
   if (cached && cached.key === cacheKey && cached.expiresAt > Date.now()) {
     return cached.data.map(item => ({ ...item }));
@@ -250,6 +256,7 @@ export async function loadNavPages(
       siteUrl,
       undefined,
       pagePattern,
+      timezone,
     ),
   }));
   navSnapshot = {

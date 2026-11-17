@@ -193,25 +193,20 @@ export async function deleteSpamCommentsForUser(
 
   // Non-admin: clear spam attached to posts the user currently owns.
   // G7-4: use the live contents.authorId rather than the historical
-  // comment.ownerId.
-  const ownedCids = await db
-    .select({ cid: schema.contents.cid })
-    .from(schema.contents)
-    .where(eq(schema.contents.authorId, user.uid));
-  if (ownedCids.length === 0) return 0;
-
-  const cidIn = sql.join(ownedCids.map(o => sql`${o.cid}`), sql`, `);
+  // comment.ownerId. A correlated subquery keeps the statement under D1's
+  // 100-bound-parameter cap regardless of how many posts the user owns.
+  const ownedContent = sql`SELECT ${schema.contents.cid} FROM ${schema.contents} WHERE ${schema.contents.authorId} = ${user.uid}`;
   const before = await db
     .select({ coid: schema.comments.coid })
     .from(schema.comments)
     .where(and(
       eq(schema.comments.status, 'spam'),
-      sql`${schema.comments.cid} IN (${cidIn})`,
+      sql`${schema.comments.cid} IN (${ownedContent})`,
     ));
   if (before.length === 0) return 0;
   await db.delete(schema.comments).where(and(
     eq(schema.comments.status, 'spam'),
-    sql`${schema.comments.cid} IN (${cidIn})`,
+    sql`${schema.comments.cid} IN (${ownedContent})`,
   ));
   return before.length;
 }

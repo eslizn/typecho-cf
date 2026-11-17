@@ -240,13 +240,13 @@ export default function init({ addHook, pluginId, registerAdminPath }: PluginIni
 }
 ```
 
-- 路径应在插件 `init()` 中注册，在任何 hook handler 之前；`registerAdminPath()` 会把路径绑定到当前 `pluginId`
+- 路径应在插件 `init()` 中注册，在任何 hook handler 之前；`registerAdminPath()` 会把路径绑定到当前 `pluginId`。注册会规范化尾部斜杠，并拒绝保留路径（`/install`、`/api/install`、`/admin`、`/api/admin`、`/admin/login`、`/admin/reset-password`、`/api/users/login|logout|register|reset-password`）及含 `?`、`#`、`\`、`.`、`..`、`//` 的非法拼写；被拒绝时只打印 warning，不建立 claim
 - `isPluginAdminPath(path)` 在中间件 `isReservedCorePath` 中调用，白名单通过后放行
 - 管理/API 路径与前台路由使用同一套 owner 生命周期：插件停用、初始化失败或注册表重置时，该 owner 的全部路径 claim 立即注销；插件只能注销自己的 claim
 - 前台自定义路由（如 WebDAV 入口）必须在插件 `init()` 中通过 `PluginInitContext.registerRouteResolver(resolver)` 声明 owner-scoped 路由：resolver 根据当前配置返回该插件当前有效的路径 claim；插件停用、初始化失败或配置变化时，核心替换或注销该 owner 的旧 claim。中间件据此（1）豁免内容路径废弃检查；（2）禁止插件路径进入边缘缓存（插件自带鉴权，缓存会绕过）。路由优先级保持为：系统固定 > 系统路由表 > 插件路由表
 - route resolver 只负责声明和生命周期管理，不负责处理请求；实际请求仍由 `request:route` hook 分发。核心必须在缓存决策和 `request:route` 分发前同步当前 claim；不同插件的冲突 claim 必须 fail-closed（相关 owner 均不可用），WebDAV 保留历史兼容路径 `/dav` 的匹配行为
 - 插件路由声明按 owner 管理，插件只能替换或注销自己的 claim；插件停用后不得残留旧路径。旧的全局 `registerPluginAdminPath(path)` 已从 SDK 移除，管理/API 路径统一改用 `PluginInitContext.registerAdminPath(path)`
-- **行为变更（相对早期实现）**：`request:route` 现在对保留核心路径（`/install`、`/api/install`、`/admin/**`、`/api/admin/**`、`/api/users/login|logout|register`）**提前短路，不再调用插件 hook**；早期实现是「先调用、命中保留路径再丢弃响应并打印 warn 日志」。因此依赖「先收到请求、再判断是否处理」的插件必须改为在 `init()` 中用 `registerAdminPath()` 声明管理/API 路径、用 `registerRouteResolver()` 声明前台路由，否则不会再收到这些请求
+- **行为变更（相对早期实现）**：`request:route` 现在对保留核心路径（`/install`、`/api/install`、`/admin/**`、`/api/admin/**`、`/api/users/login|logout|register|reset-password`、`/admin/reset-password`）**提前短路，不再调用插件 hook**；早期实现是「先调用、命中保留路径再丢弃响应并打印 warn 日志」。因此依赖「先收到请求、再判断是否处理」的插件必须改为在 `init()` 中用 `registerAdminPath()` 声明管理/API 路径、用 `registerRouteResolver()` 声明前台路由，否则不会再收到这些请求
 
 ### 6.4 插件专属管理页面
 
@@ -442,6 +442,8 @@ Cloudflare Workers 单个 isolate 内的模块级状态会在异步请求间交�
 - `src/lib/security-options.ts`：只在带认证 Cookie、`Authorization` 头或已登记插件路由候选的请求上，通过 D1 `first-primary` 会话刷新插件启用集合与 `plugin:*` 配置；普通公开页面继续使用 options 快照。D1 批次提交后才能触发插件 Hooks 或外部副作用
 - `src/lib/sidebar.ts`：`sidebarSnapshot` / `navSnapshot`（同样是 isolate 级单槽 + cacheVersion 版本化键）
 - `src/lib/comment-page.ts`：`commentRootCounts`（按 cacheVersion 键控的根评论计数缓存，TTL + 条数上限）
+- `src/lib/page-data/archive.ts`：`archiveCountCache`（按 cacheVersion + 归档类型/URL 键控的归档总数缓存，60s TTL + 200 条上限，过期与最旧条目淘汰）
+- `src/lib/markdown.ts`：`renderedContentCache`（Markdown 渲染结果 LRU，64 条；仅缓存默认摘要长度且源文本 ≤ 100k 字符的输入）与 `commentSanitizeOptionsCache`（评论净化选项 LRU，32 条）
 - `src/lib/fulltext.ts`：`ftsAvailability`（FTS5 就绪状态）
 - `src/lib/isolate-boot.ts`：`state`（表检查 / 索引回填 / FTS 引导的一次性标志）
 - `src/lib/plugin-routes.ts`：resolver 注册表与当前 claim 表；请求引导必须复制为 request-local route snapshot，不能在后续路由判断中依赖可能被其他请求刷新过的模块级 claim

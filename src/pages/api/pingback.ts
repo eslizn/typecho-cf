@@ -6,7 +6,7 @@ import { getRequestCoreContextFromLocals, getClientIp } from '@/lib/context';
 import { parseActivatedPlugins, setActivatedPlugins } from '@/lib/plugin';
 import { INCOMING_FEEDBACK_RATE_LIMIT, saveIncomingFeedback } from '@/lib/incoming-feedback';
 import { trackSlidingWindow } from '@/lib/login-rate-limit';
-import { compilePermalinkPattern, DEFAULT_PERMALINK_PATTERNS } from '@/lib/permalink-pattern';
+import { compilePermalinkPattern, decodePathnameForMatching, DEFAULT_PERMALINK_PATTERNS } from '@/lib/permalink-pattern';
 import { nowSeconds } from '@/lib/content-visibility';
 import { env } from 'cloudflare:workers';
 import { InputError, readBoundedText } from '@/lib/input';
@@ -87,9 +87,10 @@ export async function resolvePingbackTarget(
     },
   ];
 
+  const matchPath = decodePathnameForMatching(path);
   for (const attempt of attempts) {
     const regex = compilePermalinkPattern(attempt.pattern, attempt.kind);
-    const match = regex ? path.match(regex) : null;
+    const match = regex ? matchPath.match(regex) : null;
     if (!match?.groups) continue;
 
     const conditions = [

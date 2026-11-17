@@ -60,6 +60,13 @@ export async function preparePostData(
 
   if (!contentRow) return new Response(getRequestI18n(ctx).t('core.error.notFound', {}, 'Not Found'), { status: 404 });
 
+  // Only posts and their draft rows render through the post template.
+  // Attachments keep metadata JSON in `text`; revisions are editor-only
+  // children. Neither may be exposed as a public article.
+  if (contentRow.type !== 'post' && contentRow.type !== 'post_draft') {
+    return new Response(getRequestI18n(ctx).t('core.error.notFound', {}, 'Not Found'), { status: 404 });
+  }
+
   if (!singleOptions.allowPreview && !canViewContent(contentRow, { isLoggedIn, uid: user?.uid })) {
     return new Response(getRequestI18n(ctx).t('core.error.notFound', {}, 'Not Found'), { status: 404 });
   }
@@ -157,6 +164,8 @@ export async function preparePostData(
     { cid: contentRow.cid, slug: contentRow.slug, type: contentRow.type, created: contentRow.created, category: categories[0]?.slug },
     urls.siteUrl,
     options.permalinkPattern as string | undefined,
+    undefined,
+    options.timezone,
   );
 
   const allowComment = contentRow.allowComment === '1';
@@ -192,11 +201,11 @@ export async function preparePostData(
     commentOptions: { ...buildCommentOptions(options, securityToken), allowComment },
     prevPost: prevPostRows[0] ? {
       title: prevPostRows[0].title || getRequestI18n(ctx).t('core.content.untitled', {}, 'Untitled'),
-      permalink: buildPermalink(prevPostRows[0], urls.siteUrl, options.permalinkPattern as string | undefined),
+      permalink: buildPermalink(prevPostRows[0], urls.siteUrl, options.permalinkPattern as string | undefined, undefined, options.timezone),
     } : null,
     nextPost: nextPostRows[0] ? {
       title: nextPostRows[0].title || getRequestI18n(ctx).t('core.content.untitled', {}, 'Untitled'),
-      permalink: buildPermalink(nextPostRows[0], urls.siteUrl, options.permalinkPattern as string | undefined),
+      permalink: buildPermalink(nextPostRows[0], urls.siteUrl, options.permalinkPattern as string | undefined, undefined, options.timezone),
     } : null,
     gravatarMap,
   };
@@ -251,6 +260,7 @@ export async function preparePageData(
     urls.siteUrl,
     undefined,
     options.pagePattern as string | undefined,
+    options.timezone,
   );
 
   const hasPassword = !!pageRow.password;

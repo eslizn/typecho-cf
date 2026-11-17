@@ -192,6 +192,12 @@ describe('POST /api/admin/user-batch', () => {
 
     const post = await testDb.query.contents.findFirst();
     expect(post?.authorId).toBe(admin.uid);
+
+    // Author archives and bylines are public, so the site cache must be bumped.
+    const cacheVersion = await testDb.query.options.findFirst({
+      where: eq(schema.options.name, 'cacheVersion'),
+    });
+    expect(Number(cacheVersion?.value)).toBeGreaterThanOrEqual(1);
   });
 
   it('re-assigns deleted user comments to admin', async () => {
@@ -239,6 +245,46 @@ describe('POST /api/admin/user-batch', () => {
     // Only the admin should remain
     expect(remaining).toHaveLength(1);
     expect(remaining[0].uid).toBe(admin.uid);
+  });
+
+  it('keeps every deletion statement under the D1 parameter cap for 100 users', async () => {
+    const admin = await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE });
+    const cookie = await makeAuthCookie(testDb, admin.uid, TEST_AUTH_CODE, TEST_SECRET);
+    await testDb.insert(schema.users).values(
+      Array.from({ length: 100 }, (_, index) => ({
+        name: `bulk-${index}`,
+        password: 'unused',
+        mail: `bulk-${index}@example.com`,
+        group: 'contributor',
+        authCode: `bulk-${index}`,
+      })),
+    );
+    const targets = await testDb
+      .select({ uid: schema.users.uid })
+      .from(schema.users)
+      .where(eq(schema.users.group, 'contributor'));
+    expect(targets).toHaveLength(100);
+
+    const batches: unknown[][] = [];
+    const originalBatch = testDb.batch.bind(testDb);
+    const batchSpy = vi.spyOn(testDb, 'batch').mockImplementation((async (statements: unknown[]) => {
+      batches.push(statements);
+      return originalBatch(statements as any);
+    }) as any);
+    try {
+      const req = makeBatchRequest(targets.map(target => target.uid), cookie);
+      const res = await POST({ request: req, locals: {}, url: new URL(req.url) } as any);
+      expect(res.status).toBe(302);
+    } finally {
+      batchSpy.mockRestore();
+    }
+
+    const statements = batches.flat() as Array<{ toSQL(): { params: unknown[] } }>;
+    const paramCounts = statements.map(statement => statement.toSQL().params.length);
+    expect(paramCounts.length).toBeGreaterThan(0);
+    expect(Math.max(...paramCounts)).toBeLessThanOrEqual(100);
+    expect(await testDb.select().from(schema.users)
+      .where(eq(schema.users.group, 'contributor'))).toHaveLength(0);
   });
 
   it('skips non-existent uids gracefully', async () => {

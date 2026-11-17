@@ -33,7 +33,7 @@ export const GET: APIRoute = async ({ request, locals, params }) => {
   const items = [];
   for (const p of posts) {
     items.push(
-      await buildFeedItem(p, urls.siteUrl, options.permalinkPattern as string | undefined, undefined, pluginCtx, !!(options.feedFullText), i18n),
+      await buildFeedItem(p, urls.siteUrl, options.permalinkPattern as string | undefined, undefined, pluginCtx, !!(options.feedFullText), i18n, options.timezone),
     );
   }
 

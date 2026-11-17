@@ -31,6 +31,7 @@ function makeRuntime(activePlugins: string[]): TaskRuntime {
     options: {} as TaskRuntime['options'],
     activatedPlugins: new Set(activePlugins),
     initFailures: {},
+    activationDiagnostics: [],
   };
 }
 
@@ -97,6 +98,56 @@ describe('task dispatcher', () => {
     expect(inactive.ack).toHaveBeenCalledTimes(1);
     expect(malformed.retry).not.toHaveBeenCalled();
     expect(inactive.retry).not.toHaveBeenCalled();
+  });
+
+  it('retries queued messages for plugins whose initialization failed', async () => {
+    registerAsyncTask('plugin-a', {
+      id: 'init-failed',
+      handler: async () => ({ status: 'success' }),
+    });
+    const runtime = {
+      ...makeRuntime([]),
+      initFailures: { 'plugin-a': { error: 'boom', attempts: 1, failedAt: 1 } },
+    };
+    const message = makeMessage(envelope('plugin-a', 'init-failed'), 2);
+    const disabled = makeMessage(envelope('plugin-b', 'disabled'));
+
+    await dispatchTaskMessages([message, disabled], runtime);
+
+    // An init failure is transient: retry within the Queue budget.
+    expect(message.retry).toHaveBeenCalledTimes(1);
+    expect(message.ack).not.toHaveBeenCalled();
+    // A genuinely disabled plugin must not loop forever.
+    expect(disabled.ack).toHaveBeenCalledTimes(1);
+    expect(disabled.retry).not.toHaveBeenCalled();
+  });
+
+  it('retries consumers blocked by a dependency whose init failed', async () => {
+    const blocked = makeMessage(envelope('plugin-b', 'consumer'), 2);
+    const runtime = {
+      ...makeRuntime([]),
+      initFailures: { 'plugin-a': { error: 'boom', attempts: 1, failedAt: 1 } },
+      activationDiagnostics: [{
+        pluginId: 'plugin-b',
+        dependencyId: 'plugin-a',
+        code: 'dependency-not-active' as const,
+        message: 'plugin-a is not active',
+      }],
+    };
+
+    await dispatchTaskMessages([blocked], runtime);
+
+    expect(blocked.retry).toHaveBeenCalledTimes(1);
+    expect(blocked.ack).not.toHaveBeenCalled();
+
+    // A consumer blocked by a genuinely disabled provider still acks.
+    const disabled = makeMessage(envelope('plugin-b', 'consumer'));
+    await dispatchTaskMessages([disabled], {
+      ...makeRuntime([]),
+      activationDiagnostics: runtime.activationDiagnostics,
+    });
+    expect(disabled.ack).toHaveBeenCalledTimes(1);
+    expect(disabled.retry).not.toHaveBeenCalled();
   });
 
   it('runs different tasks concurrently but limits the same task', async () => {

@@ -8,7 +8,10 @@ const { filter, hook } = vi.hoisted(() => ({
   filter: vi.fn(async (_ctx: any, _point: string, value: any) => value),
   hook: vi.fn(async () => {}),
 }));
-const { verifySource } = vi.hoisted(() => ({ verifySource: vi.fn(async () => true) }));
+const { verifySource, invalidateCache } = vi.hoisted(() => ({
+  verifySource: vi.fn(async () => true),
+  invalidateCache: vi.fn(async () => {}),
+}));
 vi.mock('@/lib/plugin', async () => {
   const actual = await vi.importActual<typeof import('@/lib/plugin')>('@/lib/plugin');
   return { ...actual, applyFilter: filter, doHook: hook };
@@ -16,6 +19,7 @@ vi.mock('@/lib/plugin', async () => {
 // Outbound verification is mocked: these cases test the status decision, and
 // the fetch path itself is covered by feedback-verification tests.
 vi.mock('@/lib/feedback-verification', () => ({ verifyFeedbackSource: verifySource }));
+vi.mock('@/lib/cache', () => ({ invalidateSiteCache: invalidateCache }));
 
 let db: TestDatabase;
 const ctx = { activatedPlugins: new Set<string>() } as any;
@@ -33,6 +37,7 @@ describe('incoming trackback and pingback', () => {
     hook.mockClear();
     verifySource.mockReset();
     verifySource.mockResolvedValue(true);
+    invalidateCache.mockClear();
   });
 
   it('stores an approved trackback and increments commentsNum', async () => {
@@ -92,6 +97,40 @@ describe('incoming trackback and pingback', () => {
     const result = await saveIncomingFeedback(db as any, ctx, options, { cid: cid || post.cid, author: 'Blog', url: 'https://source.test', text: 'x', type: 'pingback', ip: '', agent: '' });
     expect(result).toBeInstanceOf(Response);
     expect((result as Response).statusText || await (result as Response).text()).toContain(message);
+  });
+
+  it('rejects feedback for a scheduled future post without writing', async () => {
+    const post = await seed();
+    await db.update(schema.contents)
+      .set({ created: Math.floor(Date.now() / 1000) + 3600 })
+      .where(eq(schema.contents.cid, post.cid));
+
+    const result = await saveIncomingFeedback(db as any, ctx, options, {
+      cid: post.cid, author: 'Blog', url: 'https://source.test/a', text: 'Excerpt',
+      type: 'trackback', ip: '1.1.1.1', agent: 'test',
+    });
+
+    expect(result).toBeInstanceOf(Response);
+    expect((result as Response).status).toBe(404);
+    expect(await db.select().from(schema.comments)).toHaveLength(0);
+    expect(invalidateCache).not.toHaveBeenCalled();
+  });
+
+  it('invalidates the site cache only when approved feedback is stored', async () => {
+    const post = await seed();
+    await saveIncomingFeedback(db as any, ctx, options, {
+      cid: post.cid, author: 'Blog', url: 'https://source.test/a', text: 'Excerpt',
+      type: 'trackback', ip: '1.1.1.1', agent: 'test',
+    });
+    expect(invalidateCache).toHaveBeenCalledTimes(1);
+    expect(invalidateCache).toHaveBeenCalledWith(db);
+
+    invalidateCache.mockClear();
+    await saveIncomingFeedback(db as any, ctx, { ...options, commentsRequireModeration: true }, {
+      cid: post.cid, author: 'Blog', url: 'https://source.test/b', text: 'Pending',
+      type: 'pingback', ip: '1.1.1.1', agent: 'test',
+    });
+    expect(invalidateCache).not.toHaveBeenCalled();
   });
 
   it('allows filters to reject or transform incoming data', async () => {

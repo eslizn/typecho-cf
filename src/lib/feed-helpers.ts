@@ -5,6 +5,7 @@
 
 import type { FeedItem } from '@/lib/feed';
 import type { I18n, ResolvedLocale } from '@/lib/i18n';
+import type { TimezoneSetting } from '@/lib/timezone';
 import { createRequestI18n } from '@/lib/i18n-runtime';
 import { buildPermalink } from '@/lib/content';
 import { generateRss2, generateAtom, generateRss1 } from '@/lib/feed';
@@ -70,9 +71,10 @@ export async function buildFeedItem(
   pluginCtx: HookContext,
   feedFullText?: boolean,
   i18n?: I18n,
+  timezone?: TimezoneSetting,
 ): Promise<FeedItem> {
   const rendered = renderContent(post.text || '');
-  const link = buildPermalink(post, siteUrl, permalinkPattern, pagePattern);
+  const link = buildPermalink(post, siteUrl, permalinkPattern, pagePattern, timezone);
 
   let item: FeedItem = {
     title: post.title || i18n?.t('feed.untitled', {}, 'Untitled') || 'Untitled',

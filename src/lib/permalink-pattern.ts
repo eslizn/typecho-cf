@@ -66,6 +66,27 @@ export function renderPermalinkPattern(
   return result;
 }
 
+/**
+ * Decode a URL pathname for pattern matching and database slug lookups.
+ *
+ * URL pathnames are percent-encoded, while stored slugs keep their Unicode
+ * characters (`normalizeSlug` preserves them). Matching against a decoded path
+ * keeps both sides in the same representation. Encoded separators (`%2F` /
+ * `%5C`) are refused: decoding them would turn one requested segment into
+ * several and create non-canonical aliases. A malformed escape also leaves the
+ * path untouched.
+ */
+export function decodePathnameForMatching(path: string): string {
+  if (!path.includes('%')) return path;
+  const segments = path.split('/');
+  if (segments.some(segment => /%2f|%5c/i.test(segment))) return path;
+  try {
+    return segments.map(segment => decodeURIComponent(segment)).join('/');
+  } catch {
+    return path;
+  }
+}
+
 export function compilePermalinkPattern(
   pattern: string,
   kind: PermalinkPatternKind,

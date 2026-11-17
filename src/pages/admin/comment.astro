@@ -15,7 +15,7 @@ const comment = await ctx.db.query.comments.findFirst({ where: eq(schema.comment
 if (!comment) return new Response(ctx.i18n.t('core.error.notFound', {}, 'Not Found'), { status: 404 });
 const content = await ctx.db.query.contents.findFirst({ where: eq(schema.contents.cid, comment.cid || 0) });
 if (!content || (ctx.user!.group !== 'administrator' && content.authorId !== ctx.user!.uid)) return new Response(ctx.i18n.t('core.error.forbidden', {}, 'Forbidden'), { status: 403 });
-const contentUrl = buildPermalink(content, ctx.urls.siteUrl, ctx.options.permalinkPattern, ctx.options.pagePattern);
+const contentUrl = buildPermalink(content, ctx.urls.siteUrl, ctx.options.permalinkPattern, ctx.options.pagePattern, ctx.options.timezone);
 ---
 <Admin title={ctx.i18n.t('admin.page.editComment', {}, 'Edit comment')} options={ctx.options} urls={ctx.urls} user={ctx.user} activeMenu="manage-comments" pluginCtx={ctx}>
   <div class="col-mb-12 col-tb-8 col-tb-offset-2" role="form">

@@ -5,9 +5,10 @@
  * The pingback specification expects the consumer to fetch the source URI and
  * confirm it references the target; the previous implementation skipped that
  * step, so any unauthenticated POST could publish a comment row for an
- * arbitrary URL. The result now decides between `approved` and `waiting`
- * (see incoming-feedback.ts) — an unverifiable source is kept for review
- * instead of being dropped, so nothing is lost.
+ * arbitrary URL. The result gates storage in incoming-feedback.ts:
+ * unverifiable feedback is rejected with a 4xx and no row is written. Verified
+ * feedback is then `waiting` or `approved` solely according to
+ * `commentsRequireModeration`.
  */
 import { fetchWithTimeout } from '@/lib/fetch';
 

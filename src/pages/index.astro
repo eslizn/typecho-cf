@@ -44,6 +44,7 @@ if (options.frontPage && options.frontPage !== 'recent') {
           urls.siteUrl,
           undefined,
           options.pagePattern as string | undefined,
+          options.timezone,
         );
         const redirectPath = getRedirectPathIfDifferent(Astro.request.url, targetUrl);
         if (redirectPath) return Astro.redirect(redirectPath);

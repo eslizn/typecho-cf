@@ -53,11 +53,18 @@ export function contentsFtsSql(): string[] {
   return [
     `CREATE VIRTUAL TABLE IF NOT EXISTS \`${t}\` USING fts5(` +
       `title, text, content='typecho_contents', content_rowid='cid', tokenize='trigram')`,
+    // Drop first so an upgraded database replaces the older trigger definitions
+    // (CREATE TRIGGER IF NOT EXISTS alone would keep them).
+    'DROP TRIGGER IF EXISTS typecho_contents_fts_ai',
     `CREATE TRIGGER IF NOT EXISTS typecho_contents_fts_ai AFTER INSERT ON typecho_contents BEGIN ` +
       `INSERT INTO \`${t}\`(rowid, title, text) VALUES (new.cid, new.title, new.text); END`,
+    'DROP TRIGGER IF EXISTS typecho_contents_fts_ad',
     `CREATE TRIGGER IF NOT EXISTS typecho_contents_fts_ad AFTER DELETE ON typecho_contents BEGIN ` +
       `INSERT INTO \`${t}\`(\`${t}\`, rowid, title, text) VALUES ('delete', old.cid, old.title, old.text); END`,
-    `CREATE TRIGGER IF NOT EXISTS typecho_contents_fts_au AFTER UPDATE ON typecho_contents BEGIN ` +
+    'DROP TRIGGER IF EXISTS typecho_contents_fts_au',
+    // Only title/text affect the index; updating commentsNum or status must
+    // not force a full-text delete+reinsert of the article body.
+    `CREATE TRIGGER IF NOT EXISTS typecho_contents_fts_au AFTER UPDATE OF title, text ON typecho_contents BEGIN ` +
       `INSERT INTO \`${t}\`(\`${t}\`, rowid, title, text) VALUES ('delete', old.cid, old.title, old.text); ` +
       `INSERT INTO \`${t}\`(rowid, title, text) VALUES (new.cid, new.title, new.text); END`,
   ];

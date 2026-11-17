@@ -1,8 +1,9 @@
-import { eq, and, desc, asc, lt, gt, or, sql } from 'drizzle-orm';
+import { eq, and, desc, asc, lt, gt, or, inArray, sql } from 'drizzle-orm';
 import { schema } from '@/db';
 import type { SiteOptions } from '@/lib/options';
 import { buildFtsMatchExpression, contentsFtsTableRef, FTS_MIN_CHARS, isFtsAvailable } from '@/lib/fulltext';
 import { buildAuthorLink, buildCategoryLink, buildTagLink, buildSearchLink } from '@/lib/content';
+import { chunkArray, D1_SAFE_IN_LIST_SIZE } from '@/lib/d1-limits';
 import { paginate } from '@/lib/pagination';
 import type { RequestContext } from '@/lib/context';
 import { applyFilter, doHook } from '@/lib/plugin';
@@ -288,38 +289,56 @@ async function prepareArchiveData(
   let authorMap = params.authorOverride;
   let categoryRows: Array<{ cid: number; mid: number; name: string | null; slug: string | null }> = [];
   if (postIds.length > 0) {
-    const categoryStatement = db
-      .select({
-        cid: schema.relationships.cid,
-        mid: schema.relationships.mid,
-        name: schema.metas.name,
-        slug: schema.metas.slug,
-      })
-      .from(schema.relationships)
-      .innerJoin(schema.metas, eq(schema.relationships.mid, schema.metas.mid))
-      .where(
-        and(
-          sql`${schema.relationships.cid} IN (${sql.join(postIds.map(id => sql`${id}`), sql`, `)})`,
-          eq(schema.metas.type, 'category')
-        )
-      );
+    // D1 caps a statement at 100 bound parameters; chunk both the category and
+    // author lookups so a pageSize of 100 (or a page with many authors) stays
+    // within the limit.
+    const categoryStatements = chunkArray(postIds, D1_SAFE_IN_LIST_SIZE).map((chunk) =>
+      db
+        .select({
+          cid: schema.relationships.cid,
+          mid: schema.relationships.mid,
+          name: schema.metas.name,
+          slug: schema.metas.slug,
+        })
+        .from(schema.relationships)
+        .innerJoin(schema.metas, eq(schema.relationships.mid, schema.metas.mid))
+        .where(
+          and(
+            inArray(schema.relationships.cid, chunk),
+            eq(schema.metas.type, 'category'),
+          )
+        ),
+    );
 
-    if (authorMap || authorIds.length === 0) {
-      categoryRows = await categoryStatement;
-    } else {
-      const [authors, categories] = await db.batch([
-        db
-          .select({
-            uid: schema.users.uid,
-            name: schema.users.name,
-            screenName: schema.users.screenName,
-          })
-          .from(schema.users)
-          .where(sql`${schema.users.uid} IN (${sql.join(authorIds.map(id => sql`${id}`), sql`, `)})`),
-        categoryStatement,
-      ]);
+    const authorChunks = authorMap ? [] : chunkArray(authorIds, D1_SAFE_IN_LIST_SIZE);
+    const authorStatements = authorChunks.map((chunk) =>
+      db
+        .select({
+          uid: schema.users.uid,
+          name: schema.users.name,
+          screenName: schema.users.screenName,
+        })
+        .from(schema.users)
+        .where(inArray(schema.users.uid, chunk)),
+    );
+
+    const statements = [...authorStatements, ...categoryStatements];
+    const results = statements.length > 0
+      ? await db.batch(statements as [any, ...any[]])
+      : [];
+    const authors = results.slice(0, authorStatements.length).flat() as Array<{
+      uid: number;
+      name: string | null;
+      screenName: string | null;
+    }>;
+    categoryRows = results.slice(authorStatements.length).flat() as Array<{
+      cid: number;
+      mid: number;
+      name: string | null;
+      slug: string | null;
+    }>;
+    if (!authorMap && authors.length > 0) {
       authorMap = new Map(authors.map(author => [author.uid, author]));
-      categoryRows = categories;
     }
   }
   authorMap ??= await fetchAuthors(db, authorIds);

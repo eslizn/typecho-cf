@@ -25,13 +25,14 @@ vi.mock('@/lib/plugin', () => ({
 }));
 
 import { GET } from '@/pages/feed/[...type]';
+import { GET as categoryFeed } from '@/pages/category/[slug]/feed.xml';
 
 afterEach(() => {
   mockApplyFilterSafely.mockReset();
   mockApplyFilterSafely.mockImplementation(async (_ctx: unknown, _hook: string, value: unknown) => value);
 });
 
-async function seedOptions() {
+async function seedOptions(overrides: Record<string, string> = {}) {
   const options: Record<string, string> = {
     title: 'Feed Blog',
     description: 'Feed tests',
@@ -39,6 +40,7 @@ async function seedOptions() {
     commentsFeedUrl: 'https://example.com/feed/comments',
     permalinkPattern: '/posts/{slug}/',
     pagePattern: '/{slug}.html',
+    ...overrides,
   };
   for (const [name, value] of Object.entries(options)) {
     await testDb.insert(schema.options).values({ name, user: 0, value });
@@ -79,6 +81,19 @@ describe('GET /feed/comments', () => {
   beforeEach(async () => {
     testDb = await createTestDb();
     await seedOptions();
+  });
+
+  it('excludes comments on scheduled future content', async () => {
+    const futurePost = await seedContent('future-post', {
+      created: Math.floor(Date.now() / 1000) + 3600,
+    });
+    await seedComment(futurePost.cid, 'future comment');
+
+    const res = await GET({ locals: {}, params: { type: 'comments' } } as any);
+    const xml = await res.text();
+
+    expect(res.status).toBe(200);
+    expect(xml).not.toContain('future comment');
   });
 
   it('only includes comments for public feed-enabled posts and pages', async () => {
@@ -208,6 +223,45 @@ describe('GET /feed description vs content (G7-6)', () => {
     const xml = await res.text();
     expect(xml).not.toContain('<content:encoded>');
     expect(xml).toContain('<description>');
+  });
+
+  it('uses the site timezone for category feed permalinks', async () => {
+    for (const [name, value] of Object.entries({
+      permalinkPattern: '/{year}/{month}/{day}/{slug}/',
+      timezone: 'Asia/Shanghai',
+    })) {
+      await testDb.insert(schema.options).values({ name, user: 0, value })
+        .onConflictDoUpdate({
+          target: [schema.options.user, schema.options.name],
+          set: { value },
+        });
+    }
+    const [category] = await testDb.insert(schema.metas).values({
+      name: 'News', slug: 'news', type: 'category',
+    }).returning();
+    // 2026-01-14 16:30 UTC is 2026-01-15 00:30 in Asia/Shanghai.
+    const [post] = await testDb.insert(schema.contents).values({
+      title: 'Midnight post',
+      slug: 'midnight',
+      created: Math.floor(Date.UTC(2026, 0, 14, 16, 30) / 1000),
+      modified: 100,
+      text: 'Body',
+      type: 'post',
+      status: 'publish',
+      allowFeed: '1',
+    }).returning();
+    await testDb.insert(schema.relationships).values({ cid: post.cid, mid: category.mid });
+
+    const request = new Request('https://example.com/category/news/feed.xml');
+    const response = await categoryFeed({
+      request,
+      params: { slug: 'news' },
+      locals: {},
+    } as any);
+    const xml = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(xml).toContain('https://example.com/2026/01/15/midnight/');
   });
 
   it('resolves automatic feed language from Accept-Language and varies the response', async () => {

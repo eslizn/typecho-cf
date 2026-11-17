@@ -339,6 +339,8 @@ export default function init({ addHook, pluginId, registerAdminPath }: PluginIni
 
 路径 claim 与前台路由共用 owner 生命周期：注册时自动绑定当前 `pluginId`，插件停用、初始化失败或注册表重置时立即注销；旧的全局 `registerPluginAdminPath(path)` 已从 SDK 移除。
 
+注册会规范化尾部斜杠并存为不带尾斜杠的形式。以下保留路径无法被插件 claim，注册时只打印 warning：`/install`、`/api/install`、`/admin`、`/api/admin`、`/admin/login`、`/admin/reset-password`、`/api/users/login`、`/api/users/logout`、`/api/users/register`、`/api/users/reset-password`。包含 `?`、`#`、`\`、`.`、`..` 或以 `//` 开头的路径也会被拒绝。
+
 ---
 
 ## Capability 能力共享

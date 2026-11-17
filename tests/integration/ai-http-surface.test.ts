@@ -11,7 +11,7 @@ function createD1Stub() {
     prepare: (sql: string) => ({
       first: () => Promise.resolve(
         sql.includes('runtimeSchemaVersion')
-          ? { value: '20261007' }
+          ? { value: '20261117' }
           : ({ name: 'typecho_options' } as any),
       ),
       all: () => Promise.resolve({ results: [] }),

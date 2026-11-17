@@ -221,7 +221,7 @@ const titleActionHtml = new Map<number, string>(
                       {post.password && post.status === 'publish' && <em class="status">{ctx.i18n.t('admin.status.passwordProtected', {}, 'Password protected')}</em>}
                       <a href={`/admin/write-post?cid=${post.cid}`} title={`${ctx.i18n.t('admin.action.edit', {}, 'Edit')} ${post.title || ctx.i18n.t('core.content.untitled', {}, 'Untitled')}`}><i class="i-edit"></i></a>
                       {!isDraft && (
-                        <a href={buildPermalink({ cid: post.cid, slug: post.slug, type: post.type, created: post.created }, urls.siteUrl, options.permalinkPattern as string | undefined)}
+                        <a href={buildPermalink({ cid: post.cid, slug: post.slug, type: post.type, created: post.created }, urls.siteUrl, options.permalinkPattern as string | undefined, undefined, options.timezone)}
                           title={`${ctx.i18n.t('admin.action.browse', {}, 'Browse')} ${post.title || ctx.i18n.t('core.content.untitled', {}, 'Untitled')}`}><i class="i-exlink"></i></a>
                       )}
                       {titleActionHtml.get(post.cid) && <Fragment set:html={titleActionHtml.get(post.cid)} />}

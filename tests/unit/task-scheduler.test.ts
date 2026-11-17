@@ -34,6 +34,7 @@ function makeRuntime(
     options: { timezone } as TaskRuntime['options'],
     activatedPlugins: new Set(activePlugins),
     initFailures,
+    activationDiagnostics: [],
   };
 }
 

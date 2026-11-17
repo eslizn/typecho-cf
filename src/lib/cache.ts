@@ -14,7 +14,7 @@ import { eq, and, sql } from 'drizzle-orm';
 import { schema, type Database } from '@/db';
 import { OPTIONS_CACHE_TTL_SECONDS } from '@/lib/constants';
 import { advanceOptionsSnapshotGeneration } from '@/lib/options-snapshot-generation';
-import { compilePermalinkPattern, DEFAULT_PERMALINK_PATTERNS } from '@/lib/permalink-pattern';
+import { compilePermalinkPattern, decodePathnameForMatching, DEFAULT_PERMALINK_PATTERNS } from '@/lib/permalink-pattern';
 
 /** Internal namespace used for Cache API keys that are not real URLs */
 const INTERNAL_ORIGIN = 'https://typecho-cf-internal';
@@ -142,10 +142,13 @@ export function isCacheablePublicPath(
 
   // Content URLs derived from the configured permalink patterns. Defaults
   // mirror options-input.ts so a fresh install behaves like the presets.
+  // URL pathnames are percent-encoded; patterns retain Unicode literals, so
+  // test against a decoded copy.
+  const matchPath = decodePathnameForMatching(path);
   const postPattern = compilePermalinkPattern(options.permalinkPattern ?? DEFAULT_PERMALINK_PATTERNS.post, 'post');
   const pagePattern = compilePermalinkPattern(options.pagePattern ?? DEFAULT_PERMALINK_PATTERNS.page, 'page');
   const categoryPattern = compilePermalinkPattern(options.categoryPattern ?? DEFAULT_PERMALINK_PATTERNS.category, 'category');
-  if (postPattern?.test(path) || pagePattern?.test(path) || categoryPattern?.test(path)) return true;
+  if (postPattern?.test(matchPath) || pagePattern?.test(matchPath) || categoryPattern?.test(matchPath)) return true;
 
   // Fixed public archive surfaces.
   if (path.startsWith('/tag/') || path.startsWith('/author/') || path.startsWith('/search/')) return true;

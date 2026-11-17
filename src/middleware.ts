@@ -1,9 +1,9 @@
 import { defineMiddleware } from 'astro:middleware';
 import { schema } from '@/db';
-import { applyFilter, doHook, isPluginAdminPath, isPluginRoute } from '@/lib/plugin';
+import { applyFilter, doHook, isPluginAdminPath, isPluginRoute, isReservedPluginAdminPath } from '@/lib/plugin';
 import { hasAuthCookies } from '@/lib/auth';
 import { createAdminErrorRedirect, getAdminUserForFlash, isAdminHtmlFormRequest, adminFallbackForApiPath } from '@/lib/admin-flash';
-import { compilePermalinkPattern, DEFAULT_PERMALINK_PATTERNS } from '@/lib/permalink-pattern';
+import { compilePermalinkPattern, decodePathnameForMatching, DEFAULT_PERMALINK_PATTERNS } from '@/lib/permalink-pattern';
 import {
   bootstrapRequestCore,
   finalizeRequestResponse,
@@ -115,12 +115,17 @@ export const onRequest = defineMiddleware(async (context, next) => {
     : null;
 
   // ── Permalink URL Rewriting ────────────────────────────────────────────────
-  // After a rewrite the middleware runs again on the NEW path.
-  // To avoid infinite loops, skip rewriting for paths that already
-  // match an Astro built-in route (the rewrite targets).
+  // A match is rendered with next(internalTarget) in this same middleware
+  // pass, after locals._permalinkRewrite is set. The target does not re-enter
+  // this branch; built-in rewrite targets are also skipped explicitly so the
+  // internal route stays unclaimable.
   const postPattern = options.permalinkPattern as string | undefined;
   const pagePattern = options.pagePattern as string | undefined;
   const categoryPattern = options.categoryPattern as string | undefined;
+
+  // URL pathnames are percent-encoded; stored slugs preserve Unicode. Keep a
+  // decoded copy for permalink matching and slug lookups.
+  const matchPath = decodePathnameForMatching(path);
 
   let permalinkTarget: string | undefined;
 
@@ -139,7 +144,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
     // are re-written to /contents/{cid}/.
     const postRegex = compilePermalinkPattern(postPattern ?? DEFAULT_PERMALINK_PATTERNS.post, 'post');
     if (postRegex) {
-      const match = path.match(postRegex);
+      const match = matchPath.match(postRegex);
       if (match?.groups) {
         let cid: number | null = null;
 
@@ -175,7 +180,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
     if (!permalinkTarget) {
       const pageRegex = compilePermalinkPattern(pagePattern ?? DEFAULT_PERMALINK_PATTERNS.page, 'page');
       if (pageRegex) {
-        const match = path.match(pageRegex);
+        const match = matchPath.match(pageRegex);
         if (match?.groups) {
           let cid: number | null = null;
 
@@ -208,7 +213,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
     if (!permalinkTarget) {
       const categoryRegex = compilePermalinkPattern(categoryPattern ?? DEFAULT_PERMALINK_PATTERNS.category, 'category');
       if (categoryRegex) {
-        const match = path.match(categoryRegex);
+        const match = matchPath.match(categoryRegex);
         if (match?.groups) {
           let slug: string | null = null;
 
@@ -228,7 +233,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
           }
 
           if (slug) {
-            permalinkTarget = `/category/${slug}/${url.search}`;
+            permalinkTarget = `/category/${encodeURIComponent(slug)}/${url.search}`;
           }
         }
       }
@@ -241,10 +246,10 @@ export const onRequest = defineMiddleware(async (context, next) => {
   // is resolved above, so a plugin can never shadow a configured permalink
   // URL: once a system route claims the path, request:route is skipped. The
   // same applies to fixed built-in surfaces, reserved core paths, and the
-  // internal rewrite target (locals._permalinkRewrite is set on the second
-  // middleware pass), so plugins cannot hijack core routes. Registered plugin
-  // admin paths remain eligible because isReservedCorePath() explicitly
-  // allows them through.
+  // internal rewrite target (locals._permalinkRewrite is set just before
+  // next(internalTarget) renders it), so plugins cannot hijack core routes.
+  // Registered plugin admin paths remain eligible because
+  // isReservedCorePath() explicitly allows them through.
   if (
     !permalinkTarget &&
     !context.locals._permalinkRewrite &&
@@ -283,9 +288,8 @@ export const onRequest = defineMiddleware(async (context, next) => {
   // are exempt via the request-local route snapshot: request:route above already resolved
   // plugin paths (lazily registering configurable entry points), and a bare
   // plugin slug must not be mistaken for a deprecated default page form.
-  // Internal rewrites mark the request with locals._permalinkRewrite
-  // (preserved across the rewrite) so the rewrite target itself is not
-  // rejected.
+  // Internal rewrites set locals._permalinkRewrite before next(target), so
+  // the rewrite target itself is not rejected here.
   if (
     !context.locals._permalinkRewrite &&
     !isPluginRoute(path, pluginCtx.routeClaims) &&
@@ -430,6 +434,9 @@ export const onRequest = defineMiddleware(async (context, next) => {
  * flow, login, or admin endpoints.
  */
 function isReservedCorePath(path: string): boolean {
+  // Install, the admin shells, and the authentication endpoints stay reserved
+  // even when a plugin registers an exact admin path with the same spelling.
+  if (isReservedPluginAdminPath(path)) return true;
   // Allow plugins to claim specific admin paths (registered via registerAdminPath)
   if (isPluginAdminPath(path)) return false;
   if (path === '/install' || path === '/api/install') return true;

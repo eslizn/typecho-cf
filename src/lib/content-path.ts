@@ -13,6 +13,7 @@
  */
 import {
   compilePermalinkPattern,
+  decodePathnameForMatching,
   DEFAULT_PERMALINK_PATTERNS,
 } from '@/lib/permalink-pattern';
 
@@ -62,9 +63,10 @@ export function isContentPathAllowed(
 ): boolean {
   if (!isContentShaped(path)) return true;
 
+  const matchPath = decodePathnameForMatching(path);
   const postPattern = compilePermalinkPattern(options.permalinkPattern ?? DEFAULT_PERMALINK_PATTERNS.post, 'post');
   const pagePattern = compilePermalinkPattern(options.pagePattern ?? DEFAULT_PERMALINK_PATTERNS.page, 'page');
   const categoryPattern = compilePermalinkPattern(options.categoryPattern ?? DEFAULT_PERMALINK_PATTERNS.category, 'category');
 
-  return postPattern?.test(path) || pagePattern?.test(path) || categoryPattern?.test(path) || false;
+  return postPattern?.test(matchPath) || pagePattern?.test(matchPath) || categoryPattern?.test(matchPath) || false;
 }

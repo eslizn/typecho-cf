@@ -9,6 +9,7 @@ import { buildCategoryLink, buildTagLink } from '@/lib/content';
 import { REQUEST_BODY_LIMITS } from '@/lib/constants';
 import { i18nMessage } from '@/lib/i18n';
 import { normalizeSlug, parsePositiveInteger, readAdminFormOrError } from '@/lib/input';
+import { parseDateTimeLocalToTimestamp } from '@/lib/timezone';
 import { textError } from '@/lib/http';
 import {
   preparePageData,
@@ -146,8 +147,8 @@ const now = Math.floor(Date.now() / 1000);
 const scheduleDate = formString('date').trim();
 let created = now;
 if (scheduleDate) {
-  const parsed = Math.floor(new Date(scheduleDate).getTime() / 1000);
-  if (Number.isFinite(parsed) && parsed > 0) created = Math.min(parsed, 8_640_000_000_000);
+  const parsed = parseDateTimeLocalToTimestamp(scheduleDate, ctx.options.timezone);
+  if (parsed !== null && parsed > 0) created = Math.min(parsed, 8_640_000_000_000);
 }
 
 const parsedOrder = Number.parseInt(formString('order') || '0', 10);

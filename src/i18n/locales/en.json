@@ -367,6 +367,7 @@
   "admin.description.pageOrder": "Set a sequence value to sort custom pages from smallest to largest.",
   "admin.description.pageTemplate": "When a custom template is specified, the page is rendered with that template.",
   "admin.description.scheduleDate": "Leave blank to publish immediately; a future time schedules publication.",
+  "admin.description.contributorReview": "Your post will be submitted for review.",
   "admin.field.customPostPath": "Custom post path",
   "admin.field.pagePath": "Page path",
   "admin.field.categoryPath": "Category path",

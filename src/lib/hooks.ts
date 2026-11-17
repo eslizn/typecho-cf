@@ -338,9 +338,3 @@ export function getRegisteredHooks(): Map<string, { pluginId: string; priority: 
   }
   return result;
 }
-
-// ==================== Plugin Activation Helpers ====================
-
-/**
- * Serialize activated plugins list to string for DB storage
- */

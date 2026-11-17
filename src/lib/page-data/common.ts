@@ -1,4 +1,4 @@
-import { sql } from 'drizzle-orm';
+import { sql, inArray } from 'drizzle-orm';
 import { schema, type Database } from '@/db';
 import type { SiteOptions } from '@/lib/options';
 import { loadSidebarData, loadNavPages, type SidebarData } from '@/lib/sidebar';
@@ -11,6 +11,7 @@ import { escapeHtml } from '@/lib/escape';
 import { createI18n, type I18n } from '@/lib/i18n';
 import { coreCatalogs } from '@/i18n/catalogs';
 import type { PostListItem } from '@/lib/theme-props';
+import { chunkArray, D1_SAFE_IN_LIST_SIZE } from '@/lib/d1-limits';
 
 export type ContentRow = typeof schema.contents.$inferSelect;
 export type CommentRow = typeof schema.comments.$inferSelect;
@@ -57,9 +58,10 @@ export async function loadCommon(ctx: RequestContext, requestUrl: string, withSi
           options.pagePattern as string | undefined,
           options.cacheVersion,
           getRequestBundleName(ctx),
+          options.timezone,
         )
       : Promise.resolve(EMPTY_SIDEBAR),
-    loadNavPages(db, urls.siteUrl, options.pagePattern as string | undefined, options.cacheVersion, getRequestI18n(ctx), getRequestBundleName(ctx)),
+    loadNavPages(db, urls.siteUrl, options.pagePattern as string | undefined, options.cacheVersion, getRequestI18n(ctx), getRequestBundleName(ctx), options.timezone),
   ]);
   const currentPath = new URL(requestUrl).pathname;
   return {
@@ -136,14 +138,18 @@ export async function filterContentExcerpt(ctx: RequestContext, excerpt: string,
 
 export async function fetchAuthors(db: Database, authorIds: number[]): Promise<AuthorMap> {
   if (authorIds.length === 0) return new Map();
-  const authors = await db
-    .select({
-      uid: schema.users.uid,
-      name: schema.users.name,
-      screenName: schema.users.screenName,
-    })
-    .from(schema.users)
-    .where(sql`${schema.users.uid} IN (${sql.join(authorIds.map(id => sql`${id}`), sql`, `)})`);
+  const authors: Array<{ uid: number; name: string | null; screenName: string | null }> = [];
+  for (const chunk of chunkArray(authorIds, D1_SAFE_IN_LIST_SIZE)) {
+    const rows = await db
+      .select({
+        uid: schema.users.uid,
+        name: schema.users.name,
+        screenName: schema.users.screenName,
+      })
+      .from(schema.users)
+      .where(inArray(schema.users.uid, chunk));
+    authors.push(...rows);
+  }
   return new Map(authors.map(a => [a.uid, a]));
 }
 
@@ -179,6 +185,8 @@ export async function toPostListItem(
     { cid: displayPost.cid, slug: displayPost.slug, type: displayPost.type, created: displayPost.created, category: categories[0]?.slug },
     siteUrl,
     permalinkPattern,
+    undefined,
+    ctx.options.timezone,
   );
   const title = await filterContentTitle(
     ctx,

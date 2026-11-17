@@ -367,6 +367,7 @@
   "admin.description.pageOrder": "为自定义页面设定序列值，页面将按序列值从小到大排列。",
   "admin.description.pageTemplate": "为页面指定自定义模板后，系统将使用该模板渲染页面。",
   "admin.description.scheduleDate": "留空立即发布；填写未来时间后将自动定时发布。",
+  "admin.description.contributorReview": "文章将提交审核后发布。",
   "admin.field.customPostPath": "自定义文章路径",
   "admin.field.pagePath": "独立页面路径",
   "admin.field.categoryPath": "分类路径",

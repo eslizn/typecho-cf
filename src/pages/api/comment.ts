@@ -85,6 +85,12 @@ export const POST: APIRoute = async ({ request, locals }) => {
     return error(403, 'comment.targetUnavailable', {}, 'Comments are not available for this content.');
   }
 
+  // Scheduled posts are not public yet; do not accept comments before they
+  // become visible to anonymous visitors.
+  if ((content.created ?? 0) > Math.floor(Date.now() / 1000)) {
+    return error(403, 'comment.targetUnavailable', {}, 'Comments are not available for this content.');
+  }
+
   if (content.allowComment !== '1') {
     return error(403, 'comment.closed', {}, 'Comments are closed.');
   }
@@ -303,6 +309,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     options.siteUrl || '',
     options.permalinkPattern as string | undefined,
     options.pagePattern as string | undefined,
+    options.timezone,
   );
   await invalidateSiteCache(db);
 

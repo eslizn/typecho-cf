@@ -14,9 +14,16 @@ interface Props {
   gravatarMap: Record<number, string>;
   permalink: string;
   i18n: I18n;
+  /** Current nesting depth (0 for roots), matching Typecho's level rules. */
+  depth?: number;
 }
 
-const { comments, commentOptions, gravatarMap, permalink, i18n } = Astro.props;
+const { comments, commentOptions, gravatarMap, permalink, i18n, depth = 0 } = Astro.props;
+const maxDepth = Math.max(1, Number(commentOptions.maxNestingLevels) || 5);
+// Typecho hides reply links and child lists when threading is disabled, and
+// at levels above max-2.
+const canReply = commentOptions.threaded && commentOptions.allowComment && depth < maxDepth - 1;
+const canNest = commentOptions.threaded && depth < maxDepth - 1;
 ---
 {comments.map((node) => (
   <li class="comment-body" id={`comment-${node.coid}`}>
@@ -44,13 +51,13 @@ const { comments, commentOptions, gravatarMap, permalink, i18n } = Astro.props;
       </time>
     </div>
     <div class="comment-content" set:html={node.text} />
-    {commentOptions.allowComment && (
+    {canReply && (
       <div class="comment-reply">
         <a href="#respond" data-coid={node.coid} class="comment-reply-link" rel="nofollow"
           onclick={`return TypechoComment.reply('comment-${node.coid}', ${node.coid})`}>{i18n.t('theme.comments.reply', {}, 'Reply')}</a>
       </div>
     )}
-    {node.children.length > 0 && (
+    {canNest && node.children.length > 0 && (
       <div class="comment-children">
         <ol class="comment-list">
           <Astro.self
@@ -59,6 +66,7 @@ const { comments, commentOptions, gravatarMap, permalink, i18n } = Astro.props;
             gravatarMap={gravatarMap}
             permalink={permalink}
             i18n={i18n}
+            depth={depth + 1}
           />
         </ol>
       </div>

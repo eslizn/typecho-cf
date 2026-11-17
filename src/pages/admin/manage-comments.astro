@@ -202,6 +202,7 @@ for (const [coid, avatar] of avatarEntries) avatarMap.set(coid, avatar);
                         urls.siteUrl,
                         options.permalinkPattern as string | undefined,
                         options.pagePattern as string | undefined,
+                        options.timezone,
                       )}>{titleMap.get(comment.cid) || ctx.i18n.t('admin.comment.post', { cid: comment.cid || 0 }, 'Post #{cid}')}</a>
                     </div>
                     <div class="comment-content">

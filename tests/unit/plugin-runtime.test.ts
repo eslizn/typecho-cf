@@ -15,6 +15,9 @@ import {
   registerPluginLoaders,
   registerPlugin,
   isPluginAdminPath,
+  isReservedPluginAdminPath,
+  registerPluginAdminPath,
+  clearPluginAdminPaths,
   isPluginRoute,
   refreshPluginRoutes,
   getPluginInitFailures,
@@ -421,6 +424,43 @@ describe('plugin route resolver lifecycle', () => {
 
     resetPluginInitState();
     expect(isPluginRoute('/reset-route')).toBe(false);
+  });
+
+  it('rejects reserved and malformed admin path claims', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const owner = 'admin-path-guard';
+    try {
+      for (const path of [
+        '/admin', '/api/admin', '/install', '/api/install', '/admin/login',
+        '/admin/reset-password', '/api/users/login', '/api/users/logout',
+        '/api/users/register', '/api/users/reset-password',
+      ]) {
+        expect(isReservedPluginAdminPath(path)).toBe(true);
+        registerPluginAdminPath(owner, path);
+        expect(isPluginAdminPath(path)).toBe(false);
+      }
+
+      for (const path of [
+        'relative', '//evil', '/a?x=1', '/a#frag', '/a\\b', '/a/../b', '/a/./b', '/',
+      ]) {
+        registerPluginAdminPath(owner, path);
+      }
+      expect(isPluginAdminPath('relative')).toBe(false);
+      expect(isPluginAdminPath('//evil')).toBe(false);
+      expect(isPluginAdminPath('/a?x=1')).toBe(false);
+      expect(isPluginAdminPath('/a')).toBe(false);
+
+      // Registration and request matching both normalize trailing slashes.
+      expect(isReservedPluginAdminPath('/install/')).toBe(true);
+      registerPluginAdminPath(owner, '/install/');
+      expect(isPluginAdminPath('/install')).toBe(false);
+      registerPluginAdminPath(owner, '/api/admin/webdav/');
+      expect(isPluginAdminPath('/api/admin/webdav')).toBe(true);
+      expect(isPluginAdminPath('/api/admin/webdav/')).toBe(true);
+    } finally {
+      clearPluginAdminPaths(owner);
+      warnSpy.mockRestore();
+    }
   });
 
   it('scopes admin path claims to the owning plugin lifecycle', async () => {

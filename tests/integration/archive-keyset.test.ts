@@ -124,6 +124,63 @@ describe('archive keyset pagination', () => {
     expect(props.pagination.hasNext).toBe(true);
   }, 30000);
 
+  it('keeps archive lookup statements under the D1 parameter cap at pageSize 100', async () => {
+    testDb = await createTestDb();
+    const authors = Array.from({ length: 100 }, (_, index) => ({
+      uid: index + 1,
+      name: `author-${index}`,
+      group: 'contributor',
+      authCode: `code-${index}`,
+      created: 1,
+    }));
+    await testDb.insert(schema.users).values(authors);
+    const rows = Array.from({ length: 100 }, (_, index) => ({
+      title: `page-${index}`,
+      slug: `page-${index}`,
+      type: 'post',
+      status: 'publish',
+      created: 1000 - index,
+      modified: 1000 - index,
+      text: `body-${index}`,
+      authorId: index + 1,
+    }));
+    for (let start = 0; start < rows.length; start += 50) {
+      await testDb.insert(schema.contents).values(rows.slice(start, start + 50));
+    }
+
+    const batches: unknown[][] = [];
+    const originalBatch = testDb.batch.bind(testDb);
+    (testDb as any).batch = async (statements: unknown[]) => {
+      batches.push(statements);
+      return originalBatch(statements as any);
+    };
+    try {
+      const ctx = await buildCtx();
+      (ctx.options as any).pageSize = 100;
+      const props = await prepareIndexData(
+        ctx,
+        'https://example.com/',
+        {},
+        new URL('https://example.com/'),
+      );
+      expect(props.posts).toHaveLength(100);
+    } finally {
+      (testDb as any).batch = originalBatch;
+    }
+
+    const statements = batches.flat() as Array<{ toSQL(): { sql: string; params: unknown[] } }>;
+    const paramCounts = statements.map(statement => statement.toSQL().params.length);
+    expect(paramCounts.length).toBeGreaterThan(0);
+    expect(Math.max(...paramCounts)).toBeLessThanOrEqual(100);
+    // A single 100-id IN list plus type = 101 parameters, so the category
+    // lookup must have been split across at least two statements.
+    const categoryStatements = statements.filter(statement => {
+      const text = statement.toSQL().sql;
+      return text.includes('typecho_relationships') && text.includes('typecho_metas');
+    });
+    expect(categoryStatements.length).toBeGreaterThanOrEqual(2);
+  });
+
   it('runs archive lifecycle, query, and content display hooks', async () => {
     testDb = await createTestDb();
     for (let created = 1; created <= 2; created++) {

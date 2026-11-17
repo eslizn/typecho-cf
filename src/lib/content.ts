@@ -41,6 +41,7 @@ export function buildPermalink(
   siteUrl: string,
   pattern?: string | null,
   pagePattern?: string | null,
+  timezone: TimezoneSetting = 'UTC',
 ): string {
   const base = siteUrl.replace(/\/$/, '');
 
@@ -62,11 +63,15 @@ export function buildPermalink(
   // For posts, use the configured pattern (default: /archives/{cid}/)
   const postPattern = pattern || '/archives/{cid}/';
 
-  // Build date parts from created timestamp
-  const date = content.created ? new Date(content.created * 1000) : new Date();
-  const year = String(date.getFullYear());
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
+  // Build date parts in the configured site timezone so date-based permalink
+  // patterns match the local publication date shown throughout the admin.
+  const { parts } = getTimezoneDateParts(
+    content.created || Math.floor(Date.now() / 1000),
+    timezone,
+  );
+  const year = String(parts.year);
+  const month = String(parts.month).padStart(2, '0');
+  const day = String(parts.day).padStart(2, '0');
 
   const url = renderPermalinkPattern(postPattern, 'post', {
     cid: content.cid,

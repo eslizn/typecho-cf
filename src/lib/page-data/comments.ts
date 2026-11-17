@@ -63,10 +63,36 @@ export async function buildCommentTree(ctx: RequestContext, allComments: Comment
     return displayComments.map(comment => map.get(comment.coid)!);
   }
 
+  // Mirror Typecho's render-time nesting limit (Widget\Comments\Archive):
+  // a comment at or beyond the configured depth is reattached to its
+  // grandparent, so the displayed tree never nests deeper than the setting.
+  // Submissions are not rejected; the limit is a presentation rule.
+  const maxLevels = Math.max(1, Math.floor(Number(options.commentsMaxNestingLevels) || 5));
+  const levels = new Map<number, number>();
+  const parents = new Map<number, number>();
+
+  for (const comment of [...displayComments].sort((a, b) => a.coid - b.coid)) {
+    const originalParent = comment.parent || 0;
+    const parentLevel = levels.get(originalParent);
+    const parentKnown = originalParent > 0
+      && parentLevel !== undefined
+      && map.has(originalParent);
+
+    let level = parentKnown ? parentLevel + 1 : 0;
+    let parent = parentKnown ? originalParent : 0;
+    if (parentKnown && level >= maxLevels) {
+      level = parentLevel;
+      parent = parents.get(originalParent) ?? 0;
+    }
+    levels.set(comment.coid, level);
+    parents.set(comment.coid, parent);
+  }
+
   for (const c of displayComments) {
     const node = map.get(c.coid)!;
-    if (c.parent && map.has(c.parent)) {
-      map.get(c.parent)!.children.push(node);
+    const parent = parents.get(c.coid) ?? 0;
+    if (parent > 0 && parent !== c.coid && map.has(parent)) {
+      map.get(parent)!.children.push(node);
     } else {
       roots.push(node);
     }
@@ -110,7 +136,7 @@ export function buildCommentOptions(options: SiteOptions, securityToken: string)
     markdown: !!options.commentsMarkdown,
     urlNofollow: !!options.commentsUrlNofollow,
     threaded: !!options.commentsThreaded,
-    maxNestingLevels: Number(options.commentsMaxNestingLevels) || 2,
+    maxNestingLevels: Number(options.commentsMaxNestingLevels) || 5,
     pageBreak: !!options.commentsPageBreak,
     pageSize: Number(options.commentsPageSize) || 20,
     pageDisplay: (options.commentsPageDisplay === 'first' ? 'first' : 'last') as 'first' | 'last',

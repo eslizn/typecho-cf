@@ -5,7 +5,7 @@ import { renderContent } from '@/lib/markdown';
 import { generateRss2, generateAtom, generateRss1, type FeedItem } from '@/lib/feed';
 import { applyFilterSafely } from '@/lib/plugin';
 import { getFeedRuntime, renderFeedResponse } from '@/lib/feed-helpers';
-import { eq, and, desc, sql, or } from 'drizzle-orm';
+import { eq, and, desc, lte, sql, or } from 'drizzle-orm';
 import { publishedPostCondition } from '@/lib/content-visibility';
 
 const FEED_ITEMS_DEFAULT = 10;
@@ -104,6 +104,8 @@ export const GET: APIRoute = async ({ request, locals, params }) => {
         { cid: post.cid, slug: post.slug, type: post.type, created: post.created },
         urls.siteUrl,
         options.permalinkPattern as string | undefined,
+        undefined,
+        options.timezone,
       ),
       content: options.feedFullText ? rendered.html : '',
       excerpt: rendered.plainExcerpt,
@@ -160,6 +162,7 @@ async function generateCommentsFeed(
       eq(schema.contents.status, 'publish'),
       eq(schema.contents.allowFeed, '1'),
       or(eq(schema.contents.type, 'post'), eq(schema.contents.type, 'page')),
+      lte(schema.contents.created, Math.floor(Date.now() / 1000)),
       sql`(${schema.contents.password} IS NULL OR ${schema.contents.password} = '')`,
     ))
     .orderBy(desc(schema.comments.created))
@@ -183,6 +186,7 @@ async function generateCommentsFeed(
       urls.siteUrl,
       options.permalinkPattern as string | undefined,
       options.pagePattern as string | undefined,
+      options.timezone,
     )}#comment-${comment.coid}`,
     content: renderContent(comment.text || '').html,
     date: new Date((comment.created || 0) * 1000),

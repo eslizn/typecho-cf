@@ -123,6 +123,17 @@ describe('POST /api/comment', () => {
     expect(res.status).toBe(404);
   });
 
+  it('returns 403 for scheduled future content and writes no comment', async () => {
+    await seedOptions(testDb);
+    const content = await seedContent(testDb, {
+      created: Math.floor(Date.now() / 1000) + 3600,
+    });
+    const req = makeCommentRequest({ cid: String(content.cid), text: 'Too early', author: 'Alice' });
+    const res = await POST({ request: req, locals: {} } as any);
+    expect(res.status).toBe(403);
+    expect(await testDb.query.comments.findFirst()).toBeUndefined();
+  });
+
   it('returns 403 when comments are closed on content', async () => {
     await seedOptions(testDb);
     const content = await seedContent(testDb, { allowComment: '0' });

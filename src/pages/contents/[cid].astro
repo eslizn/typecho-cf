@@ -3,7 +3,7 @@ import { themeTemplates } from 'virtual:theme-templates';
 import { createContextAlongside } from '@/lib/context';
 import { prepareNotFoundData, preparePageData, preparePostData } from '@/lib/page-data';
 import { buildPermalink, getRedirectPathIfDifferent } from '@/lib/content';
-import { compilePermalinkPattern, DEFAULT_PERMALINK_PATTERNS } from '@/lib/permalink-pattern';
+import { compilePermalinkPattern, decodePathnameForMatching, DEFAULT_PERMALINK_PATTERNS } from '@/lib/permalink-pattern';
 import { eq } from 'drizzle-orm';
 import { schema } from '@/db';
 
@@ -42,7 +42,7 @@ if (!contentRow) {
   // Draft pages render in place: their canonical URL is not publicly
   // reachable while unlisted, so redirecting would end in a 404.
   const pagePattern = options.pagePattern as string | undefined;
-  const sourcePath = Astro.locals._permalinkSourcePath ?? Astro.url.pathname;
+  const sourcePath = decodePathnameForMatching(Astro.locals._permalinkSourcePath ?? Astro.url.pathname);
   const sourceIsCanonical = !!compilePermalinkPattern(
     pagePattern ?? DEFAULT_PERMALINK_PATTERNS.page,
     'page',
@@ -53,6 +53,7 @@ if (!contentRow) {
       ctx.urls.siteUrl,
       undefined,
       pagePattern,
+      ctx.options.timezone,
     );
     const redirectPath = getRedirectPathIfDifferent(Astro.request.url, pageUrl);
     if (redirectPath) return Astro.redirect(redirectPath);

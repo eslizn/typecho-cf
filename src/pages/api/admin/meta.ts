@@ -6,6 +6,7 @@ import { invalidateSiteCache } from '@/lib/cache';
 import { readAdminFormOrError } from '@/lib/input';
 import { i18nMessage } from '@/lib/i18n';
 import { jsonError, textError } from '@/lib/http';
+import { chunkArray, D1_SAFE_IN_LIST_SIZE } from '@/lib/d1-limits';
 import { eq, and, inArray, sql } from 'drizzle-orm';
 
 type MetaType = 'category' | 'tag';
@@ -109,8 +110,13 @@ async function handler({ request, url }: { request: Request; locals: App.Locals;
 
   if (action === 'delete') {
     const requestedIds = mids.length > 0 ? mids : (mid ? [mid] : []);
-    const targets = requestedIds.length ? await db.select({ mid: schema.metas.mid }).from(schema.metas)
-      .where(and(eq(schema.metas.type, type), inArray(schema.metas.mid, requestedIds))) : [];
+    // A bulk selection can exceed D1's 100-bound-parameter cap; the type
+    // predicate also consumes one slot per statement.
+    const targets: Array<{ mid: number }> = [];
+    for (const chunk of chunkArray(requestedIds, D1_SAFE_IN_LIST_SIZE)) {
+      targets.push(...await db.select({ mid: schema.metas.mid }).from(schema.metas)
+        .where(and(eq(schema.metas.type, type), inArray(schema.metas.mid, chunk))));
+    }
     const deleteIds = targets.map(target => target.mid);
     if (deleteIds.length === 0) {
       return new Response(null, { status: 302, headers: { Location: redirectTo } });
@@ -123,9 +129,12 @@ async function handler({ request, url }: { request: Request; locals: App.Locals;
           return error(400, 'admin.meta.defaultCategoryProtected', {}, 'The default category cannot be deleted. Choose another default category first.');
         }
       }
-      const used = await db.select({ mid: schema.relationships.mid })
-        .from(schema.relationships)
-        .where(sql`${schema.relationships.mid} IN (${sql.join(deleteIds.map(id => sql`${id}`), sql`, `)})`);
+      const used: Array<{ mid: number | null }> = [];
+      for (const chunk of chunkArray(deleteIds, D1_SAFE_IN_LIST_SIZE)) {
+        used.push(...await db.select({ mid: schema.relationships.mid })
+          .from(schema.relationships)
+          .where(inArray(schema.relationships.mid, chunk)));
+      }
       if (used.length > 0) {
         const inUseSet = new Set(used.map(r => r.mid));
         const targets = deleteIds.filter(id => inUseSet.has(id));
@@ -134,11 +143,14 @@ async function handler({ request, url }: { request: Request; locals: App.Locals;
     }
 
     // One batched round trip for the whole selection instead of 2N deletes.
-    const deleteMidList = sql.join(deleteIds.map((id) => sql`${id}`), sql`, `);
-    await db.batch([
-      db.delete(schema.relationships).where(sql`${schema.relationships.mid} IN (${deleteMidList})`),
-      db.delete(schema.metas).where(and(eq(schema.metas.type, type), inArray(schema.metas.mid, deleteIds))),
-    ] as [any, ...any[]]);
+    const deleteStatements: any[] = [];
+    for (const chunk of chunkArray(deleteIds, D1_SAFE_IN_LIST_SIZE)) {
+      deleteStatements.push(
+        db.delete(schema.relationships).where(inArray(schema.relationships.mid, chunk)),
+        db.delete(schema.metas).where(and(eq(schema.metas.type, type), inArray(schema.metas.mid, chunk))),
+      );
+    }
+    await db.batch(deleteStatements as [any, ...any[]]);
 
     await invalidateSiteCache(db);
     return new Response(null, { status: 302, headers: { Location: redirectTo } });

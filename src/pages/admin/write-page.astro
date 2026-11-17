@@ -35,6 +35,12 @@ if (cidNum > 0) {
       .orderBy(schema.contents.created),
   ]);
   page = pageRows[0] || null;
+  if (page && page.type !== 'page' && page.type !== 'page_draft') {
+    if (page.type === 'post' || page.type === 'post_draft') {
+      return Astro.redirect(`/admin/write-post?cid=${page.cid}`);
+    }
+    return new Response(ctx.i18n.t('core.error.notFound', {}, 'Not Found'), { status: 404 });
+  }
   if (page?.type === 'page') {
     const revision = await db.query.contents.findFirst({
       where: and(eq(schema.contents.parent, page.cid), eq(schema.contents.type, 'revision')),
@@ -70,7 +76,7 @@ if (cidNum > 0) {
 const isMarkdown = !page || (page.text && page.text.indexOf('<!--markdown-->') >= 0);
 
 // Build preview URL
-const previewUrl = isEdit && page ? buildPermalink(page, urls.siteUrl, options.permalinkPattern, options.pagePattern) : '';
+const previewUrl = isEdit && page ? buildPermalink(page, urls.siteUrl, options.permalinkPattern, options.pagePattern, options.timezone) : '';
 const writePageHookExtra = { options, page, user, isEdit, i18n: ctx.i18n, capabilityRuntime: ctx.capabilityRuntime };
 const writePageOptionHtml = await applyFilterSafely(ctx, 'admin:writePage:option', '', writePageHookExtra);
 const writePageAdvanceOptionHtml = await applyFilterSafely(ctx, 'admin:writePage:advanceOption', '', writePageHookExtra);

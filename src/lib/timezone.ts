@@ -156,6 +156,92 @@ export function getTimezoneOffsetSeconds(timezone: string, timestamp = Math.floo
   return Math.round(localAsUtc / 1000 - Math.trunc(timestamp));
 }
 
+function pad2(value: number): string {
+  return String(value).padStart(2, '0');
+}
+
+/**
+ * Format a Unix timestamp as a `datetime-local` value in the site timezone.
+ */
+export function formatDateTimeLocal(
+  timestampSeconds: number,
+  timezone: TimezoneSetting,
+): string {
+  const timestamp = Number.isFinite(timestampSeconds)
+    ? Math.trunc(timestampSeconds)
+    : Math.floor(Date.now() / 1000);
+  const { parts } = getTimezoneDateParts(timestamp, timezone);
+  return `${String(parts.year).padStart(4, '0')}-${pad2(parts.month)}-${pad2(parts.day)}T${pad2(parts.hour)}:${pad2(parts.minute)}`;
+}
+
+const DATETIME_LOCAL_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/;
+
+/**
+ * Parse a `datetime-local` value as a wall-clock time in the site timezone and
+ * return the corresponding Unix timestamp.
+ *
+ * The offset is resolved from the candidate instants around the requested
+ * wall time. For ambiguous fall-back times the first occurrence is chosen;
+ * for nonexistent spring-forward times the pre-transition offset is used, so
+ * the instant normalizes forward (matching PHP's date handling).
+ */
+export function parseDateTimeLocalToTimestamp(
+  value: string,
+  timezone: TimezoneSetting,
+): number | null {
+  const match = DATETIME_LOCAL_PATTERN.exec(value.trim());
+  if (!match) return null;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = match[6] === undefined ? 0 : Number(match[6]);
+  if (
+    year < 1 || year > 9999
+    || month < 1 || month > 12
+    || day < 1 || day > 31
+    || hour > 23 || minute > 59 || second > 59
+  ) return null;
+
+  const utcGuess = Date.UTC(year, month - 1, day, hour, minute, second) / 1000;
+  if (!Number.isFinite(utcGuess)) return null;
+
+  const calendarCheck = new Date(utcGuess * 1000);
+  if (
+    calendarCheck.getUTCFullYear() !== year
+    || calendarCheck.getUTCMonth() !== month - 1
+    || calendarCheck.getUTCDate() !== day
+  ) return null;
+
+  const zone = isIanaTimezone(timezone) ? timezone : DEFAULT_TIMEZONE;
+  const matchesWallClock = (candidate: number): boolean => {
+    const parts = getIanaParts(candidate, zone);
+    return parts.year === year
+      && parts.month === month
+      && parts.day === day
+      && parts.hour === hour
+      && parts.minute === minute
+      && parts.second === second;
+  };
+
+  const offsets: number[] = [];
+  for (const delta of [-86_400, 0, 86_400]) {
+    const offset = getTimezoneOffsetSeconds(zone, utcGuess + delta);
+    if (!offsets.includes(offset)) offsets.push(offset);
+  }
+
+  for (const offset of offsets) {
+    const candidate = utcGuess - offset;
+    if (matchesWallClock(candidate)) return candidate;
+  }
+
+  // Nonexistent local time (usually the spring-forward gap): keep the
+  // pre-transition offset so the instant moves forward past the gap.
+  return utcGuess - offsets[0];
+}
+
 /** Format a region-bearing IANA ID for the settings list without runtime ICU work. */
 export function formatTimezoneLabel(timezone: string): string {
   return timezone;

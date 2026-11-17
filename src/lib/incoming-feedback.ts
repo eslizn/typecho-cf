@@ -4,6 +4,7 @@ import { applyFilter, doHook, type HookContext } from '@/lib/plugin';
 import type { SiteOptions } from '@/lib/options';
 import { normalizeHttpUrl } from '@/lib/url';
 import { buildPermalink } from '@/lib/content';
+import { invalidateSiteCache } from '@/lib/cache';
 import { verifyFeedbackSource } from '@/lib/feedback-verification';
 
 /**
@@ -32,6 +33,10 @@ export async function saveIncomingFeedback(
   if (!content || !['post', 'page'].includes(content.type || '') || content.status !== 'publish') {
     return new Response('not-found', { status: 404 });
   }
+  // A scheduled row is not public yet and must not accept feedback early.
+  if ((content.created ?? 0) > Math.floor(Date.now() / 1000)) {
+    return new Response('not-found', { status: 404 });
+  }
   if (content.allowPing !== '1') return new Response('pinging-not-allowed', { status: 403 });
   const sourceUrl = normalizeHttpUrl(input.url);
   if (!sourceUrl || !input.author.trim() || !input.text.trim()) return new Response('invalid-feedback', { status: 400 });
@@ -47,6 +52,7 @@ export async function saveIncomingFeedback(
     options.siteUrl || '',
     options.permalinkPattern as string | undefined,
     options.pagePattern as string | undefined,
+    options.timezone,
   );
   const verified = await verifyFeedbackSource(sourceUrl, targetUrl);
   if (!verified) return new Response('source-not-verified', { status: 403 });
@@ -94,6 +100,11 @@ export async function saveIncomingFeedback(
         .where(eq(schema.contents.cid, input.cid)),
     ])
     : await db.batch([insertStatement]);
+  // Approved feedback changes public comment output and commentsNum, exactly
+  // like a normal comment write.
+  if (status === 'approved') {
+    await invalidateSiteCache(db);
+  }
   const row = { ...value, author, mail, url, text, cid: input.cid, coid: inserted[0]?.coid };
   await doHook(
     pluginCtx,

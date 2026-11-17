@@ -277,10 +277,53 @@ export function resetPluginInitState(): void {
  */
 const pluginAdminPaths = new Map<string, Set<string>>();
 
+/**
+ * Paths that must always be served by the core even if a plugin registers an
+ * admin path with the same spelling: install, the admin shells, and the
+ * authentication endpoints. Other `/admin/*` and `/api/admin/*` paths remain
+ * claimable by plugins through `registerAdminPath`.
+ */
+const RESERVED_PLUGIN_ADMIN_PATHS = new Set([
+  '/install',
+  '/api/install',
+  '/admin',
+  '/api/admin',
+  '/admin/login',
+  '/admin/reset-password',
+  '/api/users/login',
+  '/api/users/logout',
+  '/api/users/register',
+  '/api/users/reset-password',
+]);
+
+export function isReservedPluginAdminPath(path: string): boolean {
+  // Compare with the same normalization used for registration so a trailing
+  // slash cannot bypass the reserved list.
+  return RESERVED_PLUGIN_ADMIN_PATHS.has(normalizePluginAdminPath(path) ?? path);
+}
+
+function normalizePluginAdminPath(path: string): string | null {
+  const trimmed = path.trim();
+  if (!trimmed.startsWith('/') || trimmed.startsWith('//')) return null;
+  if (/[?#\\]/.test(trimmed)) return null;
+  if (trimmed.split('/').some(segment => segment === '..' || segment === '.')) return null;
+  const normalized = trimmed.replace(/\/+$/, '');
+  return normalized && normalized !== '/' ? normalized : null;
+}
+
 export function registerPluginAdminPath(ownerPluginId: string, path: string): void {
   if (!ownerPluginId || typeof path !== 'string' || !path) return;
+  const normalized = normalizePluginAdminPath(path);
+  if (!normalized) {
+    console.warn(`[plugin] Ignoring invalid admin path from ${ownerPluginId}: ${path.slice(0, 200)}`);
+    return;
+  }
+  if (isReservedPluginAdminPath(normalized)) {
+    console.warn(`[plugin] Refusing reserved admin path from ${ownerPluginId}: ${normalized}`);
+    return;
+  }
   const paths = pluginAdminPaths.get(ownerPluginId) ?? new Set<string>();
-  paths.add(path);
+  paths.add(normalized);
   pluginAdminPaths.set(ownerPluginId, paths);
 }
 
@@ -289,8 +332,9 @@ export function clearPluginAdminPaths(ownerPluginId: string): void {
 }
 
 export function isPluginAdminPath(path: string): boolean {
+  const normalized = normalizePluginAdminPath(path) ?? path;
   for (const paths of pluginAdminPaths.values()) {
-    if (paths.has(path)) return true;
+    if (paths.has(normalized)) return true;
   }
   return false;
 }

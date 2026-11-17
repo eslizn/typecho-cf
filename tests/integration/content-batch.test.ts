@@ -323,6 +323,51 @@ describe('POST /api/admin/content-batch', () => {
     expect(all.every(p => p.status === 'hidden')).toBe(true);
   });
 
+  it('marks more than 99 posts in one atomic batch under the D1 parameter cap', async () => {
+    const admin = await seedAdmin(testDb, { secret: TEST_SECRET, authCode: TEST_AUTH_CODE });
+    const cookie = await makeAuthCookie(testDb, admin.uid, TEST_AUTH_CODE, TEST_SECRET);
+    for (let start = 0; start < 100; start += 50) {
+      await testDb.insert(schema.contents).values(
+        Array.from({ length: 50 }, (_, offset) => {
+          const index = start + offset;
+          return {
+            title: `Bulk ${index}`,
+            slug: `bulk-mark-${index}`,
+            created: 1000 + index,
+            type: 'post',
+            status: 'publish',
+            authorId: admin.uid,
+          };
+        }),
+      );
+    }
+    const cids = (await testDb.select({ cid: schema.contents.cid }).from(schema.contents))
+      .map(row => row.cid!);
+    expect(cids).toHaveLength(100);
+
+    const batches: unknown[][] = [];
+    const originalBatch = testDb.batch.bind(testDb);
+    const batchSpy = vi.spyOn(testDb, 'batch').mockImplementation((async (statements: unknown[]) => {
+      batches.push(statements);
+      return originalBatch(statements as any);
+    }) as any);
+    try {
+      const req = makeBatchRequest('mark', cids, cookie, { status: 'hidden' });
+      expect((await POST({ request: req, locals: {}, url: new URL(req.url) } as any)).status).toBe(302);
+    } finally {
+      batchSpy.mockRestore();
+    }
+
+    // All chunks share one D1 batch: a failure cannot leave a partial mark.
+    expect(batches).toHaveLength(1);
+    const statements = batches[0] as Array<{ toSQL(): { params: unknown[] } }>;
+    expect(statements.length).toBeGreaterThan(1);
+    expect(Math.max(...statements.map(statement => statement.toSQL().params.length)))
+      .toBeLessThanOrEqual(100);
+    const all = await testDb.select().from(schema.contents);
+    expect(all.every(row => row.status === 'hidden')).toBe(true);
+  });
+
   // -- page batch (type=page) --
 
   it('deletes pages when type=page is specified', async () => {

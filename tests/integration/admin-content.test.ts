@@ -47,6 +47,20 @@ async function makeContentRequest(fields: Record<string, string>, cookie: string
   });
 }
 
+async function seedUser(group: 'editor' | 'contributor') {
+  await testDb.insert(schema.users).values({
+    name: `${group}-user`,
+    password: 'unused',
+    mail: `${group}@example.com`,
+    group,
+    authCode: `${group}-code`,
+    activated: 1,
+  });
+  return (await testDb.query.users.findFirst({
+    where: eq(schema.users.group, group),
+  }))!;
+}
+
 describe('POST /api/admin/content', () => {
   beforeEach(async () => {
     testDb = await createTestDb();
@@ -78,6 +92,273 @@ describe('POST /api/admin/content', () => {
     expect(tags).toHaveLength(1);
     expect(tags[0].count).toBe(1);
     expect(rels).toHaveLength(1);
+  });
+
+  it('chunks tag inserts so every batch statement stays under the D1 parameter cap', async () => {
+    const admin = await testDb.query.users.findFirst();
+    const cookie = await makeAuthCookie(testDb, admin!.uid, TEST_AUTH_CODE, TEST_SECRET);
+    // The metas insert binds six values per tag row (name/slug/type/count/
+    // order/parent), so 17 rows would be 102 parameters in one statement.
+    const tagNames = Array.from({ length: 17 }, (_, index) => `chunk-tag-${index}`);
+    const req = await makeContentRequest({
+      do: 'create',
+      type: 'post',
+      title: 'Many tags',
+      text: 'Body',
+      status: 'publish',
+      visibility: 'publish',
+      tags: tagNames.join(','),
+      allowFeed: '1',
+    }, cookie);
+
+    const batches: unknown[][] = [];
+    const originalBatch = testDb.batch.bind(testDb);
+    const batchSpy = vi.spyOn(testDb, 'batch').mockImplementation((async (statements: unknown[]) => {
+      batches.push(statements);
+      return originalBatch(statements as any);
+    }) as any);
+    try {
+      expect((await POST({ request: req, locals: {} } as any)).status).toBe(302);
+    } finally {
+      batchSpy.mockRestore();
+    }
+
+    const statements = batches.flat() as Array<{ toSQL(): { params: unknown[] } }>;
+    const paramCounts = statements.map(statement => statement.toSQL().params.length);
+    expect(paramCounts.length).toBeGreaterThan(0);
+    expect(Math.max(...paramCounts)).toBeLessThanOrEqual(100);
+    expect(await testDb.select().from(schema.metas).where(eq(schema.metas.type, 'tag'))).toHaveLength(17);
+    expect(await testDb.select().from(schema.relationships)).toHaveLength(17);
+  });
+
+  it('preserves page created time and password when an update omits those fields', async () => {
+    const editor = await seedUser('editor');
+    const cookie = await makeAuthCookie(testDb, editor.uid, 'editor-code', TEST_SECRET);
+    const [page] = await testDb.insert(schema.contents).values({
+      title: 'About',
+      slug: 'about-page',
+      text: 'old body',
+      type: 'page',
+      status: 'publish',
+      authorId: editor.uid,
+      created: 12_345,
+      password: 'page-secret',
+    }).returning();
+
+    const req = await makeContentRequest({
+      do: 'update',
+      cid: String(page.cid),
+      type: 'page',
+      title: 'About edited',
+      slug: 'about-page',
+      text: 'new body',
+      status: 'publish',
+      visibility: 'publish',
+    }, cookie);
+
+    expect((await POST({ request: req, locals: {} } as any)).status).toBe(302);
+    const updated = await testDb.query.contents.findFirst({
+      where: eq(schema.contents.cid, page.cid),
+    });
+    expect(updated).toMatchObject({
+      title: 'About edited',
+      created: 12_345,
+      password: 'page-secret',
+      type: 'page',
+      status: 'publish',
+    });
+  });
+
+  it('rejects page writes from contributors', async () => {
+    const contributor = await seedUser('contributor');
+    const cookie = await makeAuthCookie(testDb, contributor.uid, 'contributor-code', TEST_SECRET);
+
+    const createReq = await makeContentRequest({
+      do: 'create', type: 'page', title: 'Contributor page', text: 'Body',
+      status: 'publish', visibility: 'publish',
+    }, cookie);
+    expect((await POST({ request: createReq, locals: {} } as any)).status).toBe(403);
+
+    const [page] = await testDb.insert(schema.contents).values({
+      title: 'Existing page', slug: 'existing-page', type: 'page', status: 'publish',
+      authorId: contributor.uid, created: 100, text: 'old',
+    }).returning();
+    const updateReq = await makeContentRequest({
+      do: 'update', cid: String(page.cid), type: 'page', title: 'Hijacked',
+      text: 'new', status: 'publish', visibility: 'publish',
+    }, cookie);
+    expect((await POST({ request: updateReq, locals: {} } as any)).status).toBe(403);
+
+    const deleteReq = await makeContentRequest({
+      do: 'delete', cid: String(page.cid), type: 'page',
+    }, cookie);
+    expect((await POST({ request: deleteReq, locals: {} } as any)).status).toBe(403);
+
+    const unchanged = await testDb.query.contents.findFirst({
+      where: eq(schema.contents.cid, page.cid),
+    });
+    expect(unchanged).toMatchObject({ title: 'Existing page', text: 'old' });
+  });
+
+  it('forces contributor posts into the moderation queue and clears passwords', async () => {
+    const contributor = await seedUser('contributor');
+    const cookie = await makeAuthCookie(testDb, contributor.uid, 'contributor-code', TEST_SECRET);
+
+    const createReq = await makeContentRequest({
+      do: 'create', type: 'post', title: 'Contributor post', text: 'Body',
+      status: 'publish', visibility: 'password', password: 'post-secret', allowFeed: '1',
+    }, cookie);
+    expect((await POST({ request: createReq, locals: {} } as any)).status).toBe(302);
+
+    const created = await testDb.query.contents.findFirst();
+    expect(created).toMatchObject({
+      title: 'Contributor post',
+      type: 'post',
+      status: 'waiting',
+      password: null,
+      authorId: contributor.uid,
+    });
+
+    const [post] = await testDb.insert(schema.contents).values({
+      title: 'Live post', slug: 'live-post', type: 'post', status: 'publish',
+      authorId: contributor.uid, created: 100, text: 'old',
+    }).returning();
+    const updateReq = await makeContentRequest({
+      do: 'update', cid: String(post.cid), type: 'post', title: 'Edited live post',
+      text: 'new', status: 'publish', visibility: 'publish',
+    }, cookie);
+    expect((await POST({ request: updateReq, locals: {} } as any)).status).toBe(302);
+
+    const updated = await testDb.query.contents.findFirst({
+      where: eq(schema.contents.cid, post.cid),
+    });
+    expect(updated).toMatchObject({ status: 'waiting', password: null });
+  });
+
+  it('rejects editor updates to attachments', async () => {
+    const admin = await testDb.query.users.findFirst();
+    const cookie = await makeAuthCookie(testDb, admin!.uid, TEST_AUTH_CODE, TEST_SECRET);
+    const [attachment] = await testDb.insert(schema.contents).values({
+      title: 'file.png', slug: 'file.png', type: 'attachment', status: 'publish',
+      authorId: admin!.uid, created: 100, text: '',
+    }).returning();
+
+    const req = await makeContentRequest({
+      do: 'update', cid: String(attachment.cid), type: 'post', title: 'Renamed',
+      text: '', status: 'publish', visibility: 'publish',
+    }, cookie);
+
+    expect((await POST({ request: req, locals: {} } as any)).status).toBe(404);
+    const unchanged = await testDb.query.contents.findFirst({
+      where: eq(schema.contents.cid, attachment.cid),
+    });
+    expect(unchanged?.title).toBe('file.png');
+  });
+
+  it('keeps revision relationship inserts under the D1 parameter cap', async () => {
+    const admin = await testDb.query.users.findFirst();
+    const cookie = await makeAuthCookie(testDb, admin!.uid, TEST_AUTH_CODE, TEST_SECRET);
+    const [post] = await testDb.insert(schema.contents).values({
+      title: 'Draft target', slug: 'draft-target', type: 'post', status: 'publish',
+      authorId: admin!.uid, created: 1000, text: 'live',
+    }).returning();
+    const tags = Array.from({ length: 34 }, (_, index) => `revision-tag-${index}`);
+    const req = await makeContentRequest({
+      do: 'update', cid: String(post.cid), type: 'post', title: 'Draft target',
+      slug: 'draft-target', text: 'pending', status: 'draft', visibility: 'publish',
+      tags: tags.join(','),
+    }, cookie);
+
+    const batches: unknown[][] = [];
+    const originalBatch = testDb.batch.bind(testDb);
+    const batchSpy = vi.spyOn(testDb, 'batch').mockImplementation((async (statements: unknown[]) => {
+      batches.push(statements);
+      return originalBatch(statements as any);
+    }) as any);
+    try {
+      expect((await POST({ request: req, locals: {} } as any)).status).toBe(302);
+    } finally {
+      batchSpy.mockRestore();
+    }
+
+    const statements = batches.flat() as Array<{ toSQL(): { params: unknown[] } }>;
+    const paramCounts = statements.map(statement => statement.toSQL().params.length);
+    expect(paramCounts.length).toBeGreaterThan(0);
+    expect(Math.max(...paramCounts)).toBeLessThanOrEqual(100);
+    const revision = await testDb.query.contents.findFirst({
+      where: eq(schema.contents.type, 'revision'),
+    });
+    expect(revision).toBeTruthy();
+    expect(await testDb.select().from(schema.relationships)).toHaveLength(34);
+  });
+
+  it('preserves the exact created timestamp when an ambiguous DST wall time is unchanged', async () => {
+    await testDb.insert(schema.options).values({
+      name: 'timezone', user: 0, value: 'America/New_York',
+    });
+    const admin = await testDb.query.users.findFirst();
+    const cookie = await makeAuthCookie(testDb, admin!.uid, TEST_AUTH_CODE, TEST_SECRET);
+    // 2026-11-01 01:30 EST is the *second* 01:30 of the fall-back night
+    // (06:30Z); naive re-parsing would pick the first occurrence (05:30Z).
+    const secondOccurrence = Math.floor(Date.UTC(2026, 10, 1, 6, 30) / 1000);
+    const [post] = await testDb.insert(schema.contents).values({
+      title: 'DST post', slug: 'dst-post', type: 'post', status: 'publish',
+      authorId: admin!.uid, created: secondOccurrence, text: 'body',
+    }).returning();
+
+    const req = await makeContentRequest({
+      do: 'update', cid: String(post.cid), type: 'post', title: 'DST post',
+      slug: 'dst-post', text: 'body', status: 'publish', visibility: 'publish',
+      date: '2026-11-01T01:30',
+    }, cookie);
+    expect((await POST({ request: req, locals: {} } as any)).status).toBe(302);
+
+    const updated = await testDb.query.contents.findFirst({
+      where: eq(schema.contents.cid, post.cid),
+    });
+    expect(updated?.created).toBe(secondOccurrence);
+  });
+
+  it('invalidates cached hidden content when autosave changes it', async () => {
+    const admin = await testDb.query.users.findFirst();
+    const cookie = await makeAuthCookie(testDb, admin!.uid, TEST_AUTH_CODE, TEST_SECRET);
+    const [hidden] = await testDb.insert(schema.contents).values({
+      title: 'Hidden', slug: 'hidden-post', type: 'post', status: 'hidden',
+      authorId: admin!.uid, created: 1000, text: 'old',
+    }).returning();
+
+    const req = await makeContentRequest({
+      do: 'update', cid: String(hidden.cid), type: 'post', title: 'Hidden edited',
+      text: 'new', autosave: '1',
+    }, cookie);
+    const res = await POST({ request: req, locals: {} } as any);
+    expect(res.status).toBe(200);
+
+    const cacheVersion = await testDb.query.options.findFirst({
+      where: eq(schema.options.name, 'cacheVersion'),
+    });
+    expect(Number(cacheVersion?.value)).toBeGreaterThanOrEqual(1);
+  });
+
+  it('passes the submitted visibility status to the update write filter', async () => {
+    let seenStatus: unknown;
+    mockApplyFilter.mockImplementationOnce(async (_ctx: any, _hook: string, data: any) => {
+      seenStatus = data.status;
+      return data;
+    });
+    const admin = await testDb.query.users.findFirst();
+    const cookie = await makeAuthCookie(testDb, admin!.uid, TEST_AUTH_CODE, TEST_SECRET);
+    const [post] = await testDb.insert(schema.contents).values({
+      title: 'Hidden update', slug: 'hidden-update', type: 'post', status: 'hidden',
+      authorId: admin!.uid, created: 1000, text: 'body',
+    }).returning();
+
+    const req = await makeContentRequest({
+      do: 'update', cid: String(post.cid), type: 'post', title: 'Hidden update',
+      slug: 'hidden-update', text: 'body', status: 'publish', visibility: 'hidden',
+    }, cookie);
+    expect((await POST({ request: req, locals: {} } as any)).status).toBe(302);
+    expect(seenStatus).toBe('hidden');
   });
 
   it('rolls back content, fields, category and tag writes when the atomic create batch fails', async () => {

@@ -116,6 +116,33 @@ describe('preloadedRow null vs undefined', () => {
     expect(findFirst).not.toHaveBeenCalled();
   });
 
+  it('preparePostData refuses attachment and revision rows', async () => {
+    await testDb.insert(schema.contents).values([
+      {
+        title: 'File metadata', slug: 'file.png', type: 'attachment', status: 'publish',
+        text: '{"path":"/usr/uploads/file.png","name":"file.png"}',
+      },
+      {
+        title: 'Pending revision', slug: 'revision-row', type: 'revision', status: 'draft',
+        parent: 1,
+      },
+    ]);
+    const rows = await testDb.select().from(schema.contents);
+    expect(rows).toHaveLength(2);
+
+    for (const row of rows) {
+      const result = await preparePostData(
+        buildCtx() as any,
+        row.cid!,
+        `https://example.com/archives/${row.cid}/`,
+        null,
+        row,
+      );
+      expect(result).toBeInstanceOf(Response);
+      expect((result as Response).status).toBe(404);
+    }
+  });
+
   it('preparePostData(undefined) still performs its own lookup', async () => {
     await seedPage();
     const { wrapped, findFirst } = spyContentsFindFirst();

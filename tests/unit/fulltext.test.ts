@@ -31,7 +31,10 @@ describe('fulltext FTS5 helpers', () => {
     expect(sql).toContain("content_rowid='cid'");
     for (const trigger of ['typecho_contents_fts_ai', 'typecho_contents_fts_ad', 'typecho_contents_fts_au']) {
       expect(sql).toContain(`CREATE TRIGGER IF NOT EXISTS ${trigger}`);
+      expect(sql).toContain(`DROP TRIGGER IF EXISTS ${trigger}`);
     }
+    expect(sql).toContain('AFTER UPDATE OF title, text ON typecho_contents');
+    expect(sql).not.toContain('AFTER UPDATE ON typecho_contents');
   });
 
   it('emits a rebuild statement for external-content backfill', () => {

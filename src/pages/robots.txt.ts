@@ -9,9 +9,17 @@ export const GET: APIRoute = async () => {
   const urls = computeUrls(options);
   const custom = (options.robotsTxt as string | undefined) || '';
 
-  const body =
-    custom.trim() ||
-    `User-agent: *\nAllow: /\nDisallow: /admin/\nDisallow: /api/\n\nSitemap: ${urls.siteUrl}/sitemap.xml\n`;
+  let body: string;
+  if (custom.trim()) {
+    body = custom.trim();
+    // AGENTS.md §9.1: /robots.txt always advertises the sitemap index.
+    if (!/(^|\n)\s*Sitemap\s*:/i.test(body)) {
+      body += `\n\nSitemap: ${urls.siteUrl}/sitemap.xml`;
+    }
+    body += '\n';
+  } else {
+    body = `User-agent: *\nAllow: /\nDisallow: /admin/\nDisallow: /api/\n\nSitemap: ${urls.siteUrl}/sitemap.xml\n`;
+  }
 
   return new Response(body, {
     headers: {

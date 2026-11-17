@@ -306,6 +306,7 @@ export const CORE_TRANSLATION_KEYS = [
   'admin.description.uploadTypes',
   'admin.description.cache',
   'admin.description.timezone',
+  'admin.description.contributorReview',
   'admin.timezone.region.africa',
   'admin.timezone.region.america',
   'admin.timezone.region.asia',

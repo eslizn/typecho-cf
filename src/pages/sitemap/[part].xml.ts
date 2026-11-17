@@ -45,6 +45,7 @@ export const GET: APIRoute = async ({ params, url }) => {
       urls.siteUrl,
       options.permalinkPattern as string | undefined,
       options.pagePattern as string | undefined,
+      options.timezone,
     );
     const lastmod = new Date((row.modified || row.created || 0) * 1000)
       .toISOString()

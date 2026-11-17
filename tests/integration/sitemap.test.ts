@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { eq } from 'drizzle-orm';
 import * as schema from '@/db/schema';
 import { createTestDb, disposeTestDb, type TestDatabase } from '../helpers';
+import { resetOptionsSnapshot } from '@/lib/options';
+import { advanceOptionsSnapshotGeneration } from '@/lib/options-snapshot-generation';
+import { resetCacheVersionMemo } from '@/lib/cache';
 
 let testDb: TestDatabase;
 
@@ -114,6 +118,36 @@ describe('GET /sitemap.xml and sitemap shards', () => {
 
     const robotsResponse = await robots({ locals: {} } as any);
     expect(await robotsResponse.text()).toContain(`Sitemap: ${SITE_URL}/sitemap.xml`);
+  });
+
+  it('appends the sitemap index to custom robots.txt content without duplicating it', async () => {
+    await testDb.insert(schema.options).values({
+      name: 'robotsTxt',
+      user: 0,
+      value: 'User-agent: *\nDisallow: /private/',
+    });
+    advanceOptionsSnapshotGeneration();
+    resetOptionsSnapshot();
+
+    const custom = await robots({ locals: {} } as any);
+    const customBody = await custom.text();
+    expect(customBody).toContain('Disallow: /private/');
+    expect(customBody).toContain(`Sitemap: ${SITE_URL}/sitemap.xml`);
+
+    await testDb.update(schema.options)
+      .set({ value: 'User-agent: *\nSitemap: https://example.com/custom.xml' })
+      .where(eq(schema.options.name, 'robotsTxt'));
+    // Options reads are keyed by cacheVersion; bump it so the second call
+    // does not reuse the first call's versioned cache entry.
+    await testDb.insert(schema.options).values({ name: 'cacheVersion', user: 0, value: '1' });
+    resetCacheVersionMemo();
+    advanceOptionsSnapshotGeneration();
+    resetOptionsSnapshot();
+
+    const explicit = await robots({ locals: {} } as any);
+    const explicitBody = await explicit.text();
+    expect(explicitBody).toContain('Sitemap: https://example.com/custom.xml');
+    expect(explicitBody.match(/Sitemap\s*:/gi)).toHaveLength(1);
   });
 
   it.each([

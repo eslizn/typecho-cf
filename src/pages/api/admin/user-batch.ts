@@ -1,7 +1,9 @@
 import type { APIRoute } from 'astro';
 import { schema } from '@/db';
 import { isAdminActionResponse, requireAdminAction, safeAdminRedirectUrl } from '@/lib/admin-auth';
+import { invalidateSiteCache } from '@/lib/cache';
 import { readAdminFormOrError } from '@/lib/input';
+import { chunkArray, D1_MAX_BOUND_PARAMS } from '@/lib/d1-limits';
 import { and, eq, sql } from 'drizzle-orm';
 import { i18nMessage } from '@/lib/i18n';
 import { textError } from '@/lib/http';
@@ -39,20 +41,30 @@ async function handler({ request, locals, url }: { request: Request; locals: App
   // demotion cannot leave the site without an administrator.
   const targets = [...new Set(uids)].filter(uid => uid > 0 && uid !== auth.uid);
   if (targets.length > 0) {
-    const idList = sql.join(targets.map(id => sql`${id}`), sql`, `);
     const actorIsAdmin = and(eq(schema.users.uid, auth.uid), eq(schema.users.group, 'administrator'));
     const authorized = sql`EXISTS (SELECT 1 FROM ${schema.users} WHERE ${actorIsAdmin})`;
-    const [actors] = await auth.db.batch([
+    const statements: any[] = [
       auth.db.select({ uid: schema.users.uid }).from(schema.users).where(actorIsAdmin),
-      auth.db.update(schema.contents).set({ authorId: auth.uid })
-        .where(and(sql`${schema.contents.authorId} IN (${idList})`, authorized)),
-      auth.db.update(schema.comments).set({ authorId: auth.uid })
-        .where(and(sql`${schema.comments.authorId} IN (${idList})`, authorized)),
-      auth.db.delete(schema.users).where(and(sql`${schema.users.uid} IN (${idList})`, authorized)),
-    ]);
+    ];
+    // Chunk the selection so each `IN (...)` stays under D1's parameter cap.
+    // The UPDATE statements bind three extra values (authorId plus the actor
+    // subquery's uid/group); use the worst case for the chunk budget.
+    for (const chunk of chunkArray(targets, D1_MAX_BOUND_PARAMS - 3)) {
+      const idList = sql.join(chunk.map(id => sql`${id}`), sql`, `);
+      statements.push(
+        auth.db.update(schema.contents).set({ authorId: auth.uid })
+          .where(and(sql`${schema.contents.authorId} IN (${idList})`, authorized)),
+        auth.db.update(schema.comments).set({ authorId: auth.uid })
+          .where(and(sql`${schema.comments.authorId} IN (${idList})`, authorized)),
+        auth.db.delete(schema.users).where(and(sql`${schema.users.uid} IN (${idList})`, authorized)),
+      );
+    }
+    const [actors] = await auth.db.batch(statements as [any, ...any[]]);
     if (actors.length === 0) {
       return textError(403, i18nMessage('core.error.forbidden', 'Forbidden'), undefined, auth.i18n);
     }
+    // Reassigning authorId changes public bylines and author archives.
+    await invalidateSiteCache(auth.db);
   }
 
   const referer = safeAdminRedirectUrl(

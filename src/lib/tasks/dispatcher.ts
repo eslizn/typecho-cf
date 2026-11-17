@@ -399,15 +399,32 @@ async function processMessage(
 
   const attempt = attemptNumber(message);
   const finalizer = createMessageFinalizer(message);
-  if (!runtime.activatedPlugins.has(envelope.pluginId)) {
-    structuredTaskLog('task.discard_inactive_plugin', envelope, attempt);
-    await finalizer.ack();
-    return;
-  }
-
+  // Check initialization failures before the activation set: a plugin whose
+  // init failed is removed from `activatedPlugins` for the request, but its
+  // queued messages should be retried so a transient init failure can recover
+  // within Queue's retry budget. Genuinely disabled plugins are not reported
+  // in `initFailures` and are still acknowledged below.
   if (Object.prototype.hasOwnProperty.call(runtime.initFailures, envelope.pluginId)) {
     structuredTaskLog('task.retry_plugin_init_failure', envelope, attempt);
     await finalizer.retry(retryDelay(attempt));
+    return;
+  }
+
+  if (!runtime.activatedPlugins.has(envelope.pluginId)) {
+    // A consumer whose required provider failed init is removed from the
+    // active set too, but that is transient — retry so the task survives the
+    // provider's retry budget instead of being silently acked and lost.
+    const blockedByFailedDependency = runtime.activationDiagnostics.some(issue =>
+      issue.pluginId === envelope.pluginId
+      && !!issue.dependencyId
+      && Object.prototype.hasOwnProperty.call(runtime.initFailures, issue.dependencyId));
+    if (blockedByFailedDependency) {
+      structuredTaskLog('task.retry_dependency_init_failure', envelope, attempt);
+      await finalizer.retry(retryDelay(attempt));
+      return;
+    }
+    structuredTaskLog('task.discard_inactive_plugin', envelope, attempt);
+    await finalizer.ack();
     return;
   }
 

@@ -1,4 +1,5 @@
-import { getDb, schema, type Database } from '@/db';
+import type { schema } from '@/db';
+import { getDb, type Database } from '@/db';
 import { loadOptions, type SiteOptions } from '@/lib/options';
 import { canManageResource, getAuthCookies, hasPermission, requireAdminCSRF, validateAuthToken } from '@/lib/auth';
 import { parseActivatedPlugins, setActivatedPlugins, type HookContext } from '@/lib/plugin';

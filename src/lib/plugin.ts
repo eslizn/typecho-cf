@@ -61,7 +61,8 @@ import {
 } from '@/lib/capability';
 import type { CapabilityRegistration } from '@/lib/capability';
 import type { CapabilityRuntimeContext } from '@/lib/capability';
-import { addHook, applyFilterSafely, HookPoints, removePluginHooks } from '@/lib/hooks';
+import type { addHook, HookPoints } from '@/lib/hooks';
+import { applyFilterSafely, removePluginHooks } from '@/lib/hooks';
 import {
   planPluginActivation,
   planPluginActivationAction,

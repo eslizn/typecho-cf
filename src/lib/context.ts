@@ -8,7 +8,7 @@ import { loadOptions, type SiteOptions, computeUrls } from '@/lib/options';
 import { getAuthCookies, validateAuthToken, hasPermission, generateSecurityToken } from '@/lib/auth';
 import { setActivatedPlugins, parseActivatedPlugins, doHook, type HookContext } from '@/lib/plugin';
 import { getThemePreviewId, THEME_PREVIEW_OPTION } from '@/lib/theme-preview';
-import { schema } from '@/db';
+import type { schema } from '@/db';
 import { env } from 'cloudflare:workers';
 import { createRequestI18n, type RequestI18nRuntime } from '@/lib/i18n-runtime';
 import type { I18n, ResolvedLocale } from '@/lib/i18n';

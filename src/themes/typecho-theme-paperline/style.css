@@ -556,8 +556,11 @@ button.submit:focus-visible {
   word-wrap: break-word;
 }
 
-/* Archive/home excerpts in the reference theme stay compact. Detail pages use h1. */
-.post:has(h2.post-title) .post-content {
+/* Archive/home excerpts in the reference theme stay compact. Detail pages use h1.
+   Posts with an explicit <!--more--> divider keep the author-defined cutoff and
+   the "Read more" link; clamping those would hide whatever sits between the
+   third line and the divider. */
+.post:has(h2.post-title) .post-content:not(:has(.more)) {
   display: -webkit-box;
   overflow: hidden;
   -webkit-box-orient: vertical;

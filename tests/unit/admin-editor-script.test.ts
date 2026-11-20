@@ -36,6 +36,12 @@ describe('admin editor bootstrap', () => {
     expect(contents).not.toContain("t('admin.action.save', {}, 'Save')} {t('admin.option.draft'");
   });
 
+  it.each(PAGES)('%s labels the primary submit button with the publish action', (path) => {
+    const contents = source(path);
+    expect(contents).toMatch(/id="btn-submit".*admin\.action\.publish/);
+    expect(contents).not.toMatch(/id="btn-submit".*admin\.option\.publish/);
+  });
+
   it.each(PAGES)('%s submits the page preview without saving', (path) => {
     const contents = source(path);
     expect(contents).toContain('formaction="/admin/content-preview"');

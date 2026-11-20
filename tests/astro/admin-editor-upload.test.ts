@@ -55,6 +55,19 @@ describe.each([
     expect(token).toBeTruthy();
     expect(await validateSecurityToken(token!, SECRET, AUTH_CODE, admin.uid)).toBe(true);
   });
+
+  it('labels the primary submit button as a publish action', async () => {
+    const admin = (await testDb.query.users.findFirst())!;
+    const cookie = await makeAuthCookie(testDb, admin.uid, AUTH_CODE, SECRET);
+    const html = await renderComponent(component, {
+      request: new Request(`https://example.com/admin/${route}`, { headers: { cookie } }),
+      locals: {},
+    });
+
+    const label = html.match(/<button[^>]*id="btn-submit"[^>]*>([\s\S]*?)<\/button>/)?.[1] ?? '';
+    expect(label).toContain('发布');
+    expect(label).not.toContain('已发布');
+  });
 });
 
 // ---------------------------------------------------------------------------

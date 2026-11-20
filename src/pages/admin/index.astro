@@ -54,8 +54,8 @@ const [
     text: schema.comments.text,
     created: schema.comments.created,
     contentSlug: schema.contents.slug,
-    contentType: schema.contents.type,
-    contentCreated: schema.contents.created,
+    contentType: sql<string | null>`${schema.contents.type}`.as('content_type'),
+    contentCreated: sql<number | null>`${schema.contents.created}`.as('content_created'),
   }).from(schema.comments)
     .leftJoin(schema.contents, eq(schema.comments.cid, schema.contents.cid))
     .where(visibleCommentCondition('approved'))

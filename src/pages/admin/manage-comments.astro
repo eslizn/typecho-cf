@@ -58,8 +58,9 @@ const [countResult, commentsList, statusCounts] = await db.batch([
     created: schema.comments.created,
     contentTitle: schema.contents.title,
     contentSlug: schema.contents.slug,
-    contentType: schema.contents.type,
-    contentCreated: schema.contents.created,
+    // D1 batch rows use SQL column names as keys.
+    contentType: sql<string | null>`${schema.contents.type}`.as('content_type'),
+    contentCreated: sql<number | null>`${schema.contents.created}`.as('content_created'),
   }).from(schema.comments)
     .leftJoin(schema.contents, eq(schema.comments.cid, schema.contents.cid))
     .where(where)

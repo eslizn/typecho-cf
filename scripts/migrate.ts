@@ -445,6 +445,42 @@ interface MigrationStats {
   errors: string[];
 }
 
+/**
+ * Legacy Typecho has no slug uniqueness constraint, but the target schema
+ * enforces a partial unique index over non-revision rows. `INSERT OR REPLACE`
+ * would silently delete an earlier row on a slug collision, so map duplicates
+ * to stable values first: the lowest cid keeps the original slug, later rows
+ * become `<slug>-<cid>`, and a numeric discriminator is appended if that value
+ * is already taken. Mirrors the runtime upgrade in `src/lib/isolate-boot.ts`.
+ */
+export function dedupeContentSlugs<T extends {
+  cid: number;
+  slug: string | null;
+  type: string | null;
+}>(rows: T[]): T[] {
+  const ordered = [...rows].sort((a, b) => Number(a.cid) - Number(b.cid));
+  const used = new Set<string>();
+  for (const row of ordered) {
+    if (row.slug != null && row.type !== 'revision') used.add(row.slug);
+  }
+
+  const seen = new Set<string>();
+  return ordered.map(row => {
+    if (row.slug == null || row.type === 'revision') return row;
+    if (!seen.has(row.slug)) {
+      seen.add(row.slug);
+      return row;
+    }
+
+    const base = `${row.slug}-${row.cid}`;
+    let candidate = base;
+    let suffix = 2;
+    while (used.has(candidate)) candidate = `${base}-${suffix++}`;
+    used.add(candidate);
+    return { ...row, slug: candidate };
+  });
+}
+
 abstract class TargetWriter {
   abstract init(): void;
   abstract writeUsers(rows: SourceRow[]): number;
@@ -554,7 +590,7 @@ class WranglerWriter extends TargetWriter {
 
   writeContents(rows: SourceRow[], siteUrl: string): number {
     if (rows.length === 0) return 0;
-    const mapped = rows.map(c => {
+    const mapped = dedupeContentSlugs(rows.map(c => {
       let text = c.text || '';
       if (c.type === 'attachment') {
         text = rewriteAttachmentText(text, siteUrl) || text;
@@ -578,7 +614,7 @@ class WranglerWriter extends TargetWriter {
         allowFeed: c.allowFeed || '0',
         parent: c.parent || 0,
       };
-    });
+    }));
     const cols = ['cid', 'title', 'slug', 'created', 'modified', 'text', 'order', 'authorId', 'template', 'type', 'status', 'password', 'commentsNum', 'allowComment', 'allowPing', 'allowFeed', 'parent'];
     for (let i = 0; i < mapped.length; i += 50) {
       const batch = mapped.slice(i, i + 50);
@@ -961,7 +997,12 @@ async function main() {
   }
 }
 
-main().catch(err => {
-  console.error('❌ Migration failed:', err);
-  process.exit(1);
-});
+const isMainModule = Boolean(process.argv[1]) &&
+  import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (isMainModule) {
+  main().catch(err => {
+    console.error('❌ Migration failed:', err);
+    process.exit(1);
+  });
+}

@@ -4,7 +4,7 @@
  * Tests permalink building, date formatting, slug generation, and other
  * content utility functions.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import {
   generateSlug,
   buildPermalink,
@@ -225,5 +225,82 @@ describe('formatDate()', () => {
     // \a\t in format should be literal "at"
     const result = formatDate(ts, 'Y-m-d \\a\\t H:i', 'UTC');
     expect(result).toBe('2026-03-15 at 12:30');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Intl formatter reuse (list rendering hot path)
+// ---------------------------------------------------------------------------
+describe('date formatter construction', () => {
+  const ts = Math.floor(new Date('2026-03-15T12:30:45Z').getTime() / 1000);
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.resetModules();
+  });
+
+  async function loadContentWithCounter() {
+    vi.resetModules();
+    const Original = Intl.DateTimeFormat;
+    let constructed = 0;
+    vi.spyOn(Intl, 'DateTimeFormat').mockImplementation(function (
+      ...args: ConstructorParameters<typeof Intl.DateTimeFormat>
+    ) {
+      constructed++;
+      return new Original(...args);
+    } as unknown as typeof Intl.DateTimeFormat);
+    const content = await import('@/lib/content');
+    return { content, count: () => constructed };
+  }
+
+  it('does not convert timezones for permalink patterns without date tokens', async () => {
+    const { content, count } = await loadContentWithCounter();
+
+    for (let cid = 1; cid <= 25; cid++) {
+      expect(content.buildPermalink(
+        { cid, slug: 'entry', type: 'post', created: ts },
+        'https://example.com',
+      )).toBe(`https://example.com/archives/${cid}/`);
+    }
+
+    expect(count()).toBe(0);
+  });
+
+  it('reuses the timezone formatter for date-based permalinks', async () => {
+    const { content, count } = await loadContentWithCounter();
+
+    for (let cid = 1; cid <= 25; cid++) {
+      content.buildPermalink(
+        { cid, slug: 'entry', type: 'post', created: ts },
+        'https://example.com',
+        '/{year}/{month}/{day}/{slug}/',
+        undefined,
+        'Asia/Shanghai',
+      );
+    }
+
+    expect(count()).toBe(1);
+  });
+
+  it('does not build month-name formatters for numeric formats', async () => {
+    const { content, count } = await loadContentWithCounter();
+
+    for (let index = 0; index < 25; index++) {
+      expect(content.formatDate(ts, 'Y-m-d H:i', 'Asia/Shanghai')).toBe('2026-03-15 20:30');
+    }
+
+    expect(count()).toBe(1);
+  });
+
+  it('reuses month-name formatters across calls', async () => {
+    const { content, count } = await loadContentWithCounter();
+
+    const first = content.formatDate(ts, 'F j, Y', 'Asia/Shanghai', 'zh-CN');
+    const afterFirst = count();
+    const second = content.formatDate(ts, 'F j, Y', 'Asia/Shanghai', 'zh-CN');
+
+    expect(afterFirst).toBe(2);
+    expect(second).toBe(first);
+    expect(count()).toBe(afterFirst);
   });
 });

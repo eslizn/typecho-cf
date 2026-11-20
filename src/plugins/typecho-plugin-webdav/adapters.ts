@@ -710,6 +710,27 @@ export async function s3Fetch(
   return fetchWithTimeout(signed.url, { method, headers: signed.headers, body });
 }
 
+/**
+ * Copy an object and verify the operation actually succeeded.
+ *
+ * S3 CopyObject may answer `200 OK` with an `<Error>` document in the body
+ * while reporting the failure only there. Callers that treat the copy as a
+ * prerequisite for deleting the source must inspect the body, otherwise a
+ * failed copy followed by a successful delete loses the object.
+ *
+ * Returns a 502 response on failure, or null when the copy succeeded.
+ */
+async function s3CopyObject(
+  mount: StorageMount, srcK: string, destK: string,
+): Promise<Response | null> {
+  const copySource = `/${encodePathSegment(mount.bucket)}/${encodeKeyPath(pk(mount, srcK))}`;
+  const response = await s3Fetch(mount, 'PUT', pk(mount, destK), {}, { 'x-amz-copy-source': copySource });
+  if (!response.ok) return new Response(`Storage copy failed (${response.status})`, { status: 502 });
+  const body = await response.text();
+  if (/<Error[\s>]/i.test(body)) return new Response('Storage copy failed', { status: 502 });
+  return null;
+}
+
 // --- R2 Helpers ---
 
 function isR2BucketBinding(value: unknown): value is R2Bucket {
@@ -985,16 +1006,13 @@ function createS3Ops(mount: StorageMount): StorageOps {
     },
 
     async copy(srcK, destK, _workerEnv) {
-      const copySource = `/${encodePathSegment(mount.bucket)}/${encodeKeyPath(pk(mount, srcK))}`;
-      const response = await s3Fetch(mount, 'PUT', pk(mount, destK), {}, { 'x-amz-copy-source': copySource });
-      if (!response.ok) return new Response(`Storage copy failed (${response.status})`, { status: 502 });
-      return new Response(null, { status: 201 });
+      const failure = await s3CopyObject(mount, srcK, destK);
+      return failure ?? new Response(null, { status: 201 });
     },
 
     async move(srcK, destK, _workerEnv) {
-      const copySource = `/${encodePathSegment(mount.bucket)}/${encodeKeyPath(pk(mount, srcK))}`;
-      const copyResponse = await s3Fetch(mount, 'PUT', pk(mount, destK), {}, { 'x-amz-copy-source': copySource });
-      if (!copyResponse.ok) return new Response(`Storage copy failed (${copyResponse.status})`, { status: 502 });
+      const failure = await s3CopyObject(mount, srcK, destK);
+      if (failure) return failure;
       const deleteResponse = await s3Fetch(mount, 'DELETE', pk(mount, srcK));
       if (!deleteResponse.ok && deleteResponse.status !== 404) {
         return new Response(`Storage move cleanup failed (${deleteResponse.status})`, { status: 502 });

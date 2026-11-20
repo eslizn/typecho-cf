@@ -65,13 +65,20 @@ export function buildPermalink(
 
   // Build date parts in the configured site timezone so date-based permalink
   // patterns match the local publication date shown throughout the admin.
-  const { parts } = getTimezoneDateParts(
-    content.created || Math.floor(Date.now() / 1000),
-    timezone,
-  );
-  const year = String(parts.year);
-  const month = String(parts.month).padStart(2, '0');
-  const day = String(parts.day).padStart(2, '0');
+  // Patterns without date tokens (including the default one) skip the
+  // timezone conversion entirely.
+  let year: string | undefined;
+  let month: string | undefined;
+  let day: string | undefined;
+  if (/\{(?:year|month|day)\}/.test(postPattern)) {
+    const { parts } = getTimezoneDateParts(
+      content.created || Math.floor(Date.now() / 1000),
+      timezone,
+    );
+    year = String(parts.year);
+    month = String(parts.month).padStart(2, '0');
+    day = String(parts.day).padStart(2, '0');
+  }
 
   const url = renderPermalinkPattern(postPattern, 'post', {
     cid: content.cid,
@@ -168,6 +175,33 @@ export function buildSearchLink(keywords: string, siteUrl: string): string {
   return `${siteUrl.replace(/\/$/, '')}/search/${encodeURIComponent(keywords)}/`;
 }
 
+/** Month-name formatters are reused across list rows; keep the cache bounded. */
+const MONTH_FORMATTER_CACHE_LIMIT = 32;
+const monthFormatterCache = new Map<string, Intl.DateTimeFormat>();
+
+function getMonthFormatter(
+  locale: string,
+  timezone: string,
+  month: 'long' | 'short',
+): Intl.DateTimeFormat {
+  const key = `${locale}\u0000${timezone}\u0000${month}`;
+  const cached = monthFormatterCache.get(key);
+  if (cached) return cached;
+
+  let formatter: Intl.DateTimeFormat;
+  try {
+    formatter = new Intl.DateTimeFormat(locale, { month, timeZone: timezone, calendar: 'gregory' });
+  } catch {
+    formatter = new Intl.DateTimeFormat('en', { month, timeZone: timezone, calendar: 'gregory' });
+  }
+  if (monthFormatterCache.size >= MONTH_FORMATTER_CACHE_LIMIT) {
+    const oldest = monthFormatterCache.keys().next().value;
+    if (oldest !== undefined) monthFormatterCache.delete(oldest);
+  }
+  monthFormatterCache.set(key, formatter);
+  return formatter;
+}
+
 /**
  * Format a Unix timestamp using PHP-style date formatting
  * Supports common PHP date format characters. The timezone uses an IANA
@@ -198,40 +232,26 @@ export function formatDate(
   const monthDate = formatTimezone === 'UTC'
     ? new Date(Date.UTC(parts.year, parts.month - 1, 1))
     : date;
-  let F: string;
-  let M: string;
-  try {
-    F = new Intl.DateTimeFormat(locale, {
-      month: 'long',
-      timeZone: formatTimezone,
-      calendar: 'gregory',
-    }).format(monthDate);
-    M = new Intl.DateTimeFormat(locale, {
-      month: 'short',
-      timeZone: formatTimezone,
-      calendar: 'gregory',
-    }).format(monthDate);
-  } catch {
-    F = new Intl.DateTimeFormat('en', {
-      month: 'long',
-      timeZone: formatTimezone,
-      calendar: 'gregory',
-    }).format(monthDate);
-    M = new Intl.DateTimeFormat('en', {
-      month: 'short',
-      timeZone: formatTimezone,
-      calendar: 'gregory',
-    }).format(monthDate);
-  }
+  let F: string | undefined;
+  let M: string | undefined;
 
-  const replacements: Record<string, string> = { Y, m, d, H, i, s, n, j, F, M, c };
+  const replacements: Record<string, string> = { Y, m, d, H, i, s, n, j, c };
 
   // Single-pass replacement: match either an escaped char (\X) or a format letter (X).
   // This prevents substituted values from being re-processed by subsequent replacements.
+  // Month-name formatters are only created when F/M actually appears.
   return format.replace(/\\(.)|(Y|m|d|H|i|s|n|j|F|M|c)/g, (match, escaped, token) => {
     if (escaped !== undefined) {
       // \X — output the literal character X (strips the backslash)
       return escaped;
+    }
+    if (token === 'F') {
+      F ??= getMonthFormatter(locale, formatTimezone, 'long').format(monthDate);
+      return F;
+    }
+    if (token === 'M') {
+      M ??= getMonthFormatter(locale, formatTimezone, 'short').format(monthDate);
+      return M;
     }
     return replacements[token] ?? match;
   });

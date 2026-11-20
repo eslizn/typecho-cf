@@ -444,6 +444,8 @@ Cloudflare Workers 单个 isolate 内的模块级状态会在异步请求间交�
 - `src/lib/comment-page.ts`：`commentRootCounts`（按 cacheVersion 键控的根评论计数缓存，TTL + 条数上限）
 - `src/lib/page-data/archive.ts`：`archiveCountCache`（按 cacheVersion + 归档类型/URL 键控的归档总数缓存，60s TTL + 200 条上限，过期与最旧条目淘汰）
 - `src/lib/markdown.ts`：`renderedContentCache`（Markdown 渲染结果 LRU，64 条；仅缓存默认摘要长度且源文本 ≤ 100k 字符的输入）与 `commentSanitizeOptionsCache`（评论净化选项 LRU，32 条）
+- `src/lib/timezone.ts`：`ianaFormatterCache`（按 timezone 复用 `Intl.DateTimeFormat`，上限 64 条，超限淘汰最旧条目）
+- `src/lib/content.ts`：`monthFormatterCache`（按 locale / timezone / 长或短格式复用月份名 formatter，上限 32 条，超限淘汰最旧条目）；`formatDate` 仅在格式串包含 `F` / `M` 时创建月份名 formatter，`buildPermalink` 仅在 pattern 含日期 token 时转换时区
 - `src/lib/fulltext.ts`：`ftsAvailability`（FTS5 就绪状态）
 - `src/lib/isolate-boot.ts`：`state`（表检查 / 索引回填 / FTS 引导的一次性标志）
 - `src/lib/plugin-routes.ts`：resolver 注册表与当前 claim 表；请求引导必须复制为 request-local route snapshot，不能在后续路由判断中依赖可能被其他请求刷新过的模块级 claim

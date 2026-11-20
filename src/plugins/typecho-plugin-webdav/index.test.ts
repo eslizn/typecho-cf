@@ -20,6 +20,8 @@ import init, {
   tianyiListFiles,
 } from './index';
 import { MAX_AUTH_FAILURE_STATES } from './config';
+import { getStorageOps } from './adapters';
+import type { StorageMount } from './types';
 
 const VALID_MOUNTS = [
   {
@@ -1090,6 +1092,69 @@ describe('typecho-plugin-webdav hooks', () => {
     expect(xml).toContain('<d:href>/dav/photos/readme.txt</d:href>');
     expect(xml).toContain('<d:href>/dav/photos/nested/</d:href>');
     expect(xml.match(/<d:resourcetype><d:collection \/><\/d:resourcetype>/g)?.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('typecho-plugin-webdav S3 storage', () => {
+  const mount: StorageMount = {
+    mount: 'media',
+    provider: 's3',
+    bindingName: '',
+    endpoint: 'https://s3.example.com',
+    bucket: 'media',
+    region: 'us-east-1',
+    accessKeyId: 'ak',
+    secretAccessKey: 'sk',
+    prefix: 'uploads/',
+    pathStyle: true,
+    username: '',
+    password: '',
+    sessionCookie: '',
+    rootDir: '',
+  };
+
+  function mockS3Copy(copyBody: string) {
+    const methods: string[] = [];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const method = init?.method || 'GET';
+      methods.push(method);
+      if (method === 'PUT') return new Response(copyBody, { status: 200 });
+      if (method === 'DELETE') return new Response(null, { status: 204 });
+      throw new Error(`Unexpected S3 request: ${method}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return methods;
+  }
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('keeps the source when CopyObject reports an embedded error', async () => {
+    const methods = mockS3Copy(
+      '<Error><Code>InternalError</Code><Message>We encountered an internal error.</Message></Error>',
+    );
+
+    const response = await getStorageOps(mount).move('old/file.txt', 'new/file.txt');
+
+    expect(response.status).toBe(502);
+    expect(methods).toEqual(['PUT']);
+  });
+
+  it('reports an embedded copy error for COPY without deleting the source', async () => {
+    const methods = mockS3Copy('<Error><Code>AccessDenied</Code></Error>');
+
+    const response = await getStorageOps(mount).copy('old/file.txt', 'new/file.txt');
+
+    expect(response.status).toBe(502);
+    expect(methods).toEqual(['PUT']);
+  });
+
+  it('deletes the source only after a verified copy', async () => {
+    const methods = mockS3Copy('<CopyObjectResult><ETag>"copied"</ETag></CopyObjectResult>');
+
+    const response = await getStorageOps(mount).move('old/file.txt', 'new/file.txt');
+
+    expect(response.status).toBe(201);
+    expect(methods).toEqual(['PUT', 'DELETE']);
   });
 });
 

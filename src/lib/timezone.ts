@@ -97,7 +97,14 @@ export interface ZonedDateParts {
   second: number;
 }
 
-function getIanaParts(timestamp: number, timezone: string): ZonedDateParts {
+/** Formatter construction is expensive; one formatter per configured zone. */
+const IANA_FORMATTER_CACHE_LIMIT = 64;
+const ianaFormatterCache = new Map<string, Intl.DateTimeFormat>();
+
+function getIanaFormatter(timezone: string): Intl.DateTimeFormat {
+  const cached = ianaFormatterCache.get(timezone);
+  if (cached) return cached;
+
   const formatter = new Intl.DateTimeFormat('en-US', {
     timeZone: timezone,
     calendar: 'gregory',
@@ -110,6 +117,16 @@ function getIanaParts(timestamp: number, timezone: string): ZonedDateParts {
     second: '2-digit',
     hourCycle: 'h23',
   });
+  if (ianaFormatterCache.size >= IANA_FORMATTER_CACHE_LIMIT) {
+    const oldest = ianaFormatterCache.keys().next().value;
+    if (oldest !== undefined) ianaFormatterCache.delete(oldest);
+  }
+  ianaFormatterCache.set(timezone, formatter);
+  return formatter;
+}
+
+function getIanaParts(timestamp: number, timezone: string): ZonedDateParts {
+  const formatter = getIanaFormatter(timezone);
   const values: Record<string, number> = {};
   for (const part of formatter.formatToParts(new Date(Math.trunc(timestamp) * 1000))) {
     if (part.type !== 'literal') values[part.type] = Number(part.value);

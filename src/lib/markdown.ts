@@ -82,6 +82,47 @@ function stripMarkdownPrefix(text: string): string {
   return text.startsWith(MARKDOWN_PREFIX) ? text.slice(MARKDOWN_PREFIX.length) : text;
 }
 
+const REFERENCE_DEFINITION_RE =
+  /^ {0,3}\[[^\]\n]+\]:[ \t]*(?:<[^>\n]*>|\S+)(?:[ \t]+(?:"[^"\n]*"|'[^'\n]*'|\([^)\n]*\)))?[ \t]*$/;
+
+/**
+ * CommonMark reference definitions cannot interrupt a paragraph, but the
+ * editor writes them directly below the body text to keep reference-style
+ * attachment links compact. Insert a blank line before each definition block
+ * so `marked` resolves it; fenced code blocks are left untouched.
+ */
+export function normalizeReferenceDefinitions(text: string): string {
+  if (!text.includes(']:')) return text;
+
+  const lines = text.split('\n');
+  const output: string[] = [];
+  let fence: { char: '`' | '~'; length: number } | null = null;
+
+  for (const line of lines) {
+    if (fence) {
+      const close = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(line);
+      if (close && close[1][0] === fence.char && close[1].length >= fence.length) fence = null;
+      output.push(line);
+      continue;
+    }
+
+    const open = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (open && !(open[1][0] === '`' && open[2].includes('`'))) {
+      fence = { char: open[1][0] as '`' | '~', length: open[1].length };
+      output.push(line);
+      continue;
+    }
+
+    if (REFERENCE_DEFINITION_RE.test(line)) {
+      const previous = output.length > 0 ? output[output.length - 1] : '';
+      if (previous.trim() !== '' && !REFERENCE_DEFINITION_RE.test(previous)) output.push('');
+    }
+    output.push(line);
+  }
+
+  return output.join('\n');
+}
+
 /**
  * Remove Typecho-specific markers from content: <!--markdown--> prefix and all <!--more--> tags.
  */
@@ -122,7 +163,9 @@ export function renderContent(text: string, maxExcerptLength = 200): RenderedCon
     return cached;
   }
 
-  const content = stripMarkdownPrefix(text).replace(MORE_COMMENT_RE, '');
+  const content = normalizeReferenceDefinitions(
+    stripMarkdownPrefix(text).replace(MORE_COMMENT_RE, ''),
+  );
   const parsed = marked.parse(content, { async: false }) as string;
   const html = sanitizeHtml(parsed, SANITIZE_OPTIONS);
   const plain = stripHtmlTags(parsed);
@@ -146,7 +189,7 @@ export function renderCommentText(text: string, options: CommentRenderOptions = 
 
   const sanitizeOptions = buildCommentSanitizeOptions(options.htmlTagAllowed, !!options.markdown);
   if (options.markdown) {
-    const html = marked.parse(stripMarkdownPrefix(text), { async: false }) as string;
+    const html = marked.parse(normalizeReferenceDefinitions(stripMarkdownPrefix(text)), { async: false }) as string;
     return sanitizeHtml(html, sanitizeOptions);
   }
 
@@ -170,7 +213,7 @@ export async function renderCommentTextFiltered(
       capabilityRuntime: ctx.capabilityRuntime,
     });
     if (typeof filteredSource === 'string') source = filteredSource;
-    rendered = sanitizeHtml(marked.parse(source, { async: false }) as string, sanitizeOptions);
+    rendered = sanitizeHtml(marked.parse(normalizeReferenceDefinitions(source), { async: false }) as string, sanitizeOptions);
   } else {
     rendered = autop(sanitizeHtml(source, sanitizeOptions));
   }
@@ -198,7 +241,7 @@ export async function renderMarkdownFiltered(ctx: HookContext, text: string): Pr
   });
   if (typeof filteredContent === 'string') content = filteredContent;
 
-  const html = marked.parse(content, { async: false }) as string;
+  const html = marked.parse(normalizeReferenceDefinitions(content), { async: false }) as string;
   let sanitized = sanitizeHtml(html, SANITIZE_OPTIONS);
 
   // Apply content:rendered filter — plugins can modify the rendered HTML
@@ -235,7 +278,8 @@ export function renderContentExcerpt(
   // This guarantees that marked wraps the placeholder in its own <p> block
   // regardless of whether the author placed <!--more--> inline or between
   // paragraphs — enabling a clean split on the rendered output.
-  const withPlaceholder = content.replace(MORE_COMMENT_RE, '\n\n' + MORE_PLACEHOLDER + '\n\n');
+  const withPlaceholder = normalizeReferenceDefinitions(content)
+    .replace(MORE_COMMENT_RE, '\n\n' + MORE_PLACEHOLDER + '\n\n');
   const html = marked.parse(withPlaceholder, { async: false }) as string;
   const sanitized = sanitizeHtml(html, SANITIZE_OPTIONS);
 

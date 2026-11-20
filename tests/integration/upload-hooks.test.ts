@@ -37,6 +37,7 @@ vi.mock('@/lib/plugin', async () => {
 
 const r2Put = vi.fn(async () => {});
 const r2Delete = vi.fn(async () => {});
+const r2Head = vi.fn(async () => null);
 
 vi.mock('cloudflare:workers', () => ({
   get env() {
@@ -46,6 +47,7 @@ vi.mock('cloudflare:workers', () => ({
         put: r2Put,
         delete: r2Delete,
         get: async () => null,
+        head: r2Head,
       },
     };
   },
@@ -75,8 +77,8 @@ async function csrf() {
   return await generateSecurityToken(SECRET, AUTH, user!.uid);
 }
 
-function buildUploadRequest(cookie: string, csrfToken: string) {
-  const file = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'tiny.png', { type: 'image/png' });
+function buildUploadRequest(cookie: string, csrfToken: string, filename = 'tiny.png') {
+  const file = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], filename, { type: 'image/png' });
   const fd = new FormData();
   fd.set('_', csrfToken);
   fd.set('file', file);
@@ -96,6 +98,7 @@ describe('upload endpoint (G5-4 + G5-5)', () => {
     deleteHook.mockReset();
     r2Put.mockReset();
     r2Delete.mockReset();
+    r2Head.mockReset().mockResolvedValue(null);
   });
 
   it('rate-limits past 60 uploads per minute (G5-4)', async () => {
@@ -125,6 +128,92 @@ describe('upload endpoint (G5-4 + G5-5)', () => {
     expect(uploadHook).toHaveBeenCalledTimes(1);
     const putCalls = r2Put.mock.calls as unknown as unknown[][];
     expect(putCalls[0]?.[1]).toBeInstanceOf(ReadableStream);
+  });
+
+  it('accepts the X-CSRF-Token header sent by the editor upload script', async () => {
+    const cookie = await adminCookie();
+    const csrfToken = await csrf();
+    const formData = new FormData();
+    formData.set('file', new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'header.png', { type: 'image/png' }));
+
+    const res = await POST({
+      request: new Request(`${SITE}/api/admin/upload`, {
+        method: 'POST',
+        headers: { cookie, origin: SITE, 'X-CSRF-Token': csrfToken },
+        body: formData,
+      }),
+      locals: {},
+    } as any);
+
+    expect(res.status).toBe(200);
+    expect(r2Put).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects an upload without a CSRF token', async () => {
+    const cookie = await adminCookie();
+    const formData = new FormData();
+    formData.set('file', new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'missing.png', { type: 'image/png' }));
+
+    const res = await POST({
+      request: new Request(`${SITE}/api/admin/upload`, {
+        method: 'POST',
+        headers: { cookie, origin: SITE },
+        body: formData,
+      }),
+      locals: {},
+    } as any);
+
+    expect(res.status).toBe(403);
+    expect((await res.json() as { code?: string }).code).toBe('core.error.csrf');
+    expect(r2Put).not.toHaveBeenCalled();
+  });
+
+  it('accepts the X-CSRF-Token header on attachment deletion', async () => {
+    const cookie = await adminCookie();
+    const csrfToken = await csrf();
+    const uploadRes = await POST({
+      request: buildUploadRequest(cookie, csrfToken),
+      locals: {},
+    } as any);
+    expect(uploadRes.status).toBe(200);
+    const [, info] = await uploadRes.json() as [string, { cid: number }];
+
+    const delRes = await DELETE({
+      request: new Request(`${SITE}/api/admin/upload?cid=${info.cid}`, {
+        method: 'DELETE',
+        headers: { cookie, origin: SITE, 'X-CSRF-Token': csrfToken },
+      }),
+      url: new URL(`${SITE}/api/admin/upload?cid=${info.cid}`),
+      locals: {},
+    } as any);
+
+    expect(delRes.status).toBe(200);
+  });
+
+  it('stores a Typecho-style numeric file name and keeps the display name', async () => {
+    const cookie = await adminCookie();
+    const csrfToken = await csrf();
+    const res = await POST({
+      request: buildUploadRequest(cookie, csrfToken, '../weird"<name>.png'),
+      locals: {},
+    } as any);
+    expect(res.status).toBe(200);
+
+    const putCalls = r2Put.mock.calls as unknown as unknown[][];
+    const key = putCalls[0]?.[0] as string;
+    expect(key).toMatch(/^usr\/uploads\/\d{4}\/\d{2}\/\d+\.png$/);
+    expect(key).not.toContain('weird');
+    expect(key).not.toContain('..');
+
+    const [, info] = await res.json() as [string, { title: string; url: string }];
+    expect(info.title).toBe('weirdname.png');
+    expect(info.url).toBe(`${SITE}/${key}`);
+
+    const row = await testDb.query.contents.findFirst();
+    expect(row?.title).toBe('weirdname.png');
+    const meta = JSON.parse(row!.text!);
+    expect(meta.name).toBe('weirdname.png');
+    expect(meta.path).toBe(key);
   });
 
   it('uses collision-resistant attachment slugs when uploads share a timestamp', async () => {

@@ -68,6 +68,30 @@ describe('admin editor bootstrap', () => {
     }
   });
 
+  it('sends the CSRF token with upload and delete requests', () => {
+    const component = source('src/components/admin/EditorScript.astro');
+    expect(component).toContain("uploadPanel.data('csrf')");
+    expect(component).toContain("url: '/api/admin/upload'");
+    expect(component).toContain("url: '/api/admin/upload?cid=' + attachCid");
+    expect(component.match(/'X-CSRF-Token': csrf/g)).toHaveLength(2);
+  });
+
+  it('inserts Markdown attachments as reference-style links', () => {
+    const component = source('src/components/admin/EditorScript.astro');
+    expect(component).toContain("$('input[name=\"markdown\"]').length > 0");
+    expect(component).toContain('definitionPattern');
+    expect(component).toContain("'  [' + label + ']: ' + target");
+    expect(component).toContain("next.replace(/\\s+$/, '') + '\\n' + definition");
+    expect(component).toContain("'![' + labelText + '][' + label + ']'");
+    expect(component).toContain("'[' + labelText + '][' + label + ']'");
+    expect(component).not.toContain("md = '![' + title + ']('");
+  });
+
+  it.each(PAGES)('%s exposes the CSRF token on the upload panel', (path) => {
+    const contents = source(path);
+    expect(contents).toMatch(/id="upload-panel"[^>]*data-csrf=\{csrfToken\}/);
+  });
+
   it('never interpolates server data inside an is:inline script body', () => {
     // Astro emits the body of an `is:inline` script verbatim, so `{foo}` reaches
     // the browser as literal text: `const messages = {foo};` is an object-literal

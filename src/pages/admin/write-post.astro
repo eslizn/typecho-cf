@@ -362,7 +362,7 @@ const editorMessagesJson = safeJsonForScript({
       </div>
 
       <div id="tab-files" class="tab-content hidden">
-        <div id="upload-panel" class="p" data-cid={isEdit ? String(post.cid) : '0'}>
+        <div id="upload-panel" class="p" data-cid={isEdit ? String(post.cid) : '0'} data-csrf={csrfToken}>
           <div class="upload-area" draggable="true">
             <p>{t('editor.uploadDrop', {}, 'Drop files here')}<br />{t('editor.chooseFileUpload', {}, 'or choose a file to upload')}</p>
             <input type="file" id="file-input" multiple class="hidden" />

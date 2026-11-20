@@ -292,6 +292,7 @@ const { messagesJson } = Astro.props;
       // ========== 文件上传 ==========
       (function () {
         var uploadPanel = $('#upload-panel'),
+            csrf = uploadPanel.data('csrf') || $('input[name="_"]').val() || '',
             cid = uploadPanel.data('cid') || 0,
             fileInput = $('#file-input'),
             fileList = $('#file-list');
@@ -354,6 +355,7 @@ const { messagesJson } = Astro.props;
                 processData: false,
                 contentType: false,
                 dataType: 'json',
+                headers: { 'X-CSRF-Token': csrf },
                 success: function (resp) {
                   if ($.isArray(resp) && resp[1]) {
                     fileUploadComplete(uid, resp[1]);
@@ -425,6 +427,7 @@ const { messagesJson } = Astro.props;
               url: '/api/admin/upload?cid=' + attachCid,
               type: 'DELETE',
               dataType: 'json',
+              headers: { 'X-CSRF-Token': csrf },
               success: function () {
                 $(el).fadeOut(function () {
                   $(this).remove();
@@ -444,22 +447,66 @@ const { messagesJson } = Astro.props;
         updateAttachmentNumber();
 
         // 实现 Typecho.insertFileToEditor
+        // Markdown 模式使用引用式链接：正文写 [标题][n]，地址统一追加到文末，
+        // 同一个文件重复插入时复用已有引用编号。
         Typecho.insertFileToEditor = function (title, url, isImage) {
-          var textarea = $('#text'), sel = textarea.getSelection();
+          var textarea = $('#text'),
+              value = textarea.val() || '',
+              sel = textarea.getSelection(),
+              start = sel ? sel.start : value.length,
+              end = sel ? sel.end : start,
+              isMarkdown = $('input[name="markdown"]').length > 0;
+
           // Convert absolute URL to relative path for portability
-          var relUrl = url;
+          var target = url;
           try {
             var u = new URL(url, location.origin);
-            relUrl = u.pathname;
-          } catch {}
-          var md;
-          if (isImage === 1 || isImage === true) {
-            md = '![' + title + '](' + relUrl + ')';
+            target = u.pathname;
+          } catch { target = url; }
+
+          var inserted, definition = '';
+          if (!isMarkdown) {
+            var text = escapeClientHtml(title);
+            var attr = text.replace(/"/g, '&quot;');
+            inserted = (isImage === 1 || isImage === true)
+              ? '<img src="' + target + '" alt="' + attr + '" />'
+              : '<a href="' + target + '">' + text + '</a>';
           } else {
-            md = '[' + title + '](' + relUrl + ')';
+            var label = null, maxLabel = 0, match;
+            var definitionPattern = /^ {0,3}\[([^\]]+)\]:[ \t]*(\S+)/gm;
+            while ((match = definitionPattern.exec(value)) !== null) {
+              var sameTarget;
+              try {
+                sameTarget = new URL(match[2], location.origin).pathname === target;
+              } catch {
+                sameTarget = match[2] === target;
+              }
+              if (sameTarget && label === null) label = match[1];
+              if (/^\d+$/.test(match[1])) {
+                maxLabel = Math.max(maxLabel, parseInt(match[1], 10));
+              }
+            }
+
+            if (label === null) {
+              label = String(maxLabel + 1);
+              definition = '  [' + label + ']: ' + target;
+            }
+
+            var labelText = String(title == null ? '' : title).replace(/[\[\]]/g, '\\$&');
+            inserted = (isImage === 1 || isImage === true)
+              ? '![' + labelText + '][' + label + ']'
+              : '[' + labelText + '][' + label + ']';
           }
-          textarea.replaceSelection(md);
-          textarea.setSelection(sel.start + md.length, sel.start + md.length);
+
+          var next = value.slice(0, start) + inserted + value.slice(end);
+          if (definition) {
+            // The renderer inserts a blank line before parsing when needed,
+            // so definitions stay compact right below the body text.
+            next = next.replace(/\s+$/, '') + '\n' + definition;
+          }
+          textarea.val(next);
+          var caret = Math.min(start + inserted.length, next.length);
+          textarea.setSelection(caret, caret);
           textarea.trigger('input');
         };
 

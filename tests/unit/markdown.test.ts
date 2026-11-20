@@ -7,7 +7,7 @@
  * constructs that span the boundary are resolved correctly.
  */
 import { describe, it, expect } from 'vitest';
-import { autop, escapeHtml, generateExcerpt, renderCommentText, renderCommentTextFiltered, renderContentExcerpt, renderMarkdown, stripHtmlTags, stripTypechoMarkers } from '@/lib/markdown';
+import { autop, escapeHtml, generateExcerpt, normalizeReferenceDefinitions, renderCommentText, renderCommentTextFiltered, renderContentExcerpt, renderMarkdown, stripHtmlTags, stripTypechoMarkers } from '@/lib/markdown';
 import { addHook, removePluginHooks, type HookContext } from '@/lib/plugin';
 
 // ---------------------------------------------------------------------------
@@ -38,6 +38,41 @@ describe('renderMarkdown', () => {
     const src = 'See [link][foo]<!--more-->\n\n[foo]: https://example.com';
     const html = renderMarkdown(src);
     expect(html).toContain('href="https://example.com"');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Reference definitions written directly below body text
+// ---------------------------------------------------------------------------
+
+describe('compact reference definitions', () => {
+  it('resolves a definition written directly below body text', () => {
+    const html = renderMarkdown('Body ![pic][1]\n  [1]: /usr/uploads/a.png');
+    expect(html).toContain('<img src="/usr/uploads/a.png"');
+  });
+
+  it('resolves consecutive definitions written directly below body text', () => {
+    const html = renderMarkdown(
+      '![a][1] ![b][2]\n  [1]: /usr/uploads/a.png\n  [2]: /usr/uploads/b.png',
+    );
+    expect(html).toContain('src="/usr/uploads/a.png"');
+    expect(html).toContain('src="/usr/uploads/b.png"');
+  });
+
+  it('leaves definitions inside fenced code blocks untouched', () => {
+    const html = renderMarkdown('```\n[1]: /usr/uploads/a.png\n```\n\n![pic][1]');
+    expect(html).toContain('[1]: /usr/uploads/a.png');
+    expect(html).toContain('![pic][1]');
+  });
+
+  it('keeps content that already separates definitions with a blank line unchanged', () => {
+    expect(normalizeReferenceDefinitions('Body\n\n  [1]: /a.png'))
+      .toBe('Body\n\n  [1]: /a.png');
+  });
+
+  it('resolves definitions written directly below text in markdown comments', () => {
+    const html = renderCommentText('see ![pic][1]\n  [1]: /usr/uploads/a.png', { markdown: true });
+    expect(html).toContain('src="/usr/uploads/a.png"');
   });
 });
 

@@ -125,14 +125,24 @@ export function isAllowedType(mimeType: string, attachmentTypes: string): boolea
 }
 
 /**
- * Generate upload path based on date
- * e.g., /usr/uploads/2024/03/filename.jpg
+ * Generate upload path based on date, using Typecho's filename scheme:
+ * `usr/uploads/YYYY/MM/<unsigned crc32>.<ext>`.
+ *
+ * The original filename is kept only as the attachment's display name;
+ * storing it in the path would keep changing the public URL and leak
+ * user-supplied characters into storage keys.
+ *
+ * An explicit seed makes the generated name deterministic for tests.
  */
-export function generateUploadPath(filename: string, date = new Date()): string {
+export function generateUploadPath(
+  filename: string,
+  date = new Date(),
+  seed = newUploadSeed(),
+): string {
+  const { ext } = validateUploadName(filename);
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
-  const safeName = sanitizeFilename(filename);
-  return `usr/uploads/${year}/${month}/${safeName}`;
+  return `usr/uploads/${year}/${month}/${crc32(seed)}.${ext.slice(1)}`;
 }
 
 /**
@@ -142,7 +152,7 @@ export function generateUploadPath(filename: string, date = new Date()): string 
  * - MIME type is derived from the file extension, NOT from the client-supplied `file.type`.
  * - SVG files are served with `Content-Disposition: attachment` to mitigate stored XSS,
  *   because SVGs can contain embedded `<script>` tags and event handlers.
- * - Dangerous executable extensions are rejected by `sanitizeFilename`.
+ * - Dangerous executable extensions are rejected by `validateUploadName`.
  */
 export async function uploadToR2(
   bucket: R2Bucket,
@@ -150,12 +160,8 @@ export async function uploadToR2(
   siteUrl: string,
   attachmentTypes: string
 ): Promise<UploadResult> {
-  // Derive MIME type from extension — never trust client-provided file.type
-  const mimeType = getMimeTypeFromExtension(file.name);
-  if (!mimeType) {
-    throw new UploadError('extension_unknown', { name: file.name }, `无法识别的文件扩展名: ${file.name}`);
-  }
-
+  const { displayName, ext } = validateUploadName(file.name);
+  const mimeType = EXTENSION_TO_MIME[ext]!;
   if (!isAllowedType(mimeType, attachmentTypes)) {
     throw new UploadError('type_not_allowed', { type: mimeType }, `不允许上传此类型的文件: ${mimeType}`);
   }
@@ -164,7 +170,13 @@ export async function uploadToR2(
     throw new UploadError('file_too_large', {}, '文件大小超出限制 (最大 10MB)');
   }
 
-  const path = generateUploadPath(file.name);
+  // The generated name is random, but never overwrite an existing object if
+  // two uploads happen to collide.
+  let path = generateUploadPath(displayName);
+  for (let attempt = 0; await bucket.head(path); attempt++) {
+    if (attempt >= 4) throw new Error('Unable to allocate a unique upload path');
+    path = generateUploadPath(displayName);
+  }
 
   // SVG XSS protection: force download instead of inline rendering.
   // SVGs can contain <script>, onload handlers, and other XSS vectors;
@@ -179,7 +191,7 @@ export async function uploadToR2(
   });
 
   return {
-    name: file.name,
+    name: displayName,
     path,
     size: file.size,
     type: mimeType,
@@ -202,30 +214,37 @@ export async function getFromR2(bucket: R2Bucket, path: string): Promise<R2Objec
 }
 
 /**
- * Sanitize a user-supplied filename for safe storage.
+ * Sanitize a user-supplied filename for display.
  *
- * - Strips path separators and special characters.
- * - Validates that the base name is non-empty (rejects extension-only names like ".jpg").
- * - Rejects dangerous executable extensions (e.g. .html, .js, .php, .exe).
- * - Validates the extension against the known `EXTENSION_TO_MIME` allowlist.
- * - Appends a timestamp to avoid naming collisions.
- *
- * @throws {Error} If the filename is empty, extension-only, has a dangerous extension,
- *                 or has an unrecognized extension.
+ * Mirrors Typecho's `Widget\Upload::getSafeName()`: quotes and angle brackets
+ * are removed, Windows separators are normalized, and only the basename is
+ * kept. The result is stored as the attachment title; it never becomes part
+ * of the storage key.
  */
-function sanitizeFilename(name: string): string {
-  const ext = getExtension(name);
-  const dotIdx = name.lastIndexOf('.');
-  const base = dotIdx >= 0 ? name.substring(0, dotIdx) : name;
+export function sanitizeUploadName(name: string): string {
+  const cleaned = name.replace(/["<>]/g, '').replace(/\\/g, '/');
+  return cleaned.split('/').pop() ?? '';
+}
 
-  // Reject empty or whitespace-only filenames
-  if (!name || !name.trim()) {
+/**
+ * Validate the original filename and split it into its display name and
+ * lowercased extension.
+ *
+ * @throws {UploadError} When the name is empty, extension-only, has a
+ *         dangerous executable extension, or has an unrecognized extension.
+ */
+function validateUploadName(name: string): { displayName: string; ext: string } {
+  const displayName = sanitizeUploadName(name);
+  const ext = getExtension(displayName);
+  const dotIdx = displayName.lastIndexOf('.');
+  const base = dotIdx >= 0 ? displayName.substring(0, dotIdx) : displayName;
+
+  if (!name || !name.trim() || !displayName.trim()) {
     throw new UploadError('filename_required', {}, '文件名不能为空');
   }
 
   // Reject extension-only filenames (e.g. ".jpg" with no base name)
-  const safe = base.replace(/[^a-zA-Z0-9_\-\u4e00-\u9fff]/g, '_').substring(0, 100);
-  if (!safe || safe === '_') {
+  if (!base.trim() || base === '_') {
     throw new UploadError('filename_invalid', {}, '文件名无效 (不能仅为扩展名)');
   }
 
@@ -239,7 +258,27 @@ function sanitizeFilename(name: string): string {
     throw new UploadError('extension_unknown', { name: ext || '(none)' }, `无法识别的文件扩展名: ${ext || '(无)'}`);
   }
 
-  // Add timestamp to avoid conflicts
-  const ts = Date.now().toString(36);
-  return `${safe}_${ts}${ext}`;
+  return { displayName, ext };
+}
+
+// CRC-32 (IEEE 802.3), matching PHP's crc32() used by Typecho for file names.
+const CRC32_TABLE = new Uint32Array(256);
+for (let index = 0; index < 256; index++) {
+  let value = index;
+  for (let bit = 0; bit < 8; bit++) {
+    value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+  }
+  CRC32_TABLE[index] = value >>> 0;
+}
+
+function crc32(input: string): number {
+  let crc = 0xffffffff;
+  for (const byte of new TextEncoder().encode(input)) {
+    crc = CRC32_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function newUploadSeed(): string {
+  return `${Date.now()}-${Math.random()}-${crypto.randomUUID()}`;
 }

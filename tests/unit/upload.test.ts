@@ -4,11 +4,13 @@
  * Tests MIME type validation from extension (not client-provided type),
  * dangerous extension rejection, filename sanitization, and upload path generation.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   getMimeTypeFromExtension,
   isAllowedType,
   generateUploadPath,
+  sanitizeUploadName,
+  uploadToR2,
 } from '@/lib/upload';
 
 // ---------------------------------------------------------------------------
@@ -115,31 +117,50 @@ describe('isAllowedType()', () => {
 });
 
 // ---------------------------------------------------------------------------
-// generateUploadPath — sanitizeFilename is tested indirectly
+// sanitizeUploadName
+// ---------------------------------------------------------------------------
+describe('sanitizeUploadName()', () => {
+  it('strips quotes and angle brackets', () => {
+    expect(sanitizeUploadName('a"b<c>.jpg')).toBe('abc.jpg');
+  });
+
+  it('normalizes Windows separators and keeps only the basename', () => {
+    expect(sanitizeUploadName('C:\\Photos\\trip.jpg')).toBe('trip.jpg');
+    expect(sanitizeUploadName('../../etc/passwd.png')).toBe('passwd.png');
+  });
+
+  it('preserves Unicode display names', () => {
+    expect(sanitizeUploadName('你好 世界.png')).toBe('你好 世界.png');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// generateUploadPath — Typecho-compatible numeric storage names
 // ---------------------------------------------------------------------------
 describe('generateUploadPath()', () => {
-  it('generates path in year/month format', () => {
-    const date = new Date('2026-03-15');
-    const path = generateUploadPath('photo.jpg', date);
-    expect(path).toMatch(/^usr\/uploads\/2026\/03\//);
-    expect(path).toContain('.jpg');
+  const date = new Date('2026-03-15');
+
+  it('generates path in year/month format with a numeric name', () => {
+    const path = generateUploadPath('photo.jpg', date, 'seed');
+    expect(path).toMatch(/^usr\/uploads\/2026\/03\/\d+\.jpg$/);
   });
 
-  it('sanitizes filename (removes special chars)', () => {
-    const date = new Date('2026-01-01');
-    const path = generateUploadPath('hello world!@#$%.jpg', date);
-    expect(path).toMatch(/^usr\/uploads\/2026\/01\//);
-    expect(path).toContain('.jpg');
-    // Should not contain special characters (only alnum, _, -, Chinese)
-    const filename = path.split('/').pop()!;
-    expect(filename).toMatch(/^[a-zA-Z0-9_\-\u4e00-\u9fff]+_[a-z0-9]+\.jpg$/);
+  it('is deterministic for the same seed and varies across seeds', () => {
+    const first = generateUploadPath('photo.jpg', date, 'seed-a');
+    const second = generateUploadPath('photo.jpg', date, 'seed-a');
+    const other = generateUploadPath('photo.jpg', date, 'seed-b');
+    expect(first).toBe(second);
+    expect(first).not.toBe(other);
   });
 
-  it('preserves Chinese characters in filename', () => {
-    const date = new Date('2026-01-01');
-    const path = generateUploadPath('你好世界.png', date);
-    expect(path).toContain('你好世界');
-    expect(path).toContain('.png');
+  it('does not embed the original filename in the storage path', () => {
+    const path = generateUploadPath('hello world!@#$%.jpg', date, 'seed');
+    expect(path.split('/').pop()).toMatch(/^\d+\.jpg$/);
+  });
+
+  it('keeps Chinese display names out of the path', () => {
+    const path = generateUploadPath('你好世界.png', date, 'seed');
+    expect(path).toMatch(/\/\d+\.png$/);
   });
 
   it('throws for empty filename', () => {
@@ -170,18 +191,35 @@ describe('generateUploadPath()', () => {
     expect(() => generateUploadPath('file.xyz')).toThrow('扩展名');
   });
 
-  it('adds timestamp suffix to avoid collisions', () => {
-    const date = new Date('2026-01-01');
-    const path1 = generateUploadPath('test.jpg', date);
-    const path2 = generateUploadPath('test.jpg', date);
-    // Filenames should contain a timestamp and may differ
-    expect(path1).toMatch(/test_[a-z0-9]+\.jpg$/);
-    expect(path2).toMatch(/test_[a-z0-9]+\.jpg$/);
-  });
-
   it('lowercases the extension', () => {
-    const date = new Date('2026-01-01');
-    const path = generateUploadPath('PHOTO.JPG', date);
+    const path = generateUploadPath('PHOTO.JPG', date, 'seed');
     expect(path).toMatch(/\.jpg$/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// uploadToR2 — generated-name collision handling and display name
+// ---------------------------------------------------------------------------
+describe('uploadToR2()', () => {
+  it('retries when the generated key already exists and keeps the display name', async () => {
+    const head = vi.fn()
+      .mockResolvedValueOnce({ key: 'taken' })
+      .mockResolvedValueOnce(null);
+    const put = vi.fn(async () => undefined);
+    const file = new File([new Uint8Array([1, 2, 3])], '../photo"<1>.jpg', { type: 'image/jpeg' });
+
+    const result = await uploadToR2(
+      { head, put } as unknown as R2Bucket,
+      file,
+      'https://example.com/',
+      '@image@',
+    );
+
+    expect(head).toHaveBeenCalledTimes(2);
+    expect(put).toHaveBeenCalledTimes(1);
+    expect(result.name).toBe('photo1.jpg');
+    expect(result.path).toMatch(/^usr\/uploads\/\d{4}\/\d{2}\/\d+\.jpg$/);
+    expect(result.url).toBe(`https://example.com/${result.path}`);
+    expect((put.mock.calls[0] as unknown as [string])[0]).toBe(result.path);
   });
 });

@@ -68,7 +68,7 @@ export const POST: APIRoute = async ({ request }) => {
     // Create attachment content record
     const now = Math.floor(Date.now() / 1000);
     const inserted = await db.insert(schema.contents).values({
-      title: file.name,
+      title: result.name,
       slug: `attachment-${crypto.randomUUID()}`,
       created: now,
       modified: now,
@@ -101,7 +101,7 @@ export const POST: APIRoute = async ({ request }) => {
       result.url,
       {
         cid,
-        title: file.name,
+        title: result.name,
         url: result.url,
         bytes: formatBytes(result.size),
         isImage: isImageType(result.type),

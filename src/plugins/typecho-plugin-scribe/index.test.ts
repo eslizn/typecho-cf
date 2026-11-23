@@ -316,6 +316,17 @@ describe('typecho-plugin-scribe', () => {
     expect(generate.mock.calls[0][0].temperature).toBe(0);
   });
 
+  it('defaults max_tokens to 4096 when the setting is absent', async () => {
+    const action = collectHooks().get('plugin:typecho-plugin-scribe:action')![0];
+    const generate = vi.fn(async (_request: any) => chatChunks(['正文']));
+    const result = await action({ handled: false }, {
+      action: 'generate', payload: { title: 'Test' },
+      capabilityRuntime: aiRuntime(generate), options: scribeOptions(),
+    });
+    await result.response.text();
+    expect(generate.mock.calls[0][0].max_tokens).toBe(4096);
+  });
+
   it('does not send another author\'s attachments to AI when a contributor supplies their IDs', async () => {
     const db = await createTestDb();
     try {

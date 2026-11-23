@@ -64,6 +64,85 @@ export interface AiModelCandidate {
   logicalModel: string;
 }
 
+/** Token limits discovered from a provider's non-standard model metadata. */
+export interface AiModelLimits {
+  contextWindow?: number;
+  maxOutputTokens?: number;
+}
+
+export interface AiModelLimitDiscovery extends AiModelLimits {
+  providerName: string;
+  model: string;
+}
+
+/**
+ * Parse a positive token limit from config text or provider metadata.
+ * Empty, fractional, negative, and non-numeric values are rejected.
+ */
+export function parseTokenLimit(value: unknown): number | undefined {
+  if (typeof value === 'number') {
+    return Number.isSafeInteger(value) && value > 0 ? value : undefined;
+  }
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  if (!/^\d+$/.test(trimmed)) return undefined;
+  const parsed = Number(trimmed);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+/**
+ * Fill missing model limits from provider metadata. Admin-provided values
+ * always win; only unset fields are populated.
+ */
+export function applyDiscoveredModelLimits(
+  config: AiConfig,
+  discoveries: readonly AiModelLimitDiscovery[],
+): void {
+  if (discoveries.length === 0) return;
+  const byKey = new Map<string, AiModelLimitDiscovery>();
+  for (const discovery of discoveries) {
+    byKey.set(`${discovery.providerName}\u0000${discovery.model}`, discovery);
+  }
+  for (const provider of config.providers) {
+    for (const model of provider.models) {
+      const discovered = byKey.get(`${provider.name}\u0000${model.model}`);
+      if (!discovered) continue;
+      if (model.contextWindow === undefined && discovered.contextWindow !== undefined) {
+        model.contextWindow = discovered.contextWindow;
+      }
+      if (model.maxOutputTokens === undefined && discovered.maxOutputTokens !== undefined) {
+        model.maxOutputTokens = discovered.maxOutputTokens;
+      }
+    }
+  }
+}
+
+/** Reject invalid raw limit input before normalization can silently drop it. */
+export function validateRawModelLimits(raw: unknown): void {
+  if (!isRecord(raw)) return;
+  const providers = Array.isArray(raw.providers) ? raw.providers : [];
+  for (const provider of providers) {
+    if (!isRecord(provider)) continue;
+    const models = Array.isArray(provider.models) ? provider.models : [];
+    for (const model of models) {
+      if (!isRecord(model)) continue;
+      for (const [field, code] of [
+        ['contextWindow', 'context-window-invalid'],
+        ['maxOutputTokens', 'max-output-tokens-invalid'],
+      ] as const) {
+        const value = model[field];
+        if (value === undefined || value === null || value === '') continue;
+        if (parseTokenLimit(value) === undefined) {
+          throw new AiConfigValidationError(
+            `Model ${field} must be a positive integer token count.`,
+            code,
+          );
+        }
+      }
+    }
+  }
+}
+
 export class AiConfigValidationError extends Error {
   readonly name = 'AiConfigValidationError';
   readonly code: string;
@@ -178,6 +257,12 @@ export function validateAiConfigLocally(config: AiConfig): void {
       if (model.model.length > 256 || (model.alias?.length ?? 0) > 256) {
         throw new AiConfigValidationError(`Model names and aliases in provider ${providerName} must be at most 256 characters.`, 'model-name-too-long', { name: providerName });
       }
+      if (model.contextWindow !== undefined && parseTokenLimit(model.contextWindow) === undefined) {
+        throw new AiConfigValidationError(`Model contextWindow in provider ${providerName} must be a positive integer.`, 'context-window-invalid', { name: providerName });
+      }
+      if (model.maxOutputTokens !== undefined && parseTokenLimit(model.maxOutputTokens) === undefined) {
+        throw new AiConfigValidationError(`Model maxOutputTokens in provider ${providerName} must be a positive integer.`, 'max-output-tokens-invalid', { name: providerName });
+      }
     }
 
     if (provider.baseUrl && !normalizeBaseUrl(provider.baseUrl)) {
@@ -256,7 +341,8 @@ export function listChatModels(config: AiConfig): string[] {
 export function selectAiModel(
   config: AiConfig,
   request: AiChatRequest,
-): { candidate?: AiModelCandidate; reason: 'ok' | 'no-available-model' | 'model-not-found' | 'unsupported-modality' } {
+  fitsContext?: (model: AiModelConfig) => boolean,
+): { candidate?: AiModelCandidate; reason: 'ok' | 'no-available-model' | 'model-not-found' | 'unsupported-modality' | 'context-exceeded' } {
   validateAiConfigLocally(config);
   const allChatCandidates: AiModelCandidate[] = [];
   const requestedCandidates: AiModelCandidate[] = [];
@@ -277,7 +363,9 @@ export function selectAiModel(
   if (pool.length === 0) return { reason: 'no-available-model' };
   const compatible = pool.filter(candidate => supportsRequestModalities(candidate.model, request));
   if (compatible.length === 0) return { reason: 'unsupported-modality' };
-  return { candidate: compatible[randomIndex(compatible.length)], reason: 'ok' };
+  const eligible = fitsContext ? compatible.filter(candidate => fitsContext(candidate.model)) : compatible;
+  if (eligible.length === 0) return { reason: 'context-exceeded' };
+  return { candidate: eligible[randomIndex(eligible.length)], reason: 'ok' };
 }
 
 export function supportsRequestModalities(model: AiModelConfig, request: AiChatRequest): boolean {
@@ -297,51 +385,69 @@ export async function validateAiConfig(
   config: AiConfig,
   fetcher: typeof fetch = fetch,
   limits: AiValidationLimits = AI_VALIDATION_LIMITS,
-): Promise<void> {
+): Promise<AiModelLimitDiscovery[]> {
   validateAiConfigLocally(config);
   const jobs = config.providers.filter(provider => (
     provider.models.some(model => model.enabled && model.model)
   ));
-  if (jobs.length === 0) return;
+  if (jobs.length === 0) return [];
+
+  type ListResult =
+    | { provider: AiProviderConfig; fallback: true }
+    | { provider: AiProviderConfig; discoveries: AiModelLimitDiscovery[] }
+    | { provider: AiProviderConfig; error: unknown };
+  type FallbackResult =
+    | { discovery: AiModelLimitDiscovery | null }
+    | { error: unknown };
 
   const controller = new AbortController();
   const totalTimer = setTimeout(() => controller.abort(), limits.totalBudgetMs);
   const deadline = Date.now() + limits.totalBudgetMs;
   try {
-    const listResults = await runPool(jobs, limits.concurrency, async provider => {
+    const listResults = await runPool(jobs, limits.concurrency, async (provider): Promise<ListResult> => {
       try {
         const response = await fetchProvider(provider, '/models', fetcher, controller.signal, limits);
-        if (response.status === 404 || response.status === 405) return { provider, fallback: true } as const;
+        if (response.status === 404 || response.status === 405) return { provider, fallback: true };
         if (!response.ok) throw upstreamValidationError(provider, response.status);
         const body = await readJsonBounded(response, limits.responseBodyBytes, controller.signal, deadline);
         const ids = extractModelIds(body);
+        const limitsById = extractModelLimits(body);
         const enabledModels = provider.models.filter(model => model.enabled && model.model);
         const missing = enabledModels.find(model => !ids.has(model.model));
         if (missing) {
-        throw new AiConfigValidationError(
-          `Model ${missing.model} is unavailable at provider ${provider.name}.`,
-          'model-unavailable',
-          { model: missing.model, name: provider.name },
-        );
-      }
-        return { provider, fallback: false } as const;
+          throw new AiConfigValidationError(
+            `Model ${missing.model} is unavailable at provider ${provider.name}.`,
+            'model-unavailable',
+            { model: missing.model, name: provider.name },
+          );
+        }
+        const discoveries: AiModelLimitDiscovery[] = [];
+        for (const model of enabledModels) {
+          const discovered = limitsById.get(model.model);
+          if (!discovered) continue;
+          discoveries.push({ providerName: provider.name, model: model.model, ...discovered });
+        }
+        return { provider, discoveries };
       } catch (error) {
-        return { provider, error } as const;
+        return { provider, error };
       }
     });
     const errors: unknown[] = [];
+    const discoveries: AiModelLimitDiscovery[] = [];
     const fallbackModels: Array<{ provider: AiProviderConfig; model: AiModelConfig }> = [];
     for (const result of listResults) {
-      if ('error' in result && result.error) errors.push(result.error);
-      else if (result.fallback) {
+      if ('error' in result) errors.push(result.error);
+      else if ('fallback' in result) {
         for (const model of result.provider.models) {
           if (model.enabled && model.model) fallbackModels.push({ provider: result.provider, model });
         }
+      } else {
+        discoveries.push(...result.discoveries);
       }
     }
 
     if (fallbackModels.length > 0) {
-      const fallbackResults = await runPool(fallbackModels, limits.concurrency, async item => {
+      const fallbackResults = await runPool(fallbackModels, limits.concurrency, async (item): Promise<FallbackResult> => {
         try {
           const response = await fetchProvider(
             item.provider,
@@ -359,12 +465,20 @@ export async function validateAiConfig(
               + (returnedId ? ` (returned ${returnedId}).` : '.'),
             );
           }
-          return null;
+          const discovered = extractSingleModelLimits(body, item.model.model);
+          return {
+            discovery: discovered
+              ? { providerName: item.provider.name, model: item.model.model, ...discovered }
+              : null,
+          };
         } catch (error) {
-          return error;
+          return { error };
         }
       });
-      errors.push(...fallbackResults.filter(Boolean));
+      for (const result of fallbackResults) {
+        if ('error' in result) errors.push(result.error);
+        else if (result.discovery) discoveries.push(result.discovery);
+      }
     }
 
     if (controller.signal.aborted && errors.length === 0) {
@@ -375,6 +489,7 @@ export async function validateAiConfig(
       if (error instanceof AiConfigValidationError) throw error;
       throw new AiConfigValidationError(error instanceof Error ? error.message : 'Upstream model validation failed.', 'validation-failed');
     }
+    return discoveries;
   } finally {
     clearTimeout(totalTimer);
   }
@@ -456,6 +571,71 @@ function extractModelIds(body: unknown): Set<string> {
   }).filter(Boolean));
 }
 
+function firstTokenLimit(...values: unknown[]): number | undefined {
+  for (const value of values) {
+    const parsed = parseTokenLimit(value);
+    if (parsed !== undefined) return parsed;
+  }
+  return undefined;
+}
+
+/**
+ * Read optional limit metadata from one model entry. The OpenAI contract does
+ * not define these fields, so every shape is treated as best-effort.
+ */
+function readModelLimits(source: Record<string, unknown>): AiModelLimits | null {
+  const topProvider = isRecord(source.top_provider) ? source.top_provider : {};
+  const nestedLimits: Record<string, unknown> = isRecord(source.limits)
+    ? source.limits
+    : isRecord(source.metadata) && isRecord(source.metadata.limits)
+      ? source.metadata.limits
+      : {};
+  const contextWindow = firstTokenLimit(
+    source.context_length,
+    source.context_window,
+    source.max_context_length,
+    topProvider.context_length,
+    topProvider.context_window,
+    nestedLimits.context_length,
+    nestedLimits.context_window,
+  );
+  const maxOutputTokens = firstTokenLimit(
+    source.max_completion_tokens,
+    source.max_output_tokens,
+    topProvider.max_completion_tokens,
+    topProvider.max_output_tokens,
+    nestedLimits.max_completion_tokens,
+    nestedLimits.max_output_tokens,
+    source.max_tokens,
+    topProvider.max_tokens,
+    nestedLimits.max_tokens,
+  );
+  if (contextWindow === undefined && maxOutputTokens === undefined) return null;
+  return {
+    ...(contextWindow === undefined ? {} : { contextWindow }),
+    ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
+  };
+}
+
+function extractModelLimits(body: unknown): Map<string, AiModelLimits> {
+  const result = new Map<string, AiModelLimits>();
+  if (!isRecord(body) || !Array.isArray(body.data)) return result;
+  for (const item of body.data) {
+    if (!isRecord(item) || typeof item.id !== 'string' || !item.id) continue;
+    const limits = readModelLimits(item);
+    if (limits) result.set(item.id, limits);
+  }
+  return result;
+}
+
+function extractSingleModelLimits(body: unknown, model: string): AiModelLimits | null {
+  if (!isRecord(body)) return null;
+  const fromList = extractModelLimits(body).get(model);
+  if (fromList) return fromList;
+  if (isRecord(body.data)) return readModelLimits(body.data);
+  return readModelLimits(body);
+}
+
 function upstreamValidationError(provider: AiProviderConfig, status: number, model?: string): AiConfigValidationError {
   const suffix = model ? ` for model ${model}` : '';
   return new AiConfigValidationError(`Provider ${provider.name} returned HTTP ${status}${suffix}.`);
@@ -496,12 +676,16 @@ function normalizeModel(source: Record<string, unknown>): AiModelConfig {
   const modalities = [...new Set(modalityValues.filter((value): value is AiModelModality => (
     typeof value === 'string' && Object.values(AI_MODALITIES).includes(value as AiModelModality)
   )))];
+  const contextWindow = parseTokenLimit(source.contextWindow);
+  const maxOutputTokens = parseTokenLimit(source.maxOutputTokens);
   return {
     model: typeof source.model === 'string' ? source.model.trim() : '',
     alias: typeof source.alias === 'string' ? source.alias.trim() : '',
     enabled: parseBoolean(source.enabled, true),
     capabilities,
     modalities,
+    ...(contextWindow === undefined ? {} : { contextWindow }),
+    ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
   };
 }
 

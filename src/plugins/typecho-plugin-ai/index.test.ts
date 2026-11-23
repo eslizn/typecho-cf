@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createCapabilityRuntimeContext,
   registerCapability,
@@ -97,6 +97,10 @@ async function readStream<T>(stream: ReadableStream<T>): Promise<T[]> {
 }
 
 describe('typecho-plugin-ai', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('exposes the agreed configuration schema with nested provider models', () => {
     expect(AI_CONFIG_FIELDS.providers.type).toBe('repeatable');
     expect(AI_CONFIG_FIELDS.providers.itemFields?.models.type).toBe('repeatable');
@@ -112,6 +116,8 @@ describe('typecho-plugin-ai', () => {
     expect(AI_CONFIG_FIELDS.providers.itemFields?.models.summaryFormat).toBe('parenthesized');
     expect(AI_CONFIG_FIELDS.providers.itemFields?.models.summaryAsTitle).toBe(true);
     expect(AI_CONFIG_FIELDS.providers.itemFields?.models.itemFields?.enabled.type).toBe('select');
+    expect(AI_CONFIG_FIELDS.providers.itemFields?.models.itemFields?.contextWindow.type).toBe('text');
+    expect(AI_CONFIG_FIELDS.providers.itemFields?.models.itemFields?.maxOutputTokens.type).toBe('text');
   });
 
   it('uses a short first-response budget without shortening the stream budget', () => {
@@ -263,6 +269,45 @@ describe('typecho-plugin-ai', () => {
     await expect(validateAiConfig(config(), fetcher)).rejects.toThrow('did not confirm model gpt-upstream');
   });
 
+  it('discovers optional model limits from /models metadata', async () => {
+    const fetcher = vi.fn(async () => upstreamJson({
+      data: [{
+        id: 'gpt-upstream',
+        context_length: 128_000,
+        top_provider: { max_completion_tokens: 16_384 },
+      }],
+    })) as unknown as typeof fetch;
+
+    const discoveries = await validateAiConfig(config(), fetcher);
+
+    expect(discoveries).toEqual([{
+      providerName: 'example',
+      model: 'gpt-upstream',
+      contextWindow: 128_000,
+      maxOutputTokens: 16_384,
+    }]);
+  });
+
+  it('discovers model limits from the single-model fallback endpoint', async () => {
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith('/models')) return new Response(null, { status: 404 });
+      return upstreamJson({
+        id: 'gpt-upstream',
+        context_window: '32768',
+        max_output_tokens: 8_192,
+      });
+    }) as unknown as typeof fetch;
+
+    const discoveries = await validateAiConfig(config(), fetcher);
+
+    expect(discoveries).toEqual([{
+      providerName: 'example',
+      model: 'gpt-upstream',
+      contextWindow: 32_768,
+      maxOutputTokens: 8_192,
+    }]);
+  });
+
   it('bounds a provider response body by the total validation budget', async () => {
     let sent = false;
     const fetcher = vi.fn(async () => ({
@@ -375,6 +420,111 @@ describe('typecho-plugin-ai', () => {
     await expect(clientErrorService.generate({ model: 'chat', messages: [{ role: 'user', content: 'x' }] }))
       .rejects.toMatchObject({ code: 'upstream-client-error' });
     expect(clientErrorFetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('clamps max_tokens to the configured model output limit', async () => {
+    let sentBody: Record<string, unknown> | undefined;
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      sentBody = JSON.parse(String(init?.body));
+      return upstreamJson({
+        id: 'limited-1',
+        choices: [{ message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+      });
+    }) as unknown as typeof fetch;
+    const limited = config();
+    limited.providers[0].models[0].maxOutputTokens = 4_096;
+    const service = createAiChatService(runtime(), limited, { fetcher });
+
+    await service.generate({
+      model: 'chat',
+      messages: [{ role: 'user', content: 'x' }],
+      max_tokens: 32_000,
+      max_completion_tokens: 32_000,
+    });
+
+    expect(sentBody?.max_tokens).toBe(4_096);
+    expect(sentBody?.max_completion_tokens).toBe(4_096);
+  });
+
+  it('clamps max_tokens to the remaining context window', async () => {
+    let sentBody: Record<string, unknown> | undefined;
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      sentBody = JSON.parse(String(init?.body));
+      return upstreamJson({
+        id: 'context-1',
+        choices: [{ message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+      });
+    }) as unknown as typeof fetch;
+    const limited = config();
+    limited.providers[0].models[0].contextWindow = 4_000;
+    const service = createAiChatService(runtime(), limited, { fetcher });
+
+    await service.generate({
+      model: 'chat',
+      messages: [{ role: 'user', content: 'x'.repeat(3_000) }],
+      max_tokens: 32_000,
+    });
+
+    expect(sentBody?.max_tokens).toBeGreaterThan(0);
+    expect(sentBody?.max_tokens).toBeLessThan(4_000);
+  });
+
+  it('selects a model with enough context among providers sharing an alias', async () => {
+    const fetcher = vi.fn(async (_input: RequestInfo | URL) => upstreamJson({
+      id: 'context-2',
+      choices: [{ message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+    }));
+    const settings = config();
+    const first = settings.providers[0];
+    first.models[0].contextWindow = 2_000;
+    settings.providers.push({
+      ...first,
+      name: 'large-model-provider',
+      baseUrl: 'https://large-model.example.com/v1',
+      models: [{ ...first.models[0], contextWindow: 16_000 }],
+    });
+    const service = createAiChatService(runtime(), settings, { fetcher });
+    await service.generate({
+      model: 'chat',
+      messages: [{ role: 'user', content: 'x'.repeat(9_000) }],
+      max_tokens: 1_000,
+    });
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(String(fetcher.mock.calls[0]?.[0])).toContain('large-model.example.com');
+  });
+
+  it('rejects a prompt that cannot fit the configured context window', async () => {
+    const fetcher = vi.fn() as unknown as typeof fetch;
+    const limited = config();
+    limited.providers[0].models[0].contextWindow = 100;
+    const service = createAiChatService(runtime(), limited, { fetcher });
+
+    await expect(service.generate({
+      model: 'chat',
+      messages: [{ role: 'user', content: 'x'.repeat(1_000) }],
+      max_tokens: 1_024,
+    })).rejects.toMatchObject({ code: 'invalid-request' });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('leaves max_tokens unchanged when the model has no limits', async () => {
+    let sentBody: Record<string, unknown> | undefined;
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      sentBody = JSON.parse(String(init?.body));
+      return upstreamJson({
+        id: 'unlimited-1',
+        choices: [{ message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+      });
+    }) as unknown as typeof fetch;
+    const service = createAiChatService(runtime(), config(), { fetcher });
+
+    await service.generate({
+      model: 'chat',
+      messages: [{ role: 'user', content: 'x' }],
+      max_tokens: 32_000,
+    });
+
+    expect(sentBody?.max_tokens).toBe(32_000);
   });
 
   it('aborts a hanging upstream fetch within the single request deadline', async () => {
@@ -832,6 +982,112 @@ describe('typecho-plugin-ai', () => {
     });
     expect(invalidToken.success).toBe(false);
     expect(invalidToken.error).toContain('16-128');
+  });
+
+  it('fills missing model limits from provider metadata during save', async () => {
+    const { context, hooks } = initContext();
+    init(context);
+    const fetcher = vi.fn(async () => upstreamJson({
+      data: [{
+        id: 'gpt-upstream',
+        context_length: '128000',
+        max_completion_tokens: 16_384,
+      }],
+    })) as unknown as typeof fetch;
+    vi.stubGlobal('fetch', fetcher);
+
+    const saveHook = hooks.get('plugin:config:beforeSave')!;
+    const result = await saveHook({ success: true }, {
+      pluginId: 'typecho-plugin-ai',
+      settings: {
+        providers: [{
+          name: 'example',
+          baseUrl: BASE_URL,
+          apiKey: 'key',
+          models: [{
+            model: 'gpt-upstream',
+            alias: 'chat',
+            enabled: 'true',
+            capabilities: ['ai.chat.generate'],
+            modalities: ['text'],
+          }],
+        }],
+        http: { enabled: 'false', basePath: '/ai', tokens: [] },
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.settings.providers[0].models[0]).toMatchObject({
+      contextWindow: 128_000,
+      maxOutputTokens: 16_384,
+    });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps admin-provided model limits during save', async () => {
+    const { context, hooks } = initContext();
+    init(context);
+    const fetcher = vi.fn(async () => upstreamJson({
+      data: [{
+        id: 'gpt-upstream',
+        context_length: 128_000,
+        max_completion_tokens: 16_384,
+      }],
+    })) as unknown as typeof fetch;
+    vi.stubGlobal('fetch', fetcher);
+
+    const saveHook = hooks.get('plugin:config:beforeSave')!;
+    const result = await saveHook({ success: true }, {
+      pluginId: 'typecho-plugin-ai',
+      settings: {
+        providers: [{
+          name: 'example',
+          baseUrl: BASE_URL,
+          apiKey: 'key',
+          models: [{
+            model: 'gpt-upstream',
+            alias: 'chat',
+            enabled: 'true',
+            capabilities: ['ai.chat.generate'],
+            modalities: ['text'],
+            contextWindow: '64000',
+            maxOutputTokens: '4096',
+          }],
+        }],
+        http: { enabled: 'false', basePath: '/ai', tokens: [] },
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.settings.providers[0].models[0]).toMatchObject({
+      contextWindow: 64_000,
+      maxOutputTokens: 4_096,
+    });
+  });
+
+  it('rejects invalid raw model limit input before saving', async () => {
+    const { context, hooks } = initContext();
+    init(context);
+
+    const saveHook = hooks.get('plugin:config:beforeSave')!;
+    const result = await saveHook({ success: true }, {
+      pluginId: 'typecho-plugin-ai',
+      settings: {
+        providers: [{
+          name: 'example',
+          baseUrl: BASE_URL,
+          apiKey: 'key',
+          models: [{
+            model: 'gpt-upstream',
+            contextWindow: '1.5',
+          }],
+        }],
+        http: { enabled: 'false', basePath: '/ai', tokens: [] },
+      },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('positive integer');
   });
 
   it('translates validation failures through the registered locale catalog', async () => {

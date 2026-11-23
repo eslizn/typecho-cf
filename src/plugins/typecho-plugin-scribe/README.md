@@ -27,7 +27,7 @@ Scribe 通过 `ai.chat.generate` capability 调用模型，并在配置页用下
 |------|------|--------|------|
 | `model` | select | — | 模型下拉，选项由 AI 插件发布（`optionsSource: ai.models.list`） |
 | `temperature` | text | `0.7` | 生成创造性控制 |
-| `maxTokens` | text | `32000` | 单次最大输出 Token 数 |
+| `maxTokens` | text | `4096` | 单次最大输出 Token 数；AI 插件会根据模型已知的 `maxOutputTokens` / 上下文窗口进一步向下收敛，未配置模型上限时原样发送 |
 | `stylePostCount` | text | `5` | 风格参考文章数，0 关闭 |
 | `outputLanguage` | select | `auto` | 输出语言：自动/简体中文/繁体中文/English/日本語/한국어 |
 | `targetAudience` | text | — | 目标读者描述，留空由模型推断 |

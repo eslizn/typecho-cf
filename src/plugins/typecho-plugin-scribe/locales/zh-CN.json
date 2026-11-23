@@ -5,6 +5,7 @@
   "plugin.typecho-plugin-scribe.config.model.description": "下拉选项来自 AI 插件（typecho-plugin-ai）中已设置 Alias 的对话模型，跨 Provider 合并去重；Provider、模型与 API Key 都在 AI 插件里维护。",
   "plugin.typecho-plugin-scribe.config.temperature.label": "Temperature",
   "plugin.typecho-plugin-scribe.config.maxTokens.label": "最大输出 Token",
+  "plugin.typecho-plugin-scribe.config.maxTokens.description": "作为输出上限；AI 插件会按模型已知的输出上限与上下文窗口进一步下调。",
   "plugin.typecho-plugin-scribe.config.stylePostCount.label": "风格参考文章数",
   "plugin.typecho-plugin-scribe.config.stylePostCount.description": "读取最近 N 篇已发布文章作为风格样本，填写 0 可关闭。",
   "plugin.typecho-plugin-scribe.config.outputLanguage.label": "输出语言",

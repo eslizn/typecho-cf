@@ -17,6 +17,8 @@ Typecho-CF 的 AI 能力插件：把多个 OpenAI 兼容 Provider/模型收敛�
 
 - `providers[].baseUrl` 必须是公网 HTTPS（拒绝 IP 字面量、私网域名，以及带凭据、查询串或片段的 URL）
 - `providers[].models[].alias` 决定公开名：设置别名后**上游模型名不再被接受**；未设置别名的模型不会出现在 `ai.models.list`，也不会出现在 `GET {basePath}/v1/models`
+- `providers[].models[].contextWindow` / `maxOutputTokens` 是可选的正整数 Token 上限。留空时，保存配置会尝试从 `/models` 的非标准字段（`context_length`、`context_window`、`max_completion_tokens`、`max_output_tokens`、`top_provider.max_completion_tokens` 等）自动填充；官方 OpenAI 不提供这些字段。已保存的值（包括上次自动填充的值）不会被覆盖，清空字段后再次保存可重新发现
+- 生成时按 `maxOutputTokens` 与 `contextWindow - 估算 prompt tokens` 向下收敛请求中的 `max_tokens` / `max_completion_tokens`（仅当调用方提供该字段时），不会向上提高；上下文估算使用保守的 UTF-8 bytes/3、10% 比例余量与固定图片/音频估值，属于安全余量而非精确 token 计数。留空且 Provider 未提供元数据时不做收敛
 - 保存配置时会对启用模型做 `/models` 校验（并行、有超时与总预算上限，失败会阻止保存）
 - `http.*` 控制下面这个可选的 HTTP 兼容端点
 

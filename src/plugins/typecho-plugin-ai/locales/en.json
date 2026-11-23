@@ -15,6 +15,10 @@
   "plugin.typecho-plugin-ai.config.providers.models.enabled.label": "Enabled",
   "plugin.typecho-plugin-ai.config.providers.models.enabled.option.true": "Enabled",
   "plugin.typecho-plugin-ai.config.providers.models.enabled.option.false": "Disabled",
+  "plugin.typecho-plugin-ai.config.providers.models.contextWindow.label": "Context window",
+  "plugin.typecho-plugin-ai.config.providers.models.contextWindow.description": "Optional total context window in tokens. When empty, saving tries to read it from the provider's /models metadata and uses it to cap max_tokens.",
+  "plugin.typecho-plugin-ai.config.providers.models.maxOutputTokens.label": "Max output tokens",
+  "plugin.typecho-plugin-ai.config.providers.models.maxOutputTokens.description": "Optional maximum output tokens. When empty, saving tries to read it from the provider's /models metadata and uses it to lower max_tokens.",
   "plugin.typecho-plugin-ai.config.providers.models.capabilities.label": "Capabilities",
   "plugin.typecho-plugin-ai.config.providers.models.capabilities.option.ai.chat.generate": "Chat generation",
   "plugin.typecho-plugin-ai.config.providers.models.capabilities.option.ai.image.generate": "Image generation",
@@ -47,6 +51,8 @@
   "plugin.typecho-plugin-ai.error.http-token-invalid": "Access tokens must be 16-128 characters using letters, digits, underscore, or hyphen.",
   "plugin.typecho-plugin-ai.error.http-token-limit": "At most {max} access tokens are allowed.",
   "plugin.typecho-plugin-ai.error.model-unavailable": "Model {model} is unavailable at provider {name}.",
+  "plugin.typecho-plugin-ai.error.context-window-invalid": "Context window must be a positive integer token count.",
+  "plugin.typecho-plugin-ai.error.max-output-tokens-invalid": "Maximum output tokens must be a positive integer token count.",
   "plugin.typecho-plugin-ai.error.validation-timeout": "Upstream model validation timed out.",
   "plugin.typecho-plugin-ai.error.validation-failed": "Upstream model validation failed."
 }

@@ -15,6 +15,10 @@
   "plugin.typecho-plugin-ai.config.providers.models.enabled.label": "启用",
   "plugin.typecho-plugin-ai.config.providers.models.enabled.option.true": "启用",
   "plugin.typecho-plugin-ai.config.providers.models.enabled.option.false": "禁用",
+  "plugin.typecho-plugin-ai.config.providers.models.contextWindow.label": "上下文窗口",
+  "plugin.typecho-plugin-ai.config.providers.models.contextWindow.description": "可选的上下文窗口 Token 数；留空时保存会尝试从 Provider 的 /models 元数据读取，用于限制请求的 max_tokens。",
+  "plugin.typecho-plugin-ai.config.providers.models.maxOutputTokens.label": "最大输出 Token",
+  "plugin.typecho-plugin-ai.config.providers.models.maxOutputTokens.description": "可选的模型最大输出 Token 数；留空时保存会尝试从 Provider 的 /models 元数据读取，生成时用于向下收敛 max_tokens。",
   "plugin.typecho-plugin-ai.config.providers.models.capabilities.label": "能力",
   "plugin.typecho-plugin-ai.config.providers.models.capabilities.option.ai.chat.generate": "对话生成",
   "plugin.typecho-plugin-ai.config.providers.models.capabilities.option.ai.image.generate": "图片生成",
@@ -47,6 +51,8 @@
   "plugin.typecho-plugin-ai.error.http-token-invalid": "访问 Token 必须是 16-128 位的字母、数字、下划线或连字符。",
   "plugin.typecho-plugin-ai.error.http-token-limit": "最多允许 {max} 个访问 Token。",
   "plugin.typecho-plugin-ai.error.model-unavailable": "模型 {model} 在 Provider {name} 上不可用。",
+  "plugin.typecho-plugin-ai.error.context-window-invalid": "上下文窗口必须是正整数（tokens）。",
+  "plugin.typecho-plugin-ai.error.max-output-tokens-invalid": "最大输出 Token 必须是正整数。",
   "plugin.typecho-plugin-ai.error.validation-timeout": "上游模型校验超时。",
   "plugin.typecho-plugin-ai.error.validation-failed": "上游模型校验失败。"
 }

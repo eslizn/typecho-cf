@@ -19,11 +19,13 @@ import {
 } from './http';
 import {
   AiConfigValidationError,
+  applyDiscoveredModelLimits,
   isValidHttpBasePath,
   listChatModelOptions,
   normalizeAiConfig,
   validateAiConfig,
   validateAiConfigLocally,
+  validateRawModelLimits,
 } from './provider';
 import {
   AI_CAPABILITIES,
@@ -47,6 +49,7 @@ export {
 export {
   AI_REQUEST_LIMITS,
   AI_VALIDATION_LIMITS,
+  applyDiscoveredModelLimits,
   buildProviderEndpoint,
   isValidHttpBasePath,
   isReservedHttpBasePath,
@@ -56,12 +59,19 @@ export {
   normalizeAiConfig,
   normalizeBasePath,
   normalizeBaseUrl,
+  parseTokenLimit,
   selectAiModel,
   supportsRequestModalities,
   validateAiConfig,
   validateAiConfigLocally,
+  validateRawModelLimits,
 } from './provider';
-export type { AiRequestLimits, AiValidationLimits } from './provider';
+export type {
+  AiModelLimitDiscovery,
+  AiModelLimits,
+  AiRequestLimits,
+  AiValidationLimits,
+} from './provider';
 export { AI_ERROR_CODES, AiCapabilityError, isAiCapabilityError } from './errors';
 export * from './types';
 
@@ -166,9 +176,12 @@ export default function init({
     ): Promise<AiConfigValidationResult> => {
       if (extra?.pluginId !== pluginId) return result;
       try {
-        const normalized = normalizeAiConfig(extra.settings || {});
+        const submitted = extra.settings || {};
+        validateRawModelLimits(submitted);
+        const normalized = normalizeAiConfig(submitted);
         validateAiConfigLocally(normalized);
-        await validateAiConfig(normalized);
+        const discoveries = await validateAiConfig(normalized);
+        applyDiscoveredModelLimits(normalized, discoveries);
         return { success: true, settings: normalized as unknown as Record<string, unknown> };
       } catch (error) {
         return { success: false, error: configValidationError(error, extra?.i18n) };

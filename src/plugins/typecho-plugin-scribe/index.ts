@@ -97,7 +97,7 @@ type UserContentPart =
 const DEFAULTS: ScribeConfig = {
   model: '',
   temperature: '0.7',
-  maxTokens: '32000',
+  maxTokens: '4096',
   stylePostCount: '5',
   outputLanguage: 'auto',
   targetAudience: '',

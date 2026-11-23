@@ -5,6 +5,7 @@
   "plugin.typecho-plugin-scribe.config.model.description": "Choices are the aliases published by the AI plugin (typecho-plugin-ai), merged and deduped across providers; providers, models, and API keys are maintained there.",
   "plugin.typecho-plugin-scribe.config.temperature.label": "Temperature",
   "plugin.typecho-plugin-scribe.config.maxTokens.label": "Maximum output tokens",
+  "plugin.typecho-plugin-scribe.config.maxTokens.description": "Upper bound for output tokens; the AI plugin may lower it based on the model's known output and context limits.",
   "plugin.typecho-plugin-scribe.config.stylePostCount.label": "Style reference posts",
   "plugin.typecho-plugin-scribe.config.stylePostCount.description": "Read the latest N published posts as style samples. Use 0 to disable.",
   "plugin.typecho-plugin-scribe.config.outputLanguage.label": "Output language",

@@ -46,6 +46,10 @@ export interface AiModelConfig {
   enabled: boolean;
   capabilities: AiCapability[];
   modalities: AiModelModality[];
+  /** Optional total context window in tokens (input + output). */
+  contextWindow?: number;
+  /** Optional maximum output tokens accepted by the upstream model. */
+  maxOutputTokens?: number;
 }
 
 export interface AiProviderConfig {
@@ -351,6 +355,18 @@ export const AI_CONFIG_FIELDS: Record<string, PluginConfigField> = {
             label: 'Enabled',
             default: 'true',
             options: { true: 'Enabled', false: 'Disabled' },
+          },
+          contextWindow: {
+            type: 'text',
+            label: 'Context window',
+            default: '',
+            description: 'Optional total context window in tokens. Leave empty to use provider metadata when available.',
+          },
+          maxOutputTokens: {
+            type: 'text',
+            label: 'Max output tokens',
+            default: '',
+            description: 'Optional maximum output tokens. Leave empty to use provider metadata when available.',
           },
           capabilities: {
             type: 'checkbox',

@@ -28,6 +28,7 @@ import type {
   AiContentPart,
   AiGenerationOptions,
   AiFunctionCall,
+  AiModelConfig,
   AiNormalizedMessage,
   AiToolCall,
   AiRuntimeContext,
@@ -37,6 +38,18 @@ import type {
 const MAX_UPSTREAM_RETRIES = 3;
 const DEFAULT_RETRY_BACKOFF_MS = [100, 200, 400] as const;
 const MAX_RETRY_BACKOFF_MS = 1_000;
+
+/**
+ * Context budgeting is intentionally conservative: UTF-8 bytes / 3 over-
+ * estimates English, and fixed media estimates leave room for model-specific
+ * image/audio tokenization. Limits only ever clamp a caller's max_tokens.
+ */
+const CONTEXT_SAFETY_MARGIN_TOKENS = 512;
+const MESSAGE_OVERHEAD_TOKENS = 4;
+const LOW_DETAIL_IMAGE_TOKENS = 85;
+const IMAGE_INPUT_TOKENS = 1_024;
+const AUDIO_INPUT_TOKENS = 1_024;
+const TOKEN_ESTIMATOR_ENCODER = new TextEncoder();
 
 export interface AiChatServiceOptions {
   fetcher?: typeof fetch;
@@ -62,7 +75,23 @@ export function createAiChatService(
       try {
         validateChatRequest(request, limits);
         reporter.reportPhase('requesting');
-        const selection = selectAiModel(config, request);
+        let estimatedInput: number | undefined;
+        const hasOutputLimit = request.max_tokens !== undefined || request.max_completion_tokens !== undefined;
+        const outputLimit = (model: AiModelConfig) => {
+          if (model.contextWindow !== undefined) estimatedInput ??= estimateRequestTokens(request);
+          return modelOutputTokenLimit(model, estimatedInput);
+        };
+        const selection = selectAiModel(config, request, hasOutputLimit
+          ? model => (outputLimit(model) ?? Infinity) >= 1
+          : undefined);
+        if (selection.reason === 'context-exceeded') {
+          throw new AiCapabilityError(
+            AI_ERROR_CODES.invalidRequest,
+            'The prompt exceeds the available model context windows.',
+            400,
+            false,
+          );
+        }
         if (!selection.candidate) {
           throw new AiCapabilityError(
             selection.reason === 'model-not-found'
@@ -79,12 +108,13 @@ export function createAiChatService(
         }
 
         const candidate = selection.candidate;
+        const boundedRequest = hasOutputLimit ? clampOutputTokenLimits(request, outputLimit(candidate.model)) : request;
         const preparationDeadline = Date.now() + initialTimeoutMs;
-        const upstreamMessages = await convertMessages(request.messages, limits.maxMediaBytes, runtime.signal, preparationDeadline);
-        const upstreamRequest = withDefaultStreamUsage(request);
+        const upstreamMessages = await convertMessages(boundedRequest.messages, limits.maxMediaBytes, runtime.signal, preparationDeadline);
+        const upstreamRequest = withDefaultStreamUsage(boundedRequest);
         const encodedBody = encodeRequestBody(upstreamRequest, candidate, upstreamMessages, limits.requestBodyBytes);
 
-        if (request.stream === true) {
+        if (boundedRequest.stream === true) {
           return createRetryingChatStream(
             async retryCount => {
               if (retryCount > 0) reporter.reportPhase('requesting');
@@ -273,6 +303,72 @@ function createRetryingChatStream(
       void activeReader?.cancel().catch(() => {});
     },
   });
+}
+
+function estimateTextTokens(text: string): number {
+  return text ? Math.ceil(TOKEN_ESTIMATOR_ENCODER.encode(text).byteLength / 3) : 0;
+}
+
+function estimateContentTokens(content: AiChatMessage['content']): number {
+  if (typeof content === 'string') return estimateTextTokens(content);
+  if (!Array.isArray(content)) return 0;
+  let total = 0;
+  for (const part of content) {
+    if (part.type === 'text') {
+      total += estimateTextTokens(part.text);
+    } else if (part.type === 'image_url') {
+      total += part.image_url.detail === 'low' ? LOW_DETAIL_IMAGE_TOKENS : IMAGE_INPUT_TOKENS;
+    } else if (part.type === 'input_audio') {
+      total += AUDIO_INPUT_TOKENS;
+    }
+  }
+  return total;
+}
+
+function estimateMessageTokens(message: AiChatMessage): number {
+  let total = MESSAGE_OVERHEAD_TOKENS + estimateContentTokens(message.content);
+  if (message.name) total += estimateTextTokens(message.name);
+  if (message.tool_call_id) total += estimateTextTokens(message.tool_call_id);
+  for (const call of message.tool_calls ?? []) {
+    total += MESSAGE_OVERHEAD_TOKENS
+      + estimateTextTokens(call.function.name)
+      + estimateTextTokens(call.function.arguments);
+  }
+  if (message.function_call) {
+    total += MESSAGE_OVERHEAD_TOKENS
+      + estimateTextTokens(message.function_call.name)
+      + estimateTextTokens(message.function_call.arguments);
+  }
+  return total;
+}
+
+function estimateRequestTokens(request: AiChatRequest): number {
+  let total = request.messages.reduce((sum, message) => sum + estimateMessageTokens(message), 0);
+  if (request.tools !== undefined) total += estimateTextTokens(JSON.stringify(request.tools));
+  if (request.functions !== undefined) total += estimateTextTokens(JSON.stringify(request.functions));
+  return total;
+}
+
+/** Remaining output budget allowed by the selected model, if it is known. */
+function modelOutputTokenLimit(model: AiModelConfig, estimatedInput: number | undefined): number | undefined {
+  const limits: number[] = [];
+  if (model.maxOutputTokens !== undefined) limits.push(model.maxOutputTokens);
+  if (model.contextWindow !== undefined && estimatedInput !== undefined) {
+    const margin = Math.max(CONTEXT_SAFETY_MARGIN_TOKENS, Math.ceil(estimatedInput / 10));
+    limits.push(model.contextWindow - estimatedInput - margin);
+  }
+  return limits.length > 0 ? Math.min(...limits) : undefined;
+}
+
+function clampOutputTokenLimits(request: AiChatRequest, limit: number | undefined): AiChatRequest {
+  if (limit === undefined) return request;
+  return {
+    ...request,
+    ...(request.max_tokens === undefined ? {} : { max_tokens: Math.min(request.max_tokens, limit) }),
+    ...(request.max_completion_tokens === undefined ? {} : {
+      max_completion_tokens: Math.min(request.max_completion_tokens, limit),
+    }),
+  };
 }
 
 export function validateChatRequest(request: AiChatRequest, limits: AiRequestLimits = AI_REQUEST_LIMITS): void {

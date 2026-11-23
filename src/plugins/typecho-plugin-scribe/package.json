@@ -37,7 +37,8 @@
         "maxTokens": {
           "type": "text",
           "label": "最大输出 Token",
-          "default": "32000"
+          "default": "4096",
+          "description": "作为输出上限；AI 插件会按模型已知的输出上限与上下文窗口进一步下调。"
         },
         "stylePostCount": {
           "type": "text",

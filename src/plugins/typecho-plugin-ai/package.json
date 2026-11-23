@@ -84,6 +84,18 @@
                   "default": "true",
                   "options": { "true": "Enabled", "false": "Disabled" }
                 },
+                "contextWindow": {
+                  "type": "text",
+                  "label": "Context window",
+                  "default": "",
+                  "description": "Optional total context window in tokens. Leave empty to use provider metadata when available."
+                },
+                "maxOutputTokens": {
+                  "type": "text",
+                  "label": "Max output tokens",
+                  "default": "",
+                  "description": "Optional maximum output tokens. Leave empty to use provider metadata when available."
+                },
                 "capabilities": {
                   "type": "checkbox",
                   "label": "Capabilities",

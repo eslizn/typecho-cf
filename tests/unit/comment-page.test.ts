@@ -174,23 +174,70 @@ describe('loadCommentPage', () => {
 
   it('bounds a long thread preview and pages through all approved replies in order', async () => {
     const root = await addComment(1);
-    for (let i = 2; i <= 56; i++) await addComment(i, root.coid);
-    const branch = await addComment(57, 56);
+    for (let i = 2; i <= 17; i++) await addComment(i, root.coid);
+    const branch = await addComment(18, 17);
     await db.insert(schema.comments).values({ cid: 1, parent: root.coid, status: 'waiting' });
 
-    const settings = options({ commentsPageSize: 1 });
-    const preview = await loadCommentPage(db as any, 1, settings, 'https://example.com/post?commentPage=1', 57);
-    expect(preview.rows).toHaveLength(21);
-    const first = await loadCommentPage(db as any, 1, settings, preview.replyLinks![root.coid], 57);
-    const second = await loadCommentPage(db as any, 1, settings, first.pagination.replyPage!.nextUrl!, 57);
-    const third = await loadCommentPage(db as any, 1, settings, second.pagination.replyPage!.nextUrl!, 57);
+    const settings = options({ commentsPageSize: 7 });
+    const preview = await loadCommentPage(db as any, 1, settings, 'https://example.com/post?commentPage=1', 18);
+    expect(preview.rows).toHaveLength(8);
+    const first = await loadCommentPage(db as any, 1, settings, preview.replyLinks![root.coid], 18);
+    const second = await loadCommentPage(db as any, 1, settings, first.pagination.replyPage!.nextUrl!, 18);
+    const third = await loadCommentPage(db as any, 1, settings, second.pagination.replyPage!.nextUrl!, 18);
     expect([first, second, third].flatMap(page => page.rows.slice(1).map(row => row.created)))
-      .toEqual(Array.from({ length: 55 }, (_, i) => i + 2));
+      .toEqual(Array.from({ length: 16 }, (_, i) => i + 2));
     expect(third.pagination.replyPage?.nextUrl).toBeNull();
     expect(third.pagination.replyPage?.backUrl).toBe('https://example.com/post?commentPage=1#comments');
-    const nested = await loadCommentPage(db as any, 1, settings, third.replyLinks![56], 57);
-    expect(nested.rows.map(row => row.coid)).toEqual([56, branch.coid]);
+    const nested = await loadCommentPage(db as any, 1, settings, third.replyLinks![17], 18);
+    expect(nested.rows.map(row => row.coid)).toEqual([17, branch.coid]);
     expect(nested.rows.every(row => row.status === 'approved')).toBe(true);
+  });
+
+  it('opens the configured last reply page by default and links back to the first', async () => {
+    const root = await addComment(1);
+    for (let created = 2; created <= 6; created++) await addComment(created, root.coid);
+    const settings = options({ commentsPageDisplay: 'last', commentsPageSize: 3, commentsOrder: 'DESC' });
+    const url = 'https://example.com/post?commentThread=1';
+    const last = await loadCommentPage(db as any, 1, settings, url, 6);
+    expect(last.pagination.replyPage?.currentPage).toBe(2);
+    expect(last.rows.slice(1).map(row => row.created)).toEqual([3, 2]);
+    const prevUrl = last.pagination.replyPage!.prevUrl!;
+    expect(new URL(prevUrl).searchParams.get('replyPage')).toBe('1');
+    const first = await loadCommentPage(db as any, 1, settings, prevUrl, 6);
+    expect(first.rows.slice(1).map(row => row.created)).toEqual([6, 5, 4]);
+    const clamped = await loadCommentPage(db as any, 1, settings, url + '&replyPage=999', 6);
+    expect(clamped.pagination.replyPage?.currentPage).toBe(2);
+  });
+
+  it('ignores old reply page links when pagination is disabled and all comments fit', async () => {
+    const root = await addComment(1);
+    for (let created = 2; created <= 6; created++) await addComment(created, root.coid);
+    const page = await loadCommentPage(db as any, 1, options({ commentsPageBreak: 0, commentsPageSize: 2 }),
+      'https://example.com/post?commentThread=1&replyPage=2', 6);
+    expect(page.rows.map(row => row.created)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(page.pagination.enabled).toBe(false);
+    expect(page.pagination.replyPage).toBeUndefined();
+    expect(page.replyLinks).toBeUndefined();
+  });
+
+  it.each([0, 1])('loads every approved comment with pagination off and threading set to %s', async (commentsThreaded) => {
+    const root = await addComment(1);
+    for (let start = 0; start < 200; start += 50) {
+      await db.insert(schema.comments).values(Array.from({ length: 50 }, (_, index) => ({
+        cid: 1, parent: root.coid, created: start + index + 2,
+      })));
+    }
+    await db.insert(schema.comments).values([
+      { cid: 1, parent: root.coid, created: 202, status: 'waiting' },
+      { cid: 2, created: 203, status: 'approved' },
+    ]);
+    const settings = options({ commentsPageBreak: 0, commentsPageSize: 5, commentsThreaded });
+    const page = await loadCommentPage(db as any, 1, settings,
+      'https://example.com/post?commentPage=2&commentThread=1&replyPage=2', 201);
+    expect(page.rows.map(row => row.created)).toEqual(Array.from({ length: 201 }, (_, index) => index + 1));
+    expect(page.pagination).toMatchObject({ enabled: false, currentPage: 1, totalPages: 1, totalComments: 201 });
+    expect(page.pagination.replyPage).toBeUndefined();
+    expect(page.replyLinks).toBeUndefined();
   });
 
   it('keeps every selected root when the thread preview reaches its global row budget', async () => {

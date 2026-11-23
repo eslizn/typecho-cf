@@ -424,7 +424,7 @@ WebDAV 插件的文件管理器是完整参考实现：`admin:page` 返回包含
 - 副作用类管理操作禁止响应 GET（`delete-spam` 等），统一走 POST + CSRF
 - 公共归档（首页/分类/标签/作者/月归档/搜索）必须过滤 `created > now()` 的将来贴
 - 月归档使用 `/YYYY/MM/`，侧栏和归档查询使用站点 IANA 时区的月份边界，分页沿用 `/page/N/`
-- 线程评论预览每页最多读取 200 行，单个父评论最多预览 20 条直接回复。独立回复页每页展示 25 条直接回复，保留对更深回复的入口
+- 评论分页和线程回复页共用后台的每页条数、默认首末页和排序。关闭分页时一次读取并展示该内容的全部已审核评论。线程预览每次最多读取 200 行，单个父评论的预览条数使用后台每页条数，并保留其余回复的入口
 - 评论 / 注册 / 登录 等公共 POST 必须做 Origin 同源校验（参考 `isSameOriginRequest`）
 - 搜索优先走 FTS5 trigram（`src/lib/fulltext.ts`，仅当每个空白分隔词都 ≥ `FTS_MIN_CHARS` 且 FTS 就绪时启用，MATCH 按词 AND 匹配）；其余情况回退 LIKE 并套 `[2,50]` 字符护栏，长度不在范围内时短路 `1=0`
 - Feed 路由的条数受 `options.feedItems` 控制并 clamp 到 `[5,50]`；description 始终走 excerpt，content:encoded 仅在 `feedFullText` 开启时才输出

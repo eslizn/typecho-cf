@@ -463,8 +463,8 @@ function isReservedCorePath(path: string): boolean {
   return false;
 }
 
-// Retire responses rendered before feed password filtering and pagination fixes.
-const PUBLIC_RESPONSE_CACHE_REVISION = '1';
+// Retire stale public responses after changes to visibility or pagination.
+const PUBLIC_RESPONSE_CACHE_REVISION = '2';
 
 function withCacheVersion(requestUrl: string, cacheVersion?: number, bundleName?: string): string {
   const url = normalizeCacheKeyUrl(requestUrl);

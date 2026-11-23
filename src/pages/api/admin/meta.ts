@@ -169,13 +169,9 @@ async function handler({ request, url }: { request: Request; locals: App.Locals;
   }
 
   if (action === 'refresh') {
-    const refreshIds = mids.length > 0 ? mids : [];
-    const conditions = [eq(schema.metas.type, type)];
-    if (refreshIds.length > 0) conditions.push(inArray(schema.metas.mid, refreshIds));
-
-    // Recalculate from live rows inside the UPDATE itself. Separate reads
-    // followed by updates could overwrite a concurrent relationship change.
-    await db.update(schema.metas)
+    // Recalculate from live rows inside each update and commit as one batch.
+    const chunks = mids.length ? chunkArray([...new Set(mids)], D1_SAFE_IN_LIST_SIZE) : [[]];
+    const statements = chunks.map(chunk => db.update(schema.metas)
       .set({
         count: sql`(
           SELECT COUNT(*)
@@ -185,7 +181,11 @@ async function handler({ request, url }: { request: Request; locals: App.Locals;
             AND ${schema.contents.type} <> 'revision'
         )`,
       })
-      .where(and(...conditions));
+      .where(and(
+        eq(schema.metas.type, type),
+        chunk.length ? inArray(schema.metas.mid, chunk) : undefined,
+      )));
+    await db.batch(statements as [typeof statements[number], ...typeof statements]);
 
     await invalidateSiteCache(db);
     return new Response(null, { status: 302, headers: { Location: redirectTo } });

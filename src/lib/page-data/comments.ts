@@ -32,7 +32,12 @@ async function filterCommentRow(ctx: RequestContext, comment: CommentRow): Promi
   };
 }
 
-export async function buildCommentTree(ctx: RequestContext, allComments: CommentRow[], options: SiteOptions): Promise<CommentNode[]> {
+export async function buildCommentTree(
+  ctx: RequestContext,
+  allComments: CommentRow[],
+  options: SiteOptions,
+  replyLinks?: Record<number, string>,
+): Promise<CommentNode[]> {
   const displayComments = await Promise.all(allComments.map(comment => filterCommentRow(ctx, comment)));
   const map = new Map<number, CommentNode>();
   const roots: CommentNode[] = [];
@@ -56,6 +61,7 @@ export async function buildCommentTree(ctx: RequestContext, allComments: Comment
       text: renderedTexts[index],
       created: c.created || 0,
       children: [],
+      repliesUrl: replyLinks?.[c.coid],
     });
   });
 

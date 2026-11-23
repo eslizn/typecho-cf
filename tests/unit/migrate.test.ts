@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createClient, type Client } from '@libsql/client';
-import { dedupeContentSlugs } from '../../scripts/migrate';
+import { dedupeContentSlugs, mergeLegacyMetas } from '../../scripts/migrate';
 
 function content(cid: number, slug: string | null, type = 'post') {
   return { cid, slug, type };
@@ -102,5 +102,30 @@ describe('migrated content rows', () => {
       [3, 'hello-3'],
       [4, 'hello'],
     ]);
+  });
+});
+
+
+describe('mergeLegacyMetas', () => {
+  it('keeps distinct term types and remaps duplicate term references before writing', () => {
+    const result = mergeLegacyMetas([
+      { mid: 9, type: 'category', slug: 'news', parent: 0, count: 3 },
+      { mid: 2, type: 'category', slug: 'news', parent: 0, count: 99 },
+      { mid: 8, type: 'tag', slug: 'news', parent: 0, count: 0 },
+      { mid: 3, type: 'category', slug: 'child', parent: 9, count: 0 },
+    ], [
+      { cid: 1, mid: 9 }, { cid: 2, mid: 2 }, { cid: 2, mid: 9 }, { cid: 3, mid: 9 },
+    ], [
+      { name: 'defaultCategory', value: '9', user: 0 },
+    ], [
+      { cid: 1, type: 'post' }, { cid: 2, type: 'post' }, { cid: 3, type: 'revision' },
+    ]);
+    expect(result.metas).toEqual([
+      { mid: 2, type: 'category', slug: 'news', parent: 0, count: 2 },
+      { mid: 3, type: 'category', slug: 'child', parent: 2, count: 0 },
+      { mid: 8, type: 'tag', slug: 'news', parent: 0, count: 0 },
+    ]);
+    expect(result.relationships).toEqual([{ cid: 1, mid: 2 }, { cid: 2, mid: 2 }, { cid: 3, mid: 2 }]);
+    expect(result.options[0].value).toBe('2');
   });
 });

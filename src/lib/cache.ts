@@ -15,6 +15,7 @@ import { schema, type Database } from '@/db';
 import { OPTIONS_CACHE_TTL_SECONDS } from '@/lib/constants';
 import { advanceOptionsSnapshotGeneration } from '@/lib/options-snapshot-generation';
 import { compilePermalinkPattern, decodePathnameForMatching, DEFAULT_PERMALINK_PATTERNS } from '@/lib/permalink-pattern';
+import { MONTH_ARCHIVE_PATH } from '@/lib/content-path';
 
 /** Internal namespace used for Cache API keys that are not real URLs */
 const INTERNAL_ORIGIN = 'https://typecho-cf-internal';
@@ -151,6 +152,7 @@ export function isCacheablePublicPath(
   if (postPattern?.test(matchPath) || pagePattern?.test(matchPath) || categoryPattern?.test(matchPath)) return true;
 
   // Fixed public archive surfaces.
+  if (MONTH_ARCHIVE_PATH.test(path)) return true;
   if (path.startsWith('/tag/') || path.startsWith('/author/') || path.startsWith('/search/')) return true;
   if (path.startsWith('/feed') || path.endsWith('/feed.xml')) return true;
   if (path === '/sitemap.xml' || path === '/robots.txt') return true;

@@ -57,6 +57,9 @@ const canNest = commentOptions.threaded && depth < maxDepth - 1;
           onclick={`return TypechoComment.reply('comment-${node.coid}', ${node.coid})`}>{i18n.t('theme.comments.reply', {}, 'Reply')}</a>
       </div>
     )}
+    {node.repliesUrl && (
+      <p><a href={node.repliesUrl}>{i18n.t('theme.comments.allReplies', {}, 'View all replies')}</a></p>
+    )}
     {canNest && node.children.length > 0 && (
       <div class="comment-children">
         <ol class="comment-list">

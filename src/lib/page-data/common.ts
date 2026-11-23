@@ -163,7 +163,7 @@ export function mapPostCategories(
     map.get(row.cid)!.push({
       name: row.name || '',
       slug: row.slug || '',
-      permalink: buildCategoryLink(row.slug || '', siteUrl, categoryPattern),
+      permalink: buildCategoryLink(row.slug || '', siteUrl, categoryPattern, row.mid),
     });
   }
   return map;

@@ -159,13 +159,14 @@ export function buildDateLink(
   siteUrl = ''
 ): string {
   const base = siteUrl.replace(/\/$/, '');
+  const yearPart = String(year).padStart(4, '0');
   if (day && month) {
-    return `${base}/${year}/${String(month).padStart(2, '0')}/${String(day).padStart(2, '0')}/`;
+    return `${base}/${yearPart}/${String(month).padStart(2, '0')}/${String(day).padStart(2, '0')}/`;
   }
   if (month) {
-    return `${base}/${year}/${String(month).padStart(2, '0')}/`;
+    return `${base}/${yearPart}/${String(month).padStart(2, '0')}/`;
   }
-  return `${base}/${year}/`;
+  return `${base}/${yearPart}/`;
 }
 
 /**

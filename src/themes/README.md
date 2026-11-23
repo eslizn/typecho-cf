@@ -269,7 +269,7 @@ interface ThemePageProps extends ThemeBaseProps {
 ```typescript
 interface ThemeArchiveProps extends ThemeBaseProps {
   archiveTitle: string;          // 如 "分类 技术 下的文章"
-  archiveType: 'category' | 'tag' | 'author' | 'search' | 'index';
+  archiveType: 'category' | 'tag' | 'author' | 'search' | 'index' | 'date';
   posts: PostListItem[];
   pagination: PaginationInfo;
 }
@@ -305,6 +305,7 @@ interface CommentNode {
   url: string;
   text: string;                  // 渲染后的 HTML
   created: number;
+  repliesUrl?: string;
   children: CommentNode[];       // 嵌套回复
 }
 
@@ -318,8 +319,16 @@ interface CommentPagination {
   pageUrls: Record<number, string>;
   prevUrl: string | null;
   nextUrl: string | null;
+  replyPage?: {
+    currentPage: number;
+    backUrl: string;
+    prevUrl: string | null;
+    nextUrl: string | null;
+  };
 }
 ```
+
+有 `node.repliesUrl` 时，在对应评论下显示「查看全部回复」入口。有 `commentPagination.replyPage` 时，使用它的页码、前后页链接和 `backUrl` 渲染回复导航。
 
 ---
 

@@ -3,13 +3,13 @@
  * Aggregates recent posts, comments, categories, and archives
  * Uses db.batch() to execute all queries in a single D1 round-trip.
  */
-import { eq, desc, and, gt, lte, or, sql } from 'drizzle-orm';
+import { eq, desc, and, gt, gte, lt, lte, or, sql } from 'drizzle-orm';
 import type { Database } from '@/db';
 import { schema } from '@/db';
 import { buildPermalink, buildCategoryLink, buildDateLink } from '@/lib/content';
 import { applyFilterSafely, type HookContext } from '@/lib/plugin';
 import { publishedPostCondition, nowSeconds } from '@/lib/content-visibility';
-import type { TimezoneSetting } from '@/lib/timezone';
+import { getMonthBounds, getTimezoneDateParts, type TimezoneSetting } from '@/lib/timezone';
 
 type SidebarDatabase = Pick<Database, 'batch' | 'select'>;
 // Snapshots are version-keyed, so content/options writes invalidate them by
@@ -63,7 +63,7 @@ export async function loadSidebarData(
   bundleName = '',
   timezone: TimezoneSetting = 'UTC',
 ): Promise<SidebarData> {
-  const cacheKey = `${cacheVersion}\0${bundleName}\0${siteUrl}\0${permalinkPattern || ''}\0${categoryPattern || ''}\0${pagePattern || ''}`;
+  const cacheKey = `${cacheVersion}\0${bundleName}\0${siteUrl}\0${permalinkPattern || ''}\0${categoryPattern || ''}\0${pagePattern || ''}\0${timezone}`;
   const cached = sidebarSnapshot;
   if (cached && cached.key === cacheKey && cached.expiresAt > Date.now()) {
     return await applyFilterSafely(
@@ -76,9 +76,30 @@ export async function loadSidebarData(
     );
   }
 
-  // Execute all 4 queries in a single D1 round-trip
   const now = nowSeconds();
-  const [recentPostRows, recentCommentRows, categoryRows, archiveRows] = await db.batch([
+  const oldest = now - SIDEBAR_ARCHIVE_WINDOW_SECONDS;
+  const { parts } = getTimezoneDateParts(now, timezone);
+  const archiveQueries = [];
+  let { year, month } = parts;
+  // One indexed existence check per local month, in the same round trip.
+  for (;;) {
+    const { start, end } = getMonthBounds(year, month, timezone);
+    if (start === null || end === null || end <= oldest) break;
+    archiveQueries.push(db.select({ year: sql<number>`${year}`.as('year'), month: sql<number>`${month}`.as('month') })
+      .from(schema.contents)
+      .where(and(
+        publishedPostCondition(now),
+        gte(schema.contents.created, start),
+        lt(schema.contents.created, end),
+        gt(schema.contents.created, oldest),
+      ))
+      .limit(1));
+    if (--month === 0) {
+      month = 12;
+      year--;
+    }
+  }
+  const [recentPostRows, recentCommentRows, categoryRows, ...archiveRows] = await db.batch([
     // Recent posts
     db
       .select({
@@ -128,6 +149,7 @@ export async function loadSidebarData(
     // Categories
     db
       .select({
+        mid: schema.metas.mid,
         name: schema.metas.name,
         slug: schema.metas.slug,
         count: schema.metas.count,
@@ -137,25 +159,7 @@ export async function loadSidebarData(
       .where(eq(schema.metas.type, 'category'))
       .orderBy(schema.metas.order),
 
-    // Archives (by month)
-    // Bound the scan to the recent window — strftime() cannot use the
-    // (type, status, created) index for grouping, so this would otherwise
-    // read every published row on each snapshot rebuild.
-    db
-      .select({
-        year: sql<number>`cast(strftime('%Y', ${schema.contents.created}, 'unixepoch') as integer)`,
-        month: sql<number>`cast(strftime('%m', ${schema.contents.created}, 'unixepoch') as integer)`,
-      })
-      .from(schema.contents)
-      .where(and(
-        publishedPostCondition(nowSeconds()),
-        gt(schema.contents.created, nowSeconds() - SIDEBAR_ARCHIVE_WINDOW_SECONDS),
-      ))
-      .groupBy(
-        sql`strftime('%Y', ${schema.contents.created}, 'unixepoch')`,
-        sql`strftime('%m', ${schema.contents.created}, 'unixepoch')`,
-      )
-      .orderBy(desc(sql`strftime('%Y', ${schema.contents.created}, 'unixepoch')`), desc(sql`strftime('%m', ${schema.contents.created}, 'unixepoch')`)),
+    ...archiveQueries,
   ] as const);
 
   const recentPosts = recentPostRows.map((p) => ({
@@ -185,10 +189,10 @@ export async function loadSidebarData(
     name: c.name || '',
     slug: c.slug || '',
     count: c.count || 0,
-    permalink: buildCategoryLink(c.slug || '', siteUrl, categoryPattern),
+    permalink: buildCategoryLink(c.slug || '', siteUrl, categoryPattern, c.mid),
   }));
 
-  const archives = archiveRows.map((a) => ({
+  const archives = archiveRows.flat().map((a) => ({
     date: formatArchiveMonth(a.year, a.month, ctx.i18n?.locale || 'en'),
     permalink: buildDateLink(a.year, a.month, undefined, siteUrl),
   }));
@@ -267,12 +271,14 @@ export async function loadNavPages(
   return pages.map(item => ({ ...item }));
 }
 
-function formatArchiveMonth(year: number, month: number, locale: string): string {
+export function formatArchiveMonth(year: number, month: number, locale: string): string {
+  const date = new Date(0);
+  date.setUTCFullYear(year, month - 1, 1);
   try {
     return new Intl.DateTimeFormat(locale, { year: 'numeric', month: 'long', timeZone: 'UTC' })
-      .format(new Date(Date.UTC(year, month - 1, 1)));
+      .format(date);
   } catch {
     return new Intl.DateTimeFormat('en', { year: 'numeric', month: 'long', timeZone: 'UTC' })
-      .format(new Date(Date.UTC(year, month - 1, 1)));
+      .format(date);
   }
 }

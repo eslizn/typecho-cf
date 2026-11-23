@@ -269,7 +269,7 @@ interface ThemePageProps extends ThemeBaseProps {
 ```typescript
 interface ThemeArchiveProps extends ThemeBaseProps {
   archiveTitle: string;          // e.g. "Posts in category: Technology"
-  archiveType: 'category' | 'tag' | 'author' | 'search' | 'index';
+  archiveType: 'category' | 'tag' | 'author' | 'search' | 'index' | 'date';
   posts: PostListItem[];
   pagination: PaginationInfo;
 }
@@ -305,6 +305,7 @@ interface CommentNode {
   url: string;
   text: string;                  // Rendered HTML
   created: number;
+  repliesUrl?: string;
   children: CommentNode[];       // Nested replies
 }
 
@@ -318,8 +319,16 @@ interface CommentPagination {
   pageUrls: Record<number, string>;
   prevUrl: string | null;
   nextUrl: string | null;
+  replyPage?: {
+    currentPage: number;
+    backUrl: string;
+    prevUrl: string | null;
+    nextUrl: string | null;
+  };
 }
 ```
+
+Show a “View all replies” link below any comment with a `node.repliesUrl`. When `commentPagination.replyPage` is present, render its page number, previous and next links, and `backUrl` in the reply navigation.
 
 ---
 

@@ -60,6 +60,7 @@ const CanonicalHookPoints = {
   'archive:category': 'archive:category',
   'archive:tag': 'archive:tag',
   'archive:author': 'archive:author',
+  'archive:date': 'archive:date',
   'archive:search': 'archive:search',
   'frontend:head': 'frontend:head',
   'frontend:footer': 'frontend:footer',

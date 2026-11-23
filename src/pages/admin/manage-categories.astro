@@ -77,7 +77,7 @@ const isDefault = (mid: number) => options.defaultCategory === mid;
                   <td class="typecho-select-cell"><input type="checkbox" value={String(cat.mid)} name="mid[]" /></td>
                   <td>
                     <a href={`/admin/manage-categories?mid=${cat.mid}`}>{cat.name}</a>
-                    <a href={buildCategoryLink(cat.slug, urls.siteUrl, options.categoryPattern as string | undefined)} title={`${ctx.i18n.t('admin.action.browse', {}, 'Browse')} ${cat.name}`}><i class="i-exlink"></i></a>
+                    <a href={buildCategoryLink(cat.slug, urls.siteUrl, options.categoryPattern as string | undefined, cat.mid)} title={`${ctx.i18n.t('admin.action.browse', {}, 'Browse')} ${cat.name}`}><i class="i-exlink"></i></a>
                   </td>
                   <td class="kit-hidden-mb">{cat.slug}</td>
                   <td>

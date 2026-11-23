@@ -3,7 +3,7 @@ import { schema } from '@/db';
 import { generateRss2 } from '@/lib/feed';
 import { clampFeedItems, buildFeedItem, getFeedRuntime, renderFeedResponse } from '@/lib/feed-helpers';
 import { eq, and, desc } from 'drizzle-orm';
-import { publishedPostCondition } from '@/lib/content-visibility';
+import { publicFeedCondition, publishedPostCondition } from '@/lib/content-visibility';
 
 export const GET: APIRoute = async ({ request, locals, params }) => {
   const slug = params.slug || '';
@@ -23,7 +23,7 @@ export const GET: APIRoute = async ({ request, locals, params }) => {
       and(
         eq(schema.relationships.mid, cat.mid),
         publishedPostCondition(),
-        eq(schema.contents.allowFeed, '1'),
+        publicFeedCondition(),
       ),
     )
     .orderBy(desc(schema.contents.created))

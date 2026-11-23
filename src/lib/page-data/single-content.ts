@@ -121,7 +121,7 @@ export async function preparePostData(
         .where(eq(schema.users.uid, contentRow.authorId || 0))
         .limit(1),
       db
-        .select({ name: schema.metas.name, slug: schema.metas.slug, type: schema.metas.type })
+        .select({ mid: schema.metas.mid, name: schema.metas.name, slug: schema.metas.slug, type: schema.metas.type })
         .from(schema.relationships)
         .innerJoin(schema.metas, eq(schema.relationships.mid, schema.metas.mid))
         .where(eq(schema.relationships.cid, cidNum)),
@@ -143,11 +143,11 @@ export async function preparePostData(
   const author = authorRows[0] ?? null;
   const allComments = commentPage.rows;
 
-  type MetaEntry = { name: string | null; slug: string | null; type: string | null };
+  type MetaEntry = { mid: number; name: string | null; slug: string | null; type: string | null };
   const categories = singleOptions.categories ?? (relatedMetas as MetaEntry[]).filter(m => m.type === 'category').map(m => ({
     name: m.name || '',
     slug: m.slug || '',
-    permalink: buildCategoryLink(m.slug || '', urls.siteUrl, options.categoryPattern as string | undefined),
+    permalink: buildCategoryLink(m.slug || '', urls.siteUrl, options.categoryPattern as string | undefined, m.mid),
   }));
   const tags = singleOptions.tags ?? (relatedMetas as MetaEntry[]).filter(m => m.type === 'tag').map(m => ({
     name: m.name || '',
@@ -155,7 +155,7 @@ export async function preparePostData(
     permalink: buildTagLink(m.slug || '', urls.siteUrl),
   }));
 
-  const commentTree = await buildCommentTree(ctx, allComments, options);
+  const commentTree = await buildCommentTree(ctx, allComments, options, commentPage.replyLinks);
   const gravatarMap = options.commentsAvatar
     ? await buildGravatarMap(allComments, options.commentsAvatarRating || 'G')
     : {};
@@ -274,7 +274,7 @@ export async function preparePageData(
   ]);
   const allComments = commentPage.rows;
 
-  const commentTree = await buildCommentTree(ctx, allComments, options);
+  const commentTree = await buildCommentTree(ctx, allComments, options, commentPage.replyLinks);
   const gravatarMap = options.commentsAvatar
     ? await buildGravatarMap(allComments, options.commentsAvatarRating || 'G')
     : {};

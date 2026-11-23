@@ -162,6 +162,52 @@ describe('loadCommentPage', () => {
     expect(clamped.pagination.currentPage).toBe(3);
   });
 
+  it('links to the first page when the last page is the default', async () => {
+    for (let created = 1; created <= 5; created++) await addComment(created);
+    const settings = options({ commentsPageDisplay: 'last' });
+    const last = await loadCommentPage(db as any, 1, settings, 'https://example.com/post', 5);
+    const first = await loadCommentPage(db as any, 1, settings, last.pagination.pageUrls[1], 5);
+    expect(last.pagination.currentPage).toBe(3);
+    expect(first.pagination.currentPage).toBe(1);
+    expect(first.rows.map(row => row.created)).toEqual([1, 2]);
+  });
+
+  it('bounds a long thread preview and pages through all approved replies in order', async () => {
+    const root = await addComment(1);
+    for (let i = 2; i <= 56; i++) await addComment(i, root.coid);
+    const branch = await addComment(57, 56);
+    await db.insert(schema.comments).values({ cid: 1, parent: root.coid, status: 'waiting' });
+
+    const settings = options({ commentsPageSize: 1 });
+    const preview = await loadCommentPage(db as any, 1, settings, 'https://example.com/post?commentPage=1', 57);
+    expect(preview.rows).toHaveLength(21);
+    const first = await loadCommentPage(db as any, 1, settings, preview.replyLinks![root.coid], 57);
+    const second = await loadCommentPage(db as any, 1, settings, first.pagination.replyPage!.nextUrl!, 57);
+    const third = await loadCommentPage(db as any, 1, settings, second.pagination.replyPage!.nextUrl!, 57);
+    expect([first, second, third].flatMap(page => page.rows.slice(1).map(row => row.created)))
+      .toEqual(Array.from({ length: 55 }, (_, i) => i + 2));
+    expect(third.pagination.replyPage?.nextUrl).toBeNull();
+    expect(third.pagination.replyPage?.backUrl).toBe('https://example.com/post?commentPage=1#comments');
+    const nested = await loadCommentPage(db as any, 1, settings, third.replyLinks![56], 57);
+    expect(nested.rows.map(row => row.coid)).toEqual([56, branch.coid]);
+    expect(nested.rows.every(row => row.status === 'approved')).toBe(true);
+  });
+
+  it('keeps every selected root when the thread preview reaches its global row budget', async () => {
+    const roots = await db.insert(schema.comments).values(
+      Array.from({ length: 50 }, (_, i) => ({ cid: 1, created: i + 1 })),
+    ).returning();
+    for (const root of roots) {
+      await db.insert(schema.comments).values(
+        Array.from({ length: 5 }, (_, i) => ({ cid: 1, parent: root.coid, created: 51 + i })),
+      );
+    }
+    const page = await loadCommentPage(db as any, 1, options({ commentsPageSize: 50 }), 'https://example.com/post', 300);
+    expect(page.rows).toHaveLength(200);
+    expect(page.rows.filter(row => row.parent === 0).map(row => row.coid)).toEqual(roots.map(root => root.coid));
+    expect(Object.keys(page.replyLinks!)).toHaveLength(20);
+  });
+
   it('uses contents.commentsNum instead of a count(*) scan when provided', async () => {
     await db.insert(schema.contents).values({
       cid: 1,

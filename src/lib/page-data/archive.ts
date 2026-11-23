@@ -1,13 +1,15 @@
-import { eq, and, desc, lt, or, inArray, sql } from 'drizzle-orm';
+import { eq, and, desc, gte, lt, or, inArray, sql } from 'drizzle-orm';
 import { schema } from '@/db';
 import type { SiteOptions } from '@/lib/options';
 import { buildFtsMatchExpression, contentsFtsTableRef, FTS_MIN_CHARS, isFtsAvailable } from '@/lib/fulltext';
-import { buildAuthorLink, buildCategoryLink, buildTagLink, buildSearchLink } from '@/lib/content';
+import { buildAuthorLink, buildCategoryLink, buildDateLink, buildTagLink, buildSearchLink } from '@/lib/content';
 import { chunkArray, D1_SAFE_IN_LIST_SIZE } from '@/lib/d1-limits';
 import { paginate } from '@/lib/pagination';
 import type { RequestContext } from '@/lib/context';
 import { applyFilter, doHook } from '@/lib/plugin';
 import { publishedPostCondition } from '@/lib/content-visibility';
+import { getMonthBounds } from '@/lib/timezone';
+import { formatArchiveMonth } from '@/lib/sidebar';
 import type { ThemeArchiveProps, ThemeIndexProps } from '@/lib/theme-props';
 import {
   fetchAuthors,
@@ -23,14 +25,14 @@ import {
 } from './common';
 
 // ─── Shared archive query ───────────────────────────────────────────────
-// All five list pages (index, category, tag, author, search) share this
+// Public list pages share this
 // pattern: count → paginated query → batch fetch authors+categories → map.
 
 interface ArchiveParams {
   archiveTitle: string;
-  archiveType: 'index' | 'category' | 'tag' | 'author' | 'search';
+  archiveType: 'index' | 'category' | 'tag' | 'author' | 'search' | 'date';
   baseUrl: string;
-  hookPoint: 'archive:index' | 'archive:category' | 'archive:tag' | 'archive:author' | 'archive:search';
+  hookPoint: 'archive:index' | 'archive:category' | 'archive:tag' | 'archive:author' | 'archive:search' | 'archive:date';
   hookParams: Record<string, string | number | undefined>;
   /** Additional WHERE conditions beyond type='post' + status='publish' */
   extraWhere?: ReturnType<typeof sql>;
@@ -263,6 +265,8 @@ async function prepareArchiveData(
   let posts: ContentRow[] | Array<{ content: ContentRow }>;
   if (requestedPage === 1) {
     posts = initialPosts as ContentRow[] | Array<{ content: ContentRow }>;
+  } else if (currentPage === 1) {
+    posts = totalPosts > 0 ? await makeListStatement(null) : [];
   } else if (currentPage === requestedPage) {
     const boundary = (initialPosts as Array<{ created: number | null; cid: number | null }>)[0];
     posts = boundary
@@ -402,7 +406,7 @@ export async function prepareCategoryData(
       'Posts in category {category}',
     ),
     archiveType: 'category',
-    baseUrl: buildCategoryLink(slug, ctx.urls.siteUrl, ctx.options.categoryPattern as string | undefined),
+    baseUrl: buildCategoryLink(slug, ctx.urls.siteUrl, ctx.options.categoryPattern as string | undefined, category.mid),
     hookPoint: 'archive:category',
     hookParams: { slug, mid: category.mid },
     joinMid: category.mid,
@@ -465,6 +469,28 @@ export async function prepareAuthorData(
     hookParams: { uid: uidNum },
     extraWhere: eq(schema.contents.authorId, uidNum),
     authorOverride: authorMap,
+  });
+}
+
+export async function prepareMonthData(
+  ctx: RequestContext,
+  year: number,
+  month: number,
+  requestUrl: string,
+  locals: Record<string, unknown>,
+  url: URL,
+): Promise<ThemeArchiveProps | Response> {
+  const { start, end } = getMonthBounds(year, month, ctx.options.timezone);
+  if (start === null || end === null) {
+    return new Response(null, { status: 404 });
+  }
+  return prepareArchiveData(ctx, requestUrl, locals, url, {
+    archiveTitle: formatArchiveMonth(year, month, getRequestI18n(ctx).locale),
+    archiveType: 'date',
+    baseUrl: buildDateLink(year, month, undefined, ctx.urls.siteUrl),
+    hookPoint: 'archive:date',
+    hookParams: { year, month },
+    extraWhere: and(gte(schema.contents.created, start), lt(schema.contents.created, end)),
   });
 }
 

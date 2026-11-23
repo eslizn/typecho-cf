@@ -17,7 +17,7 @@ vi.mock('@/db', async () => {
   return { ...actual, getDb: (_d1: any) => testDb, schema: actual.schema };
 });
 
-import { prepareIndexData } from '@/lib/page-data';
+import { prepareCategoryData, prepareIndexData, prepareMonthData } from '@/lib/page-data';
 import type { RequestContext } from '@/lib/context';
 import { addHook, removePluginHooks } from '@/lib/plugin';
 
@@ -55,6 +55,57 @@ describe('archive keyset pagination', () => {
     expect(page2.posts.map(post => post.cid)).not.toEqual(page3.posts.map(post => post.cid));
     expect(page2.pagination.currentPage).toBe(2);
     expect(page3.pagination.currentPage).toBe(3);
+  });
+
+  it('returns the entire first page when an out-of-range page clamps to it', async () => {
+    testDb = await createTestDb();
+    await testDb.insert(schema.contents).values([{ created: 1 }, { created: 2 }]);
+    const ctx = await buildCtx();
+    const url = new URL('https://example.com/page/2/');
+    const result = await prepareIndexData(ctx, url.href, { _page: 2 }, url);
+    expect(result.pagination.currentPage).toBe(1);
+    expect(result.posts.map(post => post.created)).toEqual([2, 1]);
+  });
+
+  it('uses numeric category links for sidebar, post terms and pagination', async () => {
+    testDb = await createTestDb();
+    const [category] = await testDb.insert(schema.metas).values({ type: 'category', slug: 'news' }).returning();
+    const posts = await testDb.insert(schema.contents).values([{ created: 1 }, { created: 2 }]).returning();
+    await testDb.insert(schema.relationships).values(posts.map(post => ({ cid: post.cid, mid: category.mid })));
+    const ctx = await buildCtx();
+    ctx.options.categoryPattern = '/c/{mid}/';
+    ctx.options.pageSize = 1;
+    const path = `https://example.com/c/${category.mid}/`;
+    const result = await prepareCategoryData(ctx, 'news', path, {}, new URL(path));
+    if (result instanceof Response) throw new Error('Expected an archive');
+    expect(result.pagination.nextUrl).toBe(`${path}page/2/`);
+    expect(result.posts[0].categories[0].permalink).toBe(path);
+    expect(result.sidebarData.categories[0].permalink).toBe(path);
+  });
+
+  it('archives posts in the site-local month and agrees with sidebar month links', async () => {
+    testDb = await createTestDb();
+    const start = Date.UTC(2026, 0, 31, 16) / 1000;
+    const end = Date.UTC(2026, 1, 28, 16) / 1000;
+    await testDb.insert(schema.contents).values([
+      { created: start - 1 }, { created: start }, { created: end - 1 }, { created: end },
+      { created: start, status: 'private' }, { created: start, type: 'page' },
+    ]);
+    const ctx = await buildCtx();
+    ctx.options.timezone = 'Asia/Shanghai';
+    ctx.options.pageSize = 1;
+    const path = 'https://example.com/2026/02/';
+    const spy = vi.spyOn(Date, 'now').mockReturnValue((end + 60) * 1000);
+    try {
+      const result = await prepareMonthData(ctx, 2026, 2, path, {}, new URL(path));
+      if (result instanceof Response) throw new Error('Expected a month archive');
+      expect(result.posts.map(post => post.created)).toEqual([end - 1]);
+      expect(result.pagination.totalItems).toBe(2);
+      expect(result.pagination.nextUrl).toBe(`${path}page/2/`);
+      expect(result.sidebarData.archives.map(month => month.permalink)).toContain(path);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('breaks created ties with cid when keyset paginating', async () => {

@@ -220,9 +220,9 @@ describe('POST /api/admin/meta batch + default', () => {
     expect(remaining).toHaveLength(0);
   });
 
-  it('deletes more than 99 selected tags under the D1 parameter cap', async () => {
+  it.each(['delete', 'refresh'])('%s handles more than 99 selected tags under the D1 parameter cap', async (action) => {
     const rows = Array.from({ length: 101 }, (_, index) => ({
-      name: `Tag ${index}`, slug: `bulk-tag-${index}`, type: 'tag', count: 0,
+      name: `Tag ${index}`, slug: `bulk-tag-${index}`, type: 'tag', count: 4,
     }));
     await testDb.insert(schema.metas).values(rows.slice(0, 100));
     await testDb.insert(schema.metas).values(rows.slice(100));
@@ -233,7 +233,7 @@ describe('POST /api/admin/meta batch + default', () => {
 
     const cookie = await makeAuthCookie(testDb, 1, AUTH_CODE, SECRET);
     const body = new URLSearchParams();
-    body.append('action', 'delete');
+    body.append('action', action);
     body.append('type', 'tag');
     for (const tag of tags) body.append('mid[]', String(tag.mid));
 
@@ -262,7 +262,9 @@ describe('POST /api/admin/meta batch + default', () => {
     const paramCounts = statements.map(statement => statement.toSQL().params.length);
     expect(paramCounts.length).toBeGreaterThan(0);
     expect(Math.max(...paramCounts)).toBeLessThanOrEqual(100);
-    expect(await testDb.select().from(schema.metas).where(eq(schema.metas.type, 'tag'))).toHaveLength(0);
+    const remaining = await testDb.select().from(schema.metas).where(eq(schema.metas.type, 'tag'));
+    expect(remaining).toHaveLength(action === 'refresh' ? 101 : 0);
+    expect(remaining.every(tag => tag.count === 0)).toBe(true);
   });
 
   it('sets the default category via POST', async () => {

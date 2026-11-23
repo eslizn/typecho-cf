@@ -7,6 +7,7 @@
  */
 import Base from '@/layouts/Base.astro';
 import CommentList from './CommentList.astro';
+import CommentPagination from '@/components/CommentPagination.astro';
 import type { ThemePostProps } from '@/lib/theme-props';
 import { formatDate, buildAuthorLink } from '@/lib/content';
 
@@ -130,17 +131,7 @@ const totalComments = commentPagination.totalComments;
                       i18n={i18n}
                     />
                   </ol>
-                  {commentPagination.enabled && commentPagination.totalPages > 1 && (
-                    <nav class="page-navigator comment-page-navigator" aria-label={t('theme.comments.ariaLabel', {}, 'Comment pagination')}>
-                      {commentPagination.prevUrl && <a class="prev" href={commentPagination.prevUrl} rel="prev">{t('theme.comments.previous', {}, 'Previous')}</a>}
-                      {commentPagination.pages.map((pageNumber) => (
-                        pageNumber === commentPagination.currentPage
-                          ? <span class="current" aria-current="page">{pageNumber}</span>
-                          : <a href={commentPagination.pageUrls[pageNumber]}>{pageNumber}</a>
-                      ))}
-                      {commentPagination.nextUrl && <a class="next" href={commentPagination.nextUrl} rel="next">{t('theme.comments.next', {}, 'Next')}</a>}
-                    </nav>
-                  )}
+                  <CommentPagination pagination={commentPagination} i18n={i18n} />
                 </>
               )}
 

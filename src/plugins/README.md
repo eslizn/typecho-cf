@@ -411,7 +411,7 @@ AI 插件配置页可以开启 OpenAI 兼容 HTTP 入口并自定义站点相对
 | `request:begin` / `request:end` | 请求上下文初始化完成 / 响应最终确定 | `(context)` / `({ request, response })` |
 | `admin:begin` / `admin:end` | 管理布局开始 / 管理布局数据确定 | `(context)` |
 | `archive:init` | 归档或单篇数据初始化 | `(context)` |
-| `archive:index` / `archive:single` / `archive:category` / `archive:tag` / `archive:author` / `archive:search` | 对应归档或单篇数据准备前 | `(context)` |
+| `archive:index` / `archive:single` / `archive:category` / `archive:tag` / `archive:author` / `archive:date` / `archive:search` | 对应归档或单篇数据准备前 | `(context)` |
 | `archive:beforeRender` / `archive:afterRender` | 前台文档响应渲染前 / 后 | `(context)` / `({ ..., response })` |
 | `post:afterPublish` / `post:afterSave` | 文章发布后 / 保存后 | `(post)` |
 | `post:beforeDelete` / `post:afterDelete` | 文章删除前 / 后 | `(post)` |

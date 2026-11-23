@@ -1,4 +1,4 @@
-import { and, eq, lte } from 'drizzle-orm';
+import { and, eq, isNull, lte, or } from 'drizzle-orm';
 import { schema } from '@/db';
 
 type VisibleContent = Pick<
@@ -21,6 +21,14 @@ export function publishedPostCondition(now = nowSeconds()) {
     eq(schema.contents.type, 'post'),
     eq(schema.contents.status, 'publish'),
     lte(schema.contents.created, now),
+  );
+}
+
+/** Content eligible for a public subscription. */
+export function publicFeedCondition() {
+  return and(
+    eq(schema.contents.allowFeed, '1'),
+    or(isNull(schema.contents.password), eq(schema.contents.password, '')),
   );
 }
 

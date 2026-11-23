@@ -1,10 +1,10 @@
 import type { APIRoute } from 'astro';
-import { schema } from '@/db';
+import { schema, type Database } from '@/db';
 import { type SiteOptions } from '@/lib/options';
 import { canManageResource, hasPermission } from '@/lib/auth';
 import { isAdminActionResponse, requireAdminAction } from '@/lib/admin-auth';
 import { normalizeSlug, readAdminFormOrError } from '@/lib/input';
-import { resolveUniqueMetaSlug, writeWithUniqueContentSlug } from '@/lib/slug';
+import { writeWithUniqueContentSlug } from '@/lib/slug';
 import { applyFilter, doHook } from '@/lib/plugin';
 import { invalidateSiteCache } from '@/lib/cache';
 import { jsonError, jsonOk } from '@/lib/http';
@@ -12,7 +12,7 @@ import { i18nMessage } from '@/lib/i18n';
 import { chunkArray, chunkInsertRows, D1_INSERT_ROW_PARAMS, D1_SAFE_IN_LIST_SIZE } from '@/lib/d1-limits';
 import { resolveContentWritePolicy } from '@/lib/content-status';
 import { formatDateTimeLocal, parseDateTimeLocalToTimestamp } from '@/lib/timezone';
-import { eq, and, sql, inArray, type SQL } from 'drizzle-orm';
+import { eq, and, sql, inArray, isNull, or, type SQL } from 'drizzle-orm';
 import { validateFilteredContent, WriteFilterError } from '@/lib/write-filter';
 
 const WRITABLE_CONTENT_TYPES = new Set(['post', 'post_draft', 'page', 'page_draft']);
@@ -66,37 +66,45 @@ interface TagPlan {
   slug: string;
 }
 
-async function prepareTagPlan(db: any, tags: string): Promise<TagPlan[]> {
-  const desired = [...new Map(parseTagNames(tags).map((name) => {
-    const slug = normalizeSlug(name, 'tag');
-    return [slug, { name, slug }] as const;
-  })).values()];
-  if (desired.length === 0) return [];
-
-  const existingSlugs = new Set<string>();
-  for (const chunk of chunkArray(desired.map((tag) => tag.slug), D1_SAFE_IN_LIST_SIZE)) {
-    const existing = await db
-      .select({ slug: schema.metas.slug })
+async function prepareTagPlan(db: Database, tags: string, contentId?: number): Promise<TagPlan[]> {
+  const desired = parseTagNames(tags);
+  const slugsByName = new Map<string, string[]>();
+  const attachedNames = new Set<string>();
+  for (const names of chunkArray(desired, D1_SAFE_IN_LIST_SIZE - 1)) {
+    const rows = await db.select({
+      name: schema.metas.name,
+      slug: schema.metas.slug,
+      attached: schema.relationships.cid,
+    })
       .from(schema.metas)
-      .where(and(
-        eq(schema.metas.type, 'tag'),
-        inArray(schema.metas.slug, chunk),
-      ));
-    for (const row of existing as Array<{ slug: string | null }>) {
-      if (row.slug) existingSlugs.add(row.slug);
+      .leftJoin(schema.relationships, contentId
+        ? and(eq(schema.relationships.mid, schema.metas.mid), eq(schema.relationships.cid, contentId))
+        : sql`0`)
+      .where(and(eq(schema.metas.type, 'tag'), inArray(schema.metas.name, names)))
+      .orderBy(schema.metas.mid);
+    for (const row of rows) {
+      if (!row.name || !row.slug) continue;
+      if (!slugsByName.has(row.name) || (row.attached && !attachedNames.has(row.name))) {
+        slugsByName.set(row.name, [row.slug]);
+      } else if (row.attached) {
+        slugsByName.get(row.name)!.push(row.slug);
+      }
+      if (row.attached) attachedNames.add(row.name);
     }
   }
+  return [...new Map(desired.flatMap(name => (slugsByName.get(name) ?? [normalizeSlug(name, 'tag')])
+    .map(slug => [slug, { name, slug }] as const))).values()];
+}
 
-  const plan: TagPlan[] = [];
-  for (const tag of desired) {
-    plan.push({
-      ...tag,
-      slug: existingSlugs.has(tag.slug)
-        ? tag.slug
-        : await resolveUniqueMetaSlug(db, tag.slug, 'tag', 0, tag.name),
-    });
-  }
-  return plan;
+function buildAttachmentClaimStatements(db: Database, parent: number, authorId: number, ids: number[]) {
+  return chunkArray(ids, D1_SAFE_IN_LIST_SIZE - 3).map(chunk => db.update(schema.contents)
+    .set({ parent })
+    .where(and(
+      inArray(schema.contents.cid, chunk),
+      eq(schema.contents.type, 'attachment'),
+      eq(schema.contents.authorId, authorId),
+      or(eq(schema.contents.parent, 0), isNull(schema.contents.parent)),
+    )));
 }
 
 function buildTagMetaStatements(db: any, tagPlan: TagPlan[]): any[] {
@@ -311,6 +319,8 @@ export const POST: APIRoute = async ({ request }) => {
   const allowPing = formData.get('allowPing') ? '1' : '0';
   const allowFeed = formData.get('allowFeed') ? '1' : '0';
   const tags = formData.get('tags')?.toString()?.trim() || '';
+  const attachmentIds = [...new Set(formData.getAll('attachment[]').map(Number)
+    .filter(id => Number.isSafeInteger(id) && id > 0))];
   let categoryIds = [...new Set(formData.getAll('category[]').map((v) => parseInt(v.toString(), 10)).filter(Boolean))];
   const template = formData.get('template')?.toString()?.trim() || null;
   const order = parseInt(formData.get('order')?.toString() || '0', 10) || 0;
@@ -473,6 +483,7 @@ export const POST: APIRoute = async ({ request }) => {
                 slug: resolvedSlug,
               } as any).returning({ cid: schema.contents.cid }),
               ...buildCustomFieldStatements(db, candidateCid, formData),
+              ...buildAttachmentClaimStatements(db, candidateCid, auth.uid, attachmentIds),
             ];
             if (tagPlan.length > 0) {
               createStatements.push(...buildTagMetaStatements(db, tagPlan));
@@ -578,9 +589,11 @@ export const POST: APIRoute = async ({ request }) => {
     // pending version as one revision child. A single revision per parent is
     // enough for the editor flow and mirrors Typecho's active draft lookup.
     if (savingRevision) {
-      const revision = await db.query.contents.findFirst({
-        where: and(eq(schema.contents.parent, cid), eq(schema.contents.type, 'revision')),
-      });
+      const revisionCidRef = sql<number>`(
+        SELECT cid FROM typecho_contents
+        WHERE parent = ${cid} AND type = 'revision'
+        ORDER BY modified DESC, cid DESC LIMIT 1
+      )`;
       const revisionInitialPolicy = resolveContentWritePolicy({
         kind: existingBaseType,
         isEditor,
@@ -627,36 +640,27 @@ export const POST: APIRoute = async ({ request }) => {
         if (error instanceof WriteFilterError) return jsonError(400, error.message);
         throw error;
       }
-      const tagPlan = await prepareTagPlan(db, tags);
-      const temporarySlug = revision ? null : `revision-${crypto.randomUUID()}`;
-      const revisionCidRef: number | SQL = revision?.cid
-        ?? sql<number>`(SELECT ${schema.contents.cid} FROM ${schema.contents} WHERE ${schema.contents.slug} = ${temporarySlug} AND ${schema.contents.type} = 'revision' AND ${schema.contents.parent} = ${cid})`;
-      const revisionWriteData = temporarySlug
-        ? { ...revisionData, slug: temporarySlug }
-        : revisionData;
-      const revisionStatements: any[] = [
-        revision
-          ? db.update(schema.contents).set(revisionWriteData as any)
-            .where(eq(schema.contents.cid, revision.cid)).returning({ cid: schema.contents.cid })
-          : db.insert(schema.contents).values(revisionWriteData as any)
-            .returning({ cid: schema.contents.cid }),
+      const tagPlan = await prepareTagPlan(db, tags, cid);
+      // D1 serializes these write batches. The existence check and insertion
+      // share one statement, so concurrent first saves reuse the same row.
+      const revisionStatements = [
+        db.insert(schema.contents).select(sql`
+          SELECT NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL, 'revision', 'draft',
+            NULL, 0, '0', '0', '0', ${cid}
+          WHERE ${revisionCidRef} IS NULL
+            AND EXISTS (SELECT 1 FROM typecho_contents WHERE cid = ${cid} AND type = ${existingBaseType})
+        `),
+        db.update(schema.contents).set(revisionData as typeof schema.contents.$inferInsert)
+          .where(sql`cid = ${revisionCidRef}`).returning({ cid: schema.contents.cid }),
         ...buildCustomFieldStatements(db, revisionCidRef, formData),
+        ...buildAttachmentClaimStatements(db, cid, auth.uid, attachmentIds),
         ...buildTagMetaStatements(db, tagPlan),
-        typeof revisionCidRef === 'number'
-          ? db.delete(schema.relationships).where(eq(schema.relationships.cid, revisionCidRef))
-          : db.delete(schema.relationships).where(sql`${schema.relationships.cid} = ${revisionCidRef}`),
+        db.delete(schema.relationships).where(sql`${schema.relationships.cid} = ${revisionCidRef}`),
+        ...buildContentCategoryStatements(db, revisionCidRef, categoryIds),
+        ...buildTagRelationshipStatements(db, revisionCidRef, tagPlan),
       ];
-      if (categoryIds.length) {
-        revisionStatements.push(...buildContentCategoryStatements(db, revisionCidRef, categoryIds));
-      }
-      revisionStatements.push(...buildTagRelationshipStatements(db, revisionCidRef, tagPlan));
-      if (temporarySlug) {
-        revisionStatements.push(db.update(schema.contents)
-          .set({ slug: String(revisionData.slug || existing.slug || cid) })
-          .where(eq(schema.contents.slug, temporarySlug)));
-      }
-      const [savedRevisionRows] = await db.batch(revisionStatements as [any, ...any[]]);
-      const revisionCid = revision?.cid ?? (savedRevisionRows as Array<{ cid: number }> | undefined)?.[0]?.cid;
+      const [, savedRevisionRows] = await db.batch(revisionStatements as [any, ...any[]]);
+      const revisionCid = (savedRevisionRows as Array<{ cid: number }>)[0]?.cid;
       if (!revisionCid) return error(500, 'admin.content.revisionSaveFailed', {}, 'The revision could not be saved.');
       await doHook(pluginCtx, existingBaseType === 'page' ? 'page:afterSave' : 'post:afterSave', {
         ...revisionData, cid: revisionCid, parent: cid,
@@ -712,20 +716,16 @@ export const POST: APIRoute = async ({ request }) => {
     });
     contentData.status = finalPolicy.status;
     contentData.password = finalPolicy.password;
-    const tagPlan = await prepareTagPlan(db, tags);
-    // Read the active revision before the main write. Its removal can then
-    // share the same atomic publish batch as the parent update.
-    const activeRevision = !isDraft
-      ? await db.query.contents.findFirst({
-        where: and(eq(schema.contents.parent, cid), eq(schema.contents.type, 'revision')),
-      })
-      : null;
+    const tagPlan = await prepareTagPlan(db, tags, cid);
+    const revisionIds = db.select({ cid: schema.contents.cid }).from(schema.contents)
+      .where(and(eq(schema.contents.parent, cid), eq(schema.contents.type, 'revision')));
 
     await writeWithUniqueContentSlug(db, contentData.slug as string || String(cid), cid, async (finalSlug) => {
       contentData.slug = finalSlug;
       const updateStatements: any[] = [
         db.update(schema.contents).set(contentData as any).where(eq(schema.contents.cid, cid)),
         ...buildCustomFieldStatements(db, cid, formData),
+        ...buildAttachmentClaimStatements(db, cid, auth.uid, attachmentIds),
         ...buildTagMetaStatements(db, tagPlan),
         ...buildContentMetaCountStatements(
           db,
@@ -741,11 +741,11 @@ export const POST: APIRoute = async ({ request }) => {
         updateStatements.push(...buildContentCategoryStatements(db, cid, categoryIds));
       }
       updateStatements.push(...buildTagRelationshipStatements(db, cid, tagPlan));
-      if (activeRevision) {
+      if (!isDraft) {
         updateStatements.push(
-          db.delete(schema.relationships).where(eq(schema.relationships.cid, activeRevision.cid)),
-          db.delete(schema.fields).where(eq(schema.fields.cid, activeRevision.cid)),
-          db.delete(schema.contents).where(eq(schema.contents.cid, activeRevision.cid)),
+          db.delete(schema.relationships).where(inArray(schema.relationships.cid, revisionIds)),
+          db.delete(schema.fields).where(inArray(schema.fields.cid, revisionIds)),
+          db.delete(schema.contents).where(and(eq(schema.contents.parent, cid), eq(schema.contents.type, 'revision'))),
         );
       }
       await db.batch(updateStatements as [any, ...any[]]);

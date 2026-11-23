@@ -1,0 +1,20 @@
+---
+import { themeTemplates } from 'virtual:theme-templates';
+import { createContext } from '@/lib/context';
+import { MONTH_ARCHIVE_PATH } from '@/lib/content-path';
+import { prepareMonthData, prepareNotFoundData } from '@/lib/page-data';
+
+const ctx = await createContext(Astro.locals, Astro.request);
+const templates = themeTemplates[ctx.options.theme] ?? {};
+const defaults = themeTemplates['typecho-theme-minimal']!;
+const result = MONTH_ARCHIVE_PATH.test(Astro.url.pathname)
+  ? await prepareMonthData(ctx, Number(Astro.params.year), Number(Astro.params.month), Astro.request.url, Astro.locals, Astro.url)
+  : new Response(null, { status: 404 });
+
+if (result instanceof Response) Astro.response.status = result.status;
+const Component = result instanceof Response
+  ? templates.NotFound ?? defaults.NotFound!
+  : templates.Archive ?? defaults.Archive!;
+const data = result instanceof Response ? await prepareNotFoundData(ctx, Astro.request.url) : result;
+---
+<Component {...data} />

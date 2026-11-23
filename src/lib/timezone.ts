@@ -159,18 +159,25 @@ export function getTimezoneDateParts(timestamp: number, timezone: TimezoneSettin
   }
 }
 
+function utcTimestamp(year: number, month: number, day: number, hour: number, minute: number, second: number): number {
+  const date = new Date(0);
+  date.setUTCFullYear(year, month - 1, day);
+  date.setUTCHours(hour, minute, second, 0);
+  return date.getTime() / 1000;
+}
+
 /** Return the current offset of an IANA zone for a given Unix timestamp. */
 export function getTimezoneOffsetSeconds(timezone: string, timestamp = Math.floor(Date.now() / 1000)): number {
   const parts = getIanaParts(timestamp, timezone);
-  const localAsUtc = Date.UTC(
+  const localAsUtc = utcTimestamp(
     parts.year,
-    parts.month - 1,
+    parts.month,
     parts.day,
     parts.hour,
     parts.minute,
     parts.second,
   );
-  return Math.round(localAsUtc / 1000 - Math.trunc(timestamp));
+  return Math.round(localAsUtc - Math.trunc(timestamp));
 }
 
 function pad2(value: number): string {
@@ -222,7 +229,7 @@ export function parseDateTimeLocalToTimestamp(
     || hour > 23 || minute > 59 || second > 59
   ) return null;
 
-  const utcGuess = Date.UTC(year, month - 1, day, hour, minute, second) / 1000;
+  const utcGuess = utcTimestamp(year, month, day, hour, minute, second);
   if (!Number.isFinite(utcGuess)) return null;
 
   const calendarCheck = new Date(utcGuess * 1000);
@@ -257,6 +264,17 @@ export function parseDateTimeLocalToTimestamp(
   // Nonexistent local time (usually the spring-forward gap): keep the
   // pre-transition offset so the instant moves forward past the gap.
   return utcGuess - offsets[0];
+}
+
+/** UTC bounds of a calendar month in the site's timezone. */
+export function getMonthBounds(year: number, month: number, timezone: TimezoneSetting) {
+  const startOf = (y: number, m: number) => parseDateTimeLocalToTimestamp(
+    `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-01T00:00`, timezone,
+  );
+  return {
+    start: startOf(year, month),
+    end: month === 12 ? startOf(year + 1, 1) : startOf(year, month + 1),
+  };
 }
 
 /** Format a region-bearing IANA ID for the settings list without runtime ICU work. */

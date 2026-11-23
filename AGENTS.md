@@ -287,7 +287,7 @@ WebDAV 插件的文件管理器是完整参考实现：`admin:page` 返回包含
 插件只应依赖下列已在运行时接入的 canonical Hook。`HookPoints` 中未列出的常量无调用保证；旧名称通过 `DeprecatedHookPointAliases` 兼容归一化。
 
 **call**：
-`request:begin`, `request:end`, `admin:begin`, `admin:end`, `archive:init`, `archive:beforeRender`, `archive:afterRender`, `archive:index`, `archive:single`, `archive:category`, `archive:tag`, `archive:author`, `archive:search`, `post:afterPublish`, `post:afterSave`, `post:beforeDelete`, `post:afterDelete`, `page:afterPublish`, `page:afterSave`, `page:beforeDelete`, `page:afterDelete`, `comment:afterCreate`, `feedback:trackback:after`, `feedback:pingback:after`, `comment:reply`, `comment:action`, `user:login:success`, `user:login:failure`, `user:logout`, `user:register:after`, `upload:after`, `upload:delete`
+`request:begin`, `request:end`, `admin:begin`, `admin:end`, `archive:init`, `archive:beforeRender`, `archive:afterRender`, `archive:index`, `archive:single`, `archive:category`, `archive:tag`, `archive:author`, `archive:date`, `archive:search`, `post:afterPublish`, `post:afterSave`, `post:beforeDelete`, `post:afterDelete`, `page:afterPublish`, `page:afterSave`, `page:beforeDelete`, `page:afterDelete`, `comment:afterCreate`, `feedback:trackback:after`, `feedback:pingback:after`, `comment:reply`, `comment:action`, `user:login:success`, `user:login:failure`, `user:logout`, `user:register:after`, `upload:after`, `upload:delete`
 
 **filter**：
 `request:route`, `admin:head`, `admin:footer`, `admin:nav`, `admin:login:head`, `admin:login:form`, `admin:page`, `admin:writePost:option`, `admin:writePost:advanceOption`, `admin:writePost:bottom`, `admin:writePage:option`, `admin:writePage:advanceOption`, `admin:writePage:bottom`, `admin:managePosts:titleActions`, `admin:profile:bottom`, `plugin:config:beforeSave`, `archive:query`, `frontend:head`, `frontend:footer`, `content:data`, `content:title`, `content:excerpt`, `content:markdown`, `content:rendered`, `comment:data`, `comment:markdown`, `comment:rendered`, `post:write`, `page:write`, `comment:beforeSave`, `feedback:trackback:before`, `feedback:pingback:before`, `user:login:before`, `user:register:before`, `upload:before`, `feed:item`, `feed:render`, `sidebar:data`, `csp:directives`
@@ -422,7 +422,9 @@ WebDAV 插件的文件管理器是完整参考实现：`admin:page` 返回包含
 - `src/pages/api/admin/content.ts` 保存文章/页面时必须确保 `contents.slug` 唯一；DB 的 `typecho_contents_slug_unique` 部分唯一索引覆盖所有非 revision 且非空 slug，revision 可复用父级 slug。应用层先由 `resolveUniqueContentSlug` 生成 `<slug>-<cid>` 后缀，并只对该索引冲突做有界重试
 - `src/pages/api/install.ts` 的 install handler 必须用 `.returning()` 拿真实自增主键，不准硬编码 `cid:1` / `mid:1`；slug 冲突要走 `resolveSlug` 后缀策略
 - 副作用类管理操作禁止响应 GET（`delete-spam` 等），统一走 POST + CSRF
-- 公共归档（首页/分类/标签/作者/搜索）必须过滤 `created > now()` 的将来贴
+- 公共归档（首页/分类/标签/作者/月归档/搜索）必须过滤 `created > now()` 的将来贴
+- 月归档使用 `/YYYY/MM/`，侧栏和归档查询使用站点 IANA 时区的月份边界，分页沿用 `/page/N/`
+- 线程评论预览每页最多读取 200 行，单个父评论最多预览 20 条直接回复。独立回复页每页展示 25 条直接回复，保留对更深回复的入口
 - 评论 / 注册 / 登录 等公共 POST 必须做 Origin 同源校验（参考 `isSameOriginRequest`）
 - 搜索优先走 FTS5 trigram（`src/lib/fulltext.ts`，仅当每个空白分隔词都 ≥ `FTS_MIN_CHARS` 且 FTS 就绪时启用，MATCH 按词 AND 匹配）；其余情况回退 LIKE 并套 `[2,50]` 字符护栏，长度不在范围内时短路 `1=0`
 - Feed 路由的条数受 `options.feedItems` 控制并 clamp 到 `[5,50]`；description 始终走 excerpt，content:encoded 仅在 `feedFullText` 开启时才输出

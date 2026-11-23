@@ -1,0 +1,31 @@
+---
+import type { CommentPagination } from '@/lib/comment-page';
+import type { I18n } from '@/lib/i18n';
+
+interface Props {
+  pagination: CommentPagination;
+  i18n: I18n;
+}
+
+const { pagination, i18n } = Astro.props;
+const replies = pagination.replyPage;
+const t = i18n.t.bind(i18n);
+---
+{replies ? (
+  <nav class="page-navigator comment-page-navigator" aria-label={t('theme.comments.replyPagination', {}, 'Reply pagination')}>
+    <a href={replies.backUrl}>{t('theme.comments.backToAll', {}, 'Back to all comments')}</a>
+    {replies.prevUrl && <a class="prev" href={replies.prevUrl} rel="prev">{t('theme.comments.previous', {}, 'Previous')}</a>}
+    <span class="current" aria-current="page">{replies.currentPage}</span>
+    {replies.nextUrl && <a class="next" href={replies.nextUrl} rel="next">{t('theme.comments.next', {}, 'Next')}</a>}
+  </nav>
+) : pagination.enabled && pagination.totalPages > 1 && (
+  <nav class="page-navigator comment-page-navigator" aria-label={t('theme.comments.ariaLabel', {}, 'Comment pagination')}>
+    {pagination.prevUrl && <a class="prev" href={pagination.prevUrl} rel="prev">{t('theme.comments.previous', {}, 'Previous')}</a>}
+    {pagination.pages.map(page => (
+      page === pagination.currentPage
+        ? <span class="current" aria-current="page">{page}</span>
+        : <a href={pagination.pageUrls[page]}>{page}</a>
+    ))}
+    {pagination.nextUrl && <a class="next" href={pagination.nextUrl} rel="next">{t('theme.comments.next', {}, 'Next')}</a>}
+  </nav>
+)}

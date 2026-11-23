@@ -359,10 +359,6 @@ const { messagesJson } = Astro.props;
                 success: function (resp) {
                   if ($.isArray(resp) && resp[1]) {
                     fileUploadComplete(uid, resp[1]);
-                    // Update cid for new post (first upload sets the parent)
-                    if (!cid && resp[1].cid) {
-                      cid = resp[1].cid;
-                    }
                   } else if (resp && resp.error) {
                     fileUploadError(uid, editorMessages.uploadFailedWithReason.replace('{name}', file.name).replace('{reason}', resp.error));
                   }

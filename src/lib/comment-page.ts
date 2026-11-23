@@ -14,15 +14,29 @@ export interface CommentPagination {
   pageUrls: Record<number, string>;
   prevUrl: string | null;
   nextUrl: string | null;
+  replyPage?: { currentPage: number; backUrl: string; prevUrl: string | null; nextUrl: string | null };
 }
 
 export interface CommentPage {
   rows: CommentRow[];
   pagination: CommentPagination;
+  replyLinks?: Record<number, string>;
 }
 
 const COMMENT_PAGE_SIZE_MAX = 100;
 const COMMENT_UNPAGED_MAX = 200;
+const THREAD_PREVIEW_REPLIES_PER_PARENT = 20;
+const THREAD_REPLY_PAGE_SIZE = 25;
+
+function replyPageUrl(requestUrl: URL, parent: number | null, page = 1): string {
+  const url = new URL(requestUrl);
+  if (parent === null) url.searchParams.delete('commentThread');
+  else url.searchParams.set('commentThread', String(parent));
+  if (parent !== null && page > 1) url.searchParams.set('replyPage', String(page));
+  else url.searchParams.delete('replyPage');
+  url.hash = parent === null ? 'comments' : `comment-${parent}`;
+  return url.toString();
+}
 
 // Root counts scan every comment on a content (NOT EXISTS per row), so they
 // are cached per (cacheVersion, cid). Every write path bumps cacheVersion,
@@ -67,10 +81,10 @@ export function resetCommentRootCountCache(): void {
   commentRootCounts.clear();
 }
 
-function pageUrl(requestUrl: string, page: number): string {
+function pageUrl(requestUrl: string, page: number, defaultPage: number): string {
   const url = new URL(requestUrl);
   url.hash = 'comments';
-  if (page <= 1) url.searchParams.delete('commentPage');
+  if (page === defaultPage) url.searchParams.delete('commentPage');
   else url.searchParams.set('commentPage', String(page));
   return url.toString();
 }
@@ -104,9 +118,9 @@ function buildPagination(
     totalComments,
     pageSize,
     pages,
-    pageUrls: Object.fromEntries(pages.map(page => [page, pageUrl(requestUrl, page)])),
-    prevUrl: currentPage > 1 ? pageUrl(requestUrl, currentPage - 1) : null,
-    nextUrl: currentPage < totalPages ? pageUrl(requestUrl, currentPage + 1) : null,
+    pageUrls: Object.fromEntries(pages.map(page => [page, pageUrl(requestUrl, page, defaultPage)])),
+    prevUrl: currentPage > 1 ? pageUrl(requestUrl, currentPage - 1, defaultPage) : null,
+    nextUrl: currentPage < totalPages ? pageUrl(requestUrl, currentPage + 1, defaultPage) : null,
   };
 }
 
@@ -122,7 +136,7 @@ export async function loadCommentPage(
   commentsNum?: number | null,
   cacheVersion: string | number = 0,
 ): Promise<CommentPage> {
-  let enabled = !!options.commentsPageBreak;
+  const enabled = !!options.commentsPageBreak;
   const threaded = !!options.commentsThreaded;
   const pageSize = Math.min(
     COMMENT_PAGE_SIZE_MAX,
@@ -132,7 +146,10 @@ export async function loadCommentPage(
   const orderExpression = order === 'DESC'
     ? desc(schema.comments.created)
     : asc(schema.comments.created);
-  const rawPage = new URL(requestUrl).searchParams.get('commentPage');
+  const commentUrl = new URL(requestUrl);
+  const threadParent = Number(commentUrl.searchParams.get('commentThread'));
+  const showThread = threaded && Number.isSafeInteger(threadParent) && threadParent > 0;
+  const rawPage = commentUrl.searchParams.get('commentPage');
   const parsedPage = rawPage ? Number.parseInt(rawPage, 10) : Number.NaN;
   const requestedPage = Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : null;
   const display = options.commentsPageDisplay === 'first' ? 'first' : 'last';
@@ -159,7 +176,7 @@ export async function loadCommentPage(
   // scan of every comment on the content.
   const hasStoredCount = typeof commentsNum === 'number' && Number.isFinite(commentsNum) && commentsNum >= 0;
 
-  if (!enabled) {
+  if (!enabled && !showThread && (!hasStoredCount || commentsNum! <= COMMENT_UNPAGED_MAX)) {
     // Probe the total with the same round trip as the bounded row fetch. Small
     // unpaged comment sets retain the legacy response shape; larger sets are
     // transparently promoted to paged mode instead of materialising everything.
@@ -197,7 +214,6 @@ export async function loadCommentPage(
         ),
       };
     }
-    enabled = true;
   }
 
   const rootCacheKey = `${cacheVersion}\0${cid}\0${threaded}\0${order}`;
@@ -284,6 +300,50 @@ export async function loadCommentPage(
     return { rows, pagination };
   }
 
+  const replyOrder = order === 'DESC' ? desc(schema.comments.coid) : asc(schema.comments.coid);
+  if (showThread) {
+    const rootPage = replyPageUrl(commentUrl, null);
+    const rawReplyPage = Number(commentUrl.searchParams.get('replyPage'));
+    const replyPage = Number.isSafeInteger(rawReplyPage) && rawReplyPage > 0
+      && Number.isSafeInteger(rawReplyPage * THREAD_REPLY_PAGE_SIZE) ? rawReplyPage : 1;
+    const [[parent], replies] = await db.batch([
+      db.select().from(schema.comments)
+        .where(and(approvedForContent, eq(schema.comments.coid, threadParent)))
+        .limit(1),
+      db.select({
+        comment: schema.comments,
+        hasReplies: sql<number>`EXISTS (
+          SELECT 1 FROM typecho_comments AS child
+          WHERE child.cid = ${cid} AND child.status = 'approved'
+            AND child.parent = typecho_comments.coid
+        )`,
+      }).from(schema.comments)
+        .where(and(approvedForContent, eq(schema.comments.parent, threadParent)))
+        .orderBy(orderExpression, replyOrder)
+        .limit(THREAD_REPLY_PAGE_SIZE + 1)
+        .offset((replyPage - 1) * THREAD_REPLY_PAGE_SIZE),
+    ]);
+    if (parent) {
+      const visibleReplies = replies.slice(0, THREAD_REPLY_PAGE_SIZE);
+      return {
+        rows: [{ ...parent, parent: 0 }, ...visibleReplies.map(row => row.comment)],
+        pagination: {
+          ...pagination,
+          replyPage: {
+            currentPage: replyPage,
+            backUrl: rootPage,
+            prevUrl: replyPage > 1 ? replyPageUrl(commentUrl, threadParent, replyPage - 1) : null,
+            nextUrl: replies.length > THREAD_REPLY_PAGE_SIZE
+              ? replyPageUrl(commentUrl, threadParent, replyPage + 1) : null,
+          },
+        },
+        replyLinks: Object.fromEntries(visibleReplies.filter(row => row.hasReplies)
+          .map(({ comment }) => [comment.coid, replyPageUrl(commentUrl, comment.coid)])),
+      };
+    }
+    return loadCommentPage(db, cid, options, rootPage, commentsNum, cacheVersion);
+  }
+
   const orderSql = order === 'DESC' ? sql`DESC` : sql`ASC`;
   const coidOrderSql = order === 'DESC' ? sql`DESC` : sql`ASC`;
   // Seek the root boundary with an index-friendly OFFSET on (created, coid)
@@ -325,8 +385,8 @@ export async function loadCommentPage(
         )`
     : sql``;
 
-  const rows = await db.all<CommentRow>(sql`
-    WITH RECURSIVE selected_roots(coid) AS (
+  const rows = await db.all<CommentRow & { hasMoreReplies: number }>(sql`
+    WITH RECURSIVE selected_roots(coid) AS MATERIALIZED (
       SELECT candidate.coid
       FROM ${schema.comments} AS candidate
       WHERE candidate.cid = ${cid}
@@ -345,20 +405,37 @@ export async function loadCommentPage(
       ORDER BY candidate.created ${orderSql}, candidate.coid ${coidOrderSql}
       LIMIT ${pageSize}
     ),
-    thread AS (
-      SELECT comment.*
+    thread(coid, depth) AS (
+      SELECT comment.coid, 0
       FROM ${schema.comments} AS comment
       INNER JOIN selected_roots AS root ON root.coid = comment.coid
       UNION ALL
-      SELECT child.*
-      FROM ${schema.comments} AS child
-      INNER JOIN thread AS parent_comment ON child.parent = parent_comment.coid
-      WHERE child.cid = ${cid}
-        AND child.status = 'approved'
+      SELECT child.coid, parent_comment.depth + 1
+      FROM thread AS parent_comment
+      INNER JOIN ${schema.comments} AS child ON child.coid IN (
+        SELECT reply.coid FROM ${schema.comments} AS reply
+        WHERE reply.cid = ${cid} AND reply.status = 'approved'
+          AND reply.parent = parent_comment.coid
+        ORDER BY reply.created ${orderSql}, reply.coid ${coidOrderSql}
+        LIMIT ${THREAD_PREVIEW_REPLIES_PER_PARENT}
+      )
+      -- Breadth first so the budget admits every selected root before replies.
+      ORDER BY 2
+      LIMIT ${COMMENT_UNPAGED_MAX}
     )
-    SELECT *
+    SELECT comment.*, EXISTS (
+      SELECT 1 FROM ${schema.comments} AS child
+      WHERE child.cid = ${cid} AND child.status = 'approved'
+        AND child.parent = comment.coid AND child.coid NOT IN (SELECT coid FROM thread)
+    ) AS hasMoreReplies
     FROM thread
-    ORDER BY created ${orderSql}, coid ${coidOrderSql}
+    INNER JOIN ${schema.comments} AS comment ON comment.coid = thread.coid
+    ORDER BY comment.created ${orderSql}, comment.coid ${coidOrderSql}
   `);
-  return { rows, pagination };
+  return {
+    rows,
+    pagination,
+    replyLinks: Object.fromEntries(rows.filter(row => row.hasMoreReplies)
+      .map(row => [row.coid, replyPageUrl(commentUrl, row.coid)])),
+  };
 }

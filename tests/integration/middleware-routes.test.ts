@@ -173,6 +173,28 @@ describe('Middleware: no redirect loops when DB is ready', () => {
     putSpy.mockRestore();
   });
 
+  it('serves a cached slug permalink without another content lookup', async () => {
+    const [page] = await testDb.insert(schema.contents).values({
+      type: 'page', slug: 'cache-hit-slug', status: 'publish',
+    }).returning();
+    const lookup = vi.spyOn(testDb.query.contents, 'findFirst');
+    const next = vi.fn(async () => new Response('cached page'));
+    const requestPage = async () => {
+      const request = new Request(`${SITE}/cache-hit-slug`);
+      return await onRequest({ request, url: new URL(request.url), locals: {} } as any, next) as Response;
+    };
+    try {
+      expect(await (await requestPage()).text()).toBe('cached page');
+      expect(lookup).toHaveBeenCalledOnce();
+      expect(next).toHaveBeenCalledWith(`/contents/${page.cid}/`);
+      expect(await (await requestPage()).text()).toBe('cached page');
+      expect(lookup).toHaveBeenCalledOnce();
+      expect(next).toHaveBeenCalledOnce();
+    } finally {
+      lookup.mockRestore();
+    }
+  });
+
   it('never caches the internal permalink rewrite target', async () => {
     // Simulates the second middleware pass after /pages/{slug}/ rewrote to
     // the built-in /archives/{cid}/ route: the internal URL must not become

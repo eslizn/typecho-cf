@@ -521,6 +521,72 @@ describe('POST /api/admin/content', () => {
     expect(updated).toMatchObject({ title: 'Published again', text: 'new live', type: 'post', status: 'publish' });
   });
 
+  it('reuses one revision for concurrent first draft saves', async () => {
+    const [post] = await testDb.insert(schema.contents).values({
+      slug: 'concurrent-revision', type: 'post', authorId: 1,
+    }).returning();
+    const cookie = await makeAuthCookie(testDb, 1, TEST_AUTH_CODE, TEST_SECRET);
+    let release!: () => void;
+    const bothReached = new Promise<void>(resolve => { release = resolve; });
+    let arrivals = 0;
+    mockApplyFilter.mockImplementation(async (_ctx, hook, data) => {
+      if (hook === 'post:write' && data.type === 'revision') {
+        if (++arrivals === 2) release();
+        await bothReached;
+      }
+      return data;
+    });
+    const saves = await Promise.all(['One', 'Two'].map(async title => POST({
+      request: await makeContentRequest({
+        do: 'update', cid: String(post.cid), status: 'draft', title,
+      }, cookie),
+    } as any)));
+    expect(saves.map(response => response.status)).toEqual([302, 302]);
+    const revisions = await testDb.query.contents.findMany({ where: and(
+      eq(schema.contents.parent, post.cid), eq(schema.contents.type, 'revision'),
+    ) });
+    expect(revisions).toHaveLength(1);
+    expect(['One', 'Two']).toContain(revisions[0].title);
+  });
+
+  it('claims only the current user’s unattached files on first save', async () => {
+    const files = await testDb.insert(schema.contents).values([
+      { title: 'One', type: 'attachment', authorId: 1 },
+      { title: 'Two', type: 'attachment', authorId: 1, parent: null },
+      { title: 'Foreign', type: 'attachment', authorId: 2 },
+      { title: 'Assigned', type: 'attachment', authorId: 1, parent: 42 },
+    ]).returning();
+    const cookie = await makeAuthCookie(testDb, 1, TEST_AUTH_CODE, TEST_SECRET);
+    const form = new URLSearchParams({ title: 'New post', status: 'publish' });
+    for (const file of files) form.append('attachment[]', String(file.cid));
+    const response = await POST({ request: new Request('https://example.com/api/admin/content', {
+      method: 'POST', headers: { cookie, origin: 'https://example.com' }, body: form,
+    }) } as any);
+    expect(response.status).toBe(302);
+    const post = await testDb.query.contents.findFirst({ where: eq(schema.contents.type, 'post') });
+    const attachments = await testDb.query.contents.findMany({
+      where: eq(schema.contents.type, 'attachment'), orderBy: schema.contents.cid,
+    });
+    expect(attachments.map(row => row.parent)).toEqual([post!.cid, post!.cid, 0, 42]);
+  });
+
+  it('retains an attached tag with a custom slug on save', async () => {
+    const [tag] = await testDb.insert(schema.metas).values({
+      name: 'Developer notes', slug: 'journal', type: 'tag',
+    }).returning();
+    const [post] = await testDb.insert(schema.contents).values({
+      title: 'Old title', slug: 'post', type: 'post', authorId: 1,
+    }).returning();
+    await testDb.insert(schema.relationships).values({ cid: post.cid, mid: tag.mid });
+    const cookie = await makeAuthCookie(testDb, 1, TEST_AUTH_CODE, TEST_SECRET);
+    const response = await POST({ request: await makeContentRequest({
+      do: 'update', cid: String(post.cid), title: 'New title', tags: 'Developer notes',
+    }, cookie) } as any);
+    expect(response.status).toBe(302);
+    expect(await testDb.query.relationships.findMany()).toEqual([{ cid: post.cid, mid: tag.mid }]);
+    expect(await testDb.query.metas.findMany()).toHaveLength(1);
+  });
+
   it('keeps revision metadata isolated from published counts', async () => {
     const [category] = await testDb.insert(schema.metas).values({ name: 'News', slug: 'news', type: 'category', count: 1 }).returning();
     const [post] = await testDb.insert(schema.contents).values({ title: 'Live', slug: 'live-meta', text: 'old', type: 'post', status: 'publish', authorId: 1 }).returning({ cid: schema.contents.cid });

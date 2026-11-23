@@ -481,6 +481,64 @@ export function dedupeContentSlugs<T extends {
   });
 }
 
+/** Merge legacy terms that share the destination's (type, slug) key. */
+export function mergeLegacyMetas(
+  metas: SourceRow[],
+  relationships: SourceRow[],
+  options: SourceRow[],
+  contents: SourceRow[],
+) {
+  const byTypeSlug = new Map<string, number>();
+  const replacements = new Map<number, number>();
+  const merged = new Set<number>();
+  const kept = [...metas].sort((a, b) => Number(a.mid) - Number(b.mid)).filter(meta => {
+    if (!meta.slug) return true;
+    const key = JSON.stringify([meta.type || 'category', meta.slug]);
+    const mid = Number(meta.mid);
+    const keeper = byTypeSlug.get(key);
+    if (keeper === undefined) {
+      byTypeSlug.set(key, mid);
+      return true;
+    }
+    replacements.set(mid, keeper);
+    merged.add(keeper);
+    return false;
+  });
+  if (replacements.size === 0) return { metas, relationships, options };
+
+  const remap = (mid: unknown) => replacements.get(Number(mid));
+  const seen = new Set<string>();
+  const counts = new Map<number, number>();
+  const countedContents = new Set(contents.filter(content => content.type !== 'revision').map(content => content.cid));
+  const links = [];
+  for (const row of relationships) {
+    const mid = remap(row.mid) ?? row.mid;
+    const key = `${row.cid}:${mid}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    links.push({ ...row, mid });
+    if (merged.has(Number(mid)) && countedContents.has(row.cid)) {
+      counts.set(Number(mid), (counts.get(Number(mid)) ?? 0) + 1);
+    }
+  }
+  return {
+    metas: kept.map(row => {
+      const mid = Number(row.mid);
+      const parent = remap(row.parent) ?? row.parent;
+      return {
+        ...row,
+        parent: Number(parent) === mid ? 0 : parent,
+        count: merged.has(mid) ? (counts.get(mid) ?? 0) : row.count,
+      };
+    }),
+    relationships: links,
+    options: options.map(row => {
+      const mid = row.name === 'defaultCategory' && !Number(row.user) ? remap(row.value) : undefined;
+      return mid === undefined ? row : { ...row, value: String(mid) };
+    }),
+  };
+}
+
 abstract class TargetWriter {
   abstract init(): void;
   abstract writeUsers(rows: SourceRow[]): number;
@@ -902,15 +960,16 @@ async function main() {
   console.log(`✅ ${stats.comments}`);
 
   process.stdout.write('  Metas...          ');
-  stats.metas = writer.writeMetas(metas);
+  const mergedTerms = mergeLegacyMetas(metas, relationships, options, contents);
+  stats.metas = writer.writeMetas(mergedTerms.metas);
   console.log(`✅ ${stats.metas}`);
 
   process.stdout.write('  Relationships...  ');
-  stats.relationships = writer.writeRelationships(relationships);
+  stats.relationships = writer.writeRelationships(mergedTerms.relationships);
   console.log(`✅ ${stats.relationships}`);
 
   process.stdout.write('  Options...        ');
-  stats.options = writer.writeOptions(options, opts.siteUrl);
+  stats.options = writer.writeOptions(mergedTerms.options, opts.siteUrl);
   console.log(`✅ ${stats.options}`);
 
   process.stdout.write('  Fields...         ');

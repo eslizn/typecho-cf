@@ -26,6 +26,41 @@ vi.mock('@/lib/plugin', () => ({
 
 import { GET } from '@/pages/feed/[...type]';
 import { GET as categoryFeed } from '@/pages/category/[slug]/feed.xml';
+import { GET as tagFeed } from '@/pages/tag/[slug]/feed.xml';
+import { GET as authorFeed } from '@/pages/author/[uid]/feed.xml';
+
+describe('public archive feeds', () => {
+  it.each([['category', categoryFeed, '0'], ['tag', tagFeed, '1'], ['author', authorFeed, '0']] as const)(
+    'excludes password-protected content from the %s feed',
+    async (type, endpoint, feedFullText) => {
+      testDb = await createTestDb();
+      await seedOptions({ feedFullText });
+      const [author] = await testDb.insert(schema.users).values({ name: 'writer' }).returning();
+      const [category, tag] = await testDb.insert(schema.metas).values([
+        { name: 'News', slug: 'news', type: 'category' },
+        { name: 'Tagged', slug: 'tagged', type: 'tag' },
+      ]).returning();
+      const publicPost = await seedContent('open-post', { authorId: author.uid });
+      const protectedPost = await seedContent('locked-post', {
+        authorId: author.uid, password: 'locked', text: 'private-body-marker',
+      });
+      await testDb.insert(schema.relationships).values([publicPost, protectedPost].flatMap(post =>
+        [category, tag].map(term => ({ cid: post.cid, mid: term.mid })),
+      ));
+      const params = { uid: String(author.uid), slug: type === 'tag' ? 'tagged' : 'news' };
+      const response = await endpoint({
+        request: new Request(`https://example.com/${type}/feed.xml`),
+        locals: {},
+        params,
+      } as any);
+      const xml = await response.text();
+      expect(response.status).toBe(200);
+      expect(xml).toContain('open-post');
+      expect(xml).not.toContain('locked-post');
+      expect(xml).not.toContain('private-body-marker');
+    },
+  );
+});
 
 afterEach(() => {
   mockApplyFilterSafely.mockReset();

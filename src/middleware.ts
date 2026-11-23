@@ -1,6 +1,6 @@
 import { defineMiddleware } from 'astro:middleware';
 import { schema } from '@/db';
-import { applyFilter, doHook, isPluginAdminPath, isPluginRoute, isReservedPluginAdminPath } from '@/lib/plugin';
+import { applyFilter, doHook, hasHook, isPluginAdminPath, isPluginRoute, isReservedPluginAdminPath } from '@/lib/plugin';
 import { hasAuthCookies } from '@/lib/auth';
 import { createAdminErrorRedirect, getAdminUserForFlash, isAdminHtmlFormRequest, adminFallbackForApiPath } from '@/lib/admin-flash';
 import { compilePermalinkPattern, decodePathnameForMatching, DEFAULT_PERMALINK_PATTERNS } from '@/lib/permalink-pattern';
@@ -12,7 +12,7 @@ import {
 import { eq, and, inArray } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 import { isCacheablePublicPath, matchCacheSafely, normalizeCacheKeyUrl } from '@/lib/cache';
-import { isContentPathAllowed } from '@/lib/content-path';
+import { isContentPathAllowed, MONTH_ARCHIVE_PATH } from '@/lib/content-path';
 import type { I18nMessage } from '@/lib/i18n';
 import { i18nMessage, normalizeI18nMessage } from '@/lib/i18n';
 import { getThemeTranslationCatalogVersion } from '@/lib/theme';
@@ -32,6 +32,7 @@ import 'virtual:typecho-plugin-registry';
 const BUILT_IN_ROUTES = [
   /^\/contents\/\d+\/?$/,       // unified content entry (post/page rewrite target)
   /^\/category\/[^/]+\/?$/,     // category default form + rewrite target
+  MONTH_ARCHIVE_PATH,
   /^\/tag\//,
   /^\/author\//,
   /^\/search\//,
@@ -113,6 +114,22 @@ export const onRequest = defineMiddleware(async (context, next) => {
       headers: { 'Accept-Language': cacheBundleName },
     })
     : null;
+
+  // Legacy request:route hooks can answer paths that core fails to resolve.
+  // For such requests preserve routing before cache lookup.
+  const canReadCacheBeforeRouting = isBuiltInRoute || !hasHook(pluginCtx, 'request:route');
+  if (cacheKey && canReadCacheBeforeRouting) {
+    const cached = await matchCacheSafely(cacheKey);
+    if (cached) {
+      return await finalizeRequestResponse(cached, {
+        request: context.request,
+        pluginCtx,
+        i18n,
+        resolvedLocale,
+        autoLocale,
+      });
+    }
+  }
 
   // ── Permalink URL Rewriting ────────────────────────────────────────────────
   // A match is rendered with next(internalTarget) in this same middleware
@@ -304,7 +321,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
     });
   }
 
-  if (cacheKey) {
+  if (cacheKey && !canReadCacheBeforeRouting) {
     const cached = await matchCacheSafely(cacheKey);
     if (cached) {
       return await finalizeRequestResponse(cached, {
@@ -446,9 +463,13 @@ function isReservedCorePath(path: string): boolean {
   return false;
 }
 
+// Retire responses rendered before feed password filtering and pagination fixes.
+const PUBLIC_RESPONSE_CACHE_REVISION = '1';
+
 function withCacheVersion(requestUrl: string, cacheVersion?: number, bundleName?: string): string {
   const url = normalizeCacheKeyUrl(requestUrl);
   url.searchParams.set('__typecho_cache', String(cacheVersion || 0));
+  url.searchParams.set('__typecho_render', PUBLIC_RESPONSE_CACHE_REVISION);
   if (bundleName) url.searchParams.set('__typecho_i18n', bundleName);
   return url.toString();
 }

@@ -23,7 +23,10 @@ const [ctx, contentRow] = await createContextAlongside(
 // But we still need to handle the page redirect at the route level
 const { options } = ctx;
 
-const suppliedPassword = Astro.url.searchParams.get('password');
+// Astro changes request.url to the internal content route during a rewrite.
+const publicUrl = new URL(Astro.request.url);
+if (Astro.locals._permalinkRewrite) publicUrl.pathname = Astro.originPathname;
+const suppliedPassword = publicUrl.searchParams.get('password');
 let result;
 let Component;
 const activeTheme = options.theme || 'typecho-theme-minimal';
@@ -59,7 +62,7 @@ if (!contentRow) {
     if (redirectPath) return Astro.redirect(redirectPath);
   }
 
-  result = await preparePageData(ctx, contentRow.slug || String(contentRow.cid), Astro.request.url, suppliedPassword, contentRow);
+  result = await preparePageData(ctx, contentRow.slug || String(contentRow.cid), publicUrl.href, suppliedPassword, contentRow);
   if (result instanceof Response) {
     if (result.status !== 404) return result;
     Astro.response.status = 404;
@@ -69,7 +72,7 @@ if (!contentRow) {
     Component = templates.Page ?? defaultTemplates.Page!;
   }
 } else {
-  result = await preparePostData(ctx, cidNum, Astro.request.url, suppliedPassword, contentRow);
+  result = await preparePostData(ctx, cidNum, publicUrl.href, suppliedPassword, contentRow);
   if (result instanceof Response) {
     if (result.status !== 404) return result;
     Astro.response.status = 404;

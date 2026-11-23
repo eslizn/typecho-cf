@@ -17,6 +17,8 @@ import {
   DEFAULT_PERMALINK_PATTERNS,
 } from '@/lib/permalink-pattern';
 
+export const MONTH_ARCHIVE_PATH = /^\/\d{4}\/(?:0[1-9]|1[0-2])\/?$/;
+
 export interface ContentPathOptions {
   permalinkPattern?: string | null;
   pagePattern?: string | null;

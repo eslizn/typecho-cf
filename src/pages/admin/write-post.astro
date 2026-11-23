@@ -3,7 +3,7 @@ import Admin from '@/layouts/Admin.astro';
 import { createContext, requireAuth } from '@/lib/context';
 import { hasPermission } from '@/lib/auth';
 import { canUseContentEditor } from '@/lib/admin-auth';
-import { eq, and } from 'drizzle-orm';
+import { desc, eq, and } from 'drizzle-orm';
 import { schema } from '@/db';
 import { buildPermalink } from '@/lib/content';
 import { applyFilterSafely } from '@/lib/plugin';
@@ -83,6 +83,7 @@ if (cidNum > 0) {
   if (post?.type === 'post') {
     const revision = await db.query.contents.findFirst({
       where: and(eq(schema.contents.parent, post.cid), eq(schema.contents.type, 'revision')),
+      orderBy: [desc(schema.contents.modified), desc(schema.contents.cid)],
     });
     if (revision) {
       post = { ...post, ...revision, cid: post.cid, type: 'revision' };

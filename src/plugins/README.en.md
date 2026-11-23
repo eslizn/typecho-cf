@@ -417,7 +417,7 @@ Adding a hook requires updating `HookPoints`, the call site, and this guide toge
 | `request:begin` / `request:end` | Request context ready / response finalized | `(context)` / `({ request, response })` |
 | `admin:begin` / `admin:end` | Admin layout starts / admin layout data is ready | `(context)` |
 | `archive:init` | Archive or single-content initialization | `(context)` |
-| `archive:index` / `archive:single` / `archive:category` / `archive:tag` / `archive:author` / `archive:search` | Before the corresponding archive or single-content preparation | `(context)` |
+| `archive:index` / `archive:single` / `archive:category` / `archive:tag` / `archive:author` / `archive:date` / `archive:search` | Before the corresponding archive or single-content preparation | `(context)` |
 | `archive:beforeRender` / `archive:afterRender` | Frontend document response before / after rendering | `(context)` / `({ ..., response })` |
 | `post:afterPublish` / `post:afterSave` | After post publish / save | `(post)` |
 | `post:beforeDelete` / `post:afterDelete` | Before / after post deletion | `(post)` |

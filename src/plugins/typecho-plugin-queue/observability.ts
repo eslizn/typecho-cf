@@ -7,6 +7,15 @@
  * the task Queue metrics can come from the local binding.
  */
 
+import type {
+  QueueConsumerSnapshot,
+  QueueDashboardSnapshot,
+  QueueMetricsSnapshot,
+  QueueResourceSnapshot,
+  QueueSettingsSnapshot,
+} from '@/lib/tasks/queue-dashboard';
+import { cloudflareTaskQueueName } from './binding';
+
 const CLOUDFLARE_API_BASE = 'https://api.cloudflare.com/client/v4';
 const MAX_QUEUE_NAME_LENGTH = 255;
 const MAX_RESOURCE_ID_LENGTH = 64;
@@ -14,63 +23,19 @@ const MAX_API_RESPONSE_BYTES = 1_000_000;
 const MAX_API_LIST_PAGES = 10;
 const API_TIMEOUT_MS = 4_000;
 
-export const DEFAULT_TASK_QUEUE_NAME = 'typecho-cf-tasks';
-
 export interface QueueMetricsBinding {
   metrics(): Promise<unknown>;
 }
 
 /** The subset of the Worker environment used by this read-only module. */
-export interface QueueObservabilityEnv {
+export interface QueueObservabilityInput {
   QUEUE?: QueueMetricsBinding;
-  QUEUE_NAME?: unknown;
-  CF_ACCOUNT_ID?: unknown;
-  CF_API_TOKEN?: unknown;
-}
-
-export interface QueueMetricsSnapshot {
-  backlogCount: number | null;
-  backlogBytes: number | null;
-  oldestMessageTimestampMs: number | null;
-}
-
-export interface QueueSettingsSnapshot {
-  deliveryDelaySeconds: number | null;
-  deliveryPaused: boolean | null;
-  retentionPeriodSeconds: number | null;
-}
-
-export interface QueueConsumerSnapshot {
-  consumerId: string | null;
-  type: 'worker' | 'http_pull' | 'unknown';
-  queueName: string | null;
-  scriptName: string | null;
-  batchSize: number | null;
-  maxConcurrency: number | 'automatic' | null;
-  maxRetries: number | null;
-  maxWaitTimeMs: number | null;
-  retryDelaySeconds: number | null;
-  visibilityTimeoutMs: number | null;
-}
-
-export interface QueueResourceSnapshot {
-  key: 'main';
-  name: string;
-  queueId: string | null;
-  metrics: QueueMetricsSnapshot | null;
-  metricsSource: 'binding' | 'api' | 'unavailable';
-  settings: QueueSettingsSnapshot | null;
-  consumers: readonly QueueConsumerSnapshot[];
-  apiResourceFound: boolean;
-}
-
-export interface QueueDashboardSnapshot {
-  queues: readonly QueueResourceSnapshot[];
-  api: {
-    configured: boolean;
-    available: boolean;
-  };
-  refreshedAt: number;
+  /** Plugin-configured queue name; defaults to the task Queue name. */
+  queueName?: unknown;
+  /** Plugin-configured Cloudflare account id. */
+  accountId?: unknown;
+  /** Plugin-configured read-only API token. */
+  apiToken?: unknown;
 }
 
 export interface QueueObservabilityDependencies {
@@ -111,11 +76,6 @@ function boundedString(value: unknown, maxLength: number): string | null {
     || /[\u0000-\u001f\u007f]/.test(normalized)
   ) return null;
   return normalized;
-}
-
-function queueName(value: unknown, fallback: string): string {
-  const normalized = boundedString(value, MAX_QUEUE_NAME_LENGTH);
-  return normalized && !/\s/.test(normalized) ? normalized : fallback;
 }
 
 function resourceId(value: unknown): string | null {
@@ -242,9 +202,9 @@ function readTotalPages(value: unknown): number {
   return totalPages && totalPages > 0 ? totalPages : 1;
 }
 
-function readApiConfig(env: QueueObservabilityEnv): QueueApiConfig | null {
-  const accountId = resourceId(env.CF_ACCOUNT_ID);
-  const token = boundedString(env.CF_API_TOKEN, 512);
+function readApiConfig(input: QueueObservabilityInput): QueueApiConfig | null {
+  const accountId = resourceId(input.accountId);
+  const token = boundedString(input.apiToken, 512);
   if (!accountId || !token) return null;
   return { accountId, token };
 }
@@ -389,13 +349,13 @@ function createResource(name: string): QueueResourceSnapshot {
  * when an operator has not configured account-level API credentials.
  */
 export async function getQueueDashboardSnapshot(
-  env: QueueObservabilityEnv,
+  input: QueueObservabilityInput,
   dependencies: QueueObservabilityDependencies = {},
 ): Promise<QueueDashboardSnapshot> {
-  const mainName = queueName(env.QUEUE_NAME, DEFAULT_TASK_QUEUE_NAME);
+  const mainName = cloudflareTaskQueueName(input.queueName);
   const queues = [createResource(mainName)];
 
-  const bindingMetrics = await readBindingMetrics(env.QUEUE);
+  const bindingMetrics = await readBindingMetrics(input.QUEUE);
   if (bindingMetrics) {
     queues[0] = {
       ...queues[0],
@@ -403,7 +363,7 @@ export async function getQueueDashboardSnapshot(
       metricsSource: 'binding',
     };
   }
-  const apiConfig = readApiConfig(env);
+  const apiConfig = readApiConfig(input);
   if (!apiConfig) {
     return {
       queues,

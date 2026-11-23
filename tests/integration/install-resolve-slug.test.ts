@@ -8,6 +8,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as schema from '@/db/schema';
 import { createD1TestDouble, createTestDb, type TestDatabase } from '../helpers';
 import { eq } from 'drizzle-orm';
+import { DEFAULT_QUEUE_PROVIDER_ID } from '@/lib/default-queue-provider';
 
 let testDb: TestDatabase;
 let d1TestDouble: ReturnType<typeof createD1TestDouble>;
@@ -95,6 +96,8 @@ describe('POST /api/install (G7-2 / G7-8)', () => {
       where: eq(schema.options.name, 'defaultCategory'),
     });
     expect(defOpt?.value).toBe(String(newCategory!.mid));
+    expect(await testDb.query.options.findFirst({ where: eq(schema.options.name, 'activatedPlugins') }))
+      .toMatchObject({ value: JSON.stringify([DEFAULT_QUEUE_PROVIDER_ID]) });
   });
 
   it('appends a numeric suffix when the slug already exists (G7-8)', async () => {

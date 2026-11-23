@@ -1,72 +1,156 @@
-import { getDb, getPrimaryDb, type Database } from '@/db';
+import type { Database } from '@/db';
+import {
+  createCapabilityRuntimeContext,
+  getCapabilityActivationGeneration,
+  getCapabilityPrimaryDb,
+  type CapabilityInvocationContext,
+  type CapabilityRuntimeContext,
+} from '@/lib/capability';
 import { loadOptions, type SiteOptions } from '@/lib/options';
 import type { PluginDependencyIssue } from '@/lib/plugin-dependencies';
 import { loadPluginSecurityOptions } from '@/lib/security-options';
 import {
   getPluginInitFailures,
+  loadPluginConfig,
   parseActivatedPlugins,
   setActivatedPlugins,
   type HookContext,
 } from '@/lib/plugin';
-import { dispatchTaskMessages, type TaskMessageBatchLike, type TaskMessageLike } from './dispatcher';
+import { dispatchTaskMessages, retryTaskMessages, type TaskMessageLike } from './dispatcher';
+import { enqueueAsyncTaskMessage, type EnqueueAsyncTaskOptions } from './enqueue';
+import { resolveTaskQueue, TaskQueueUnavailableError } from './queue';
+import { CORE_TASK_OWNER_ID } from './registry';
+import type { TaskEnvelope } from './types';
 
-export interface PluginTaskInitFailure {
+interface PluginTaskInitFailure {
   error: string;
   attempts: number;
   failedAt: number;
 }
 
-export interface TaskRuntime {
-  env: Cloudflare.Env;
+export interface TaskDispatchRuntime {
   db: Database;
   options: SiteOptions;
   activatedPlugins: ReadonlySet<string>;
   initFailures: Readonly<Record<string, PluginTaskInitFailure>>;
-  /** Request-local dependency diagnostics for the effective activation set. */
   activationDiagnostics: ReadonlyArray<PluginDependencyIssue>;
 }
 
-/**
- * Build the per-consumer runtime snapshot. Plugin init is deliberately part
- * of this step so queue dispatch uses the same activation rules as requests.
- * No task state is persisted here; Queue remains the retry boundary. The
- * deployment intentionally has no DLQ, so exhausted messages are discarded.
- */
-export async function createTaskRuntime(env: Cloudflare.Env): Promise<TaskRuntime> {
-  const db = getDb(env.DB);
-  // The public options snapshot may lag behind an activation change for the
-  // cacheVersion memo window. Queue side effects must observe a freshly
-  // disabled plugin, so overlay the authoritative plugin rows from the
-  // primary before rebuilding the activation set.
+export interface TaskRuntime extends TaskDispatchRuntime {
+  capabilityRuntime: CapabilityInvocationContext;
+}
+
+interface TaskRuntimeInput {
+  db: Database;
+  primaryDb: Database;
+  env?: Readonly<Record<string, unknown>>;
+  request?: Request;
+}
+
+/** Create an authoritative activation snapshot for a task operation. */
+export async function createTaskRuntime(input: TaskRuntimeInput): Promise<TaskRuntime> {
+  const { db, primaryDb } = input;
   const cachedOptions = await loadOptions(db);
-  const options = await loadPluginSecurityOptions(getPrimaryDb(env.DB), cachedOptions);
-  const activePluginIds = parseActivatedPlugins(options.activatedPlugins as string | undefined);
-  const pluginContext: HookContext = { activatedPlugins: new Set<string>() };
+  const options = await loadPluginSecurityOptions(primaryDb, cachedOptions);
+  const activePluginIds = parseActivatedPlugins(options.activatedPlugins);
+  const pluginContext: HookContext = { activatedPlugins: new Set() };
 
   await setActivatedPlugins(pluginContext, activePluginIds);
 
-  return {
-    env,
+  const snapshot = {
     db,
     options,
-    activatedPlugins: new Set(pluginContext.activatedPlugins),
-    initFailures: { ...getPluginInitFailures() },
-    activationDiagnostics: [...(pluginContext.activationDiagnostics ?? [])],
+    env: input.env,
+    activatedPlugins: pluginContext.activatedPlugins,
+    activationGeneration: pluginContext.activationGeneration,
+    getPluginConfig: (pluginId: string) => loadPluginConfig(options, pluginId),
+  };
+  const capabilityRuntime = input.request
+    ? createCapabilityRuntimeContext({ ...snapshot, request: input.request })
+    : createCapabilityRuntimeContext(snapshot);
+
+  return {
+    db,
+    options,
+    activatedPlugins: capabilityRuntime.activatedPlugins,
+    capabilityRuntime,
+    initFailures: getPluginInitFailures(),
+    activationDiagnostics: pluginContext.activationDiagnostics ?? [],
   };
 }
 
 /**
- * Queue consumer entrypoint helper. Empty batches avoid an unnecessary D1
- * read and are valid no-ops.
+ * Build a submission-only runtime from the authoritative activation set.
+ *
+ * Unlike createTaskRuntime(), this never mutates isolate plugin state: the
+ * calling request keeps its capability runtime and no plugin init/deactivate
+ * runs from inside an HTTP hook. Callers that need the full activation plan
+ * (Cron and Queue consumers) use createTaskRuntime() instead.
  */
-export async function consumeTaskBatch(
-  batch: TaskMessageBatchLike,
-  env: Cloudflare.Env,
-): Promise<void> {
-  if (!batch || !Array.isArray(batch.messages) || batch.messages.length === 0) return;
-  const runtime = await createTaskRuntime(env);
-  await dispatchTaskMessages(
-    batch.messages as readonly TaskMessageLike[],
-    runtime,
+export async function refreshTaskRuntime(context: CapabilityRuntimeContext): Promise<TaskRuntime> {
+  try {
+    const primaryDb = getCapabilityPrimaryDb(context);
+    if (!primaryDb) throw new TypeError('Authoritative activation is unavailable');
+    const cachedOptions = await loadOptions(context.db);
+    const options = await loadPluginSecurityOptions(primaryDb, cachedOptions);
+    const activatedPlugins = new Set(parseActivatedPlugins(options.activatedPlugins));
+    const capabilityRuntime = createCapabilityRuntimeContext({
+      db: context.db,
+      options,
+      env: context.env,
+      activatedPlugins,
+      activationGeneration: getCapabilityActivationGeneration(),
+      getPrimaryDb: () => primaryDb,
+      getPluginConfig: pluginId => loadPluginConfig(options, pluginId),
+    });
+    return {
+      db: context.db,
+      options,
+      activatedPlugins: capabilityRuntime.activatedPlugins,
+      capabilityRuntime,
+      initFailures: getPluginInitFailures(),
+      activationDiagnostics: [],
+    };
+  } catch (error) {
+    console.error({
+      event: 'task.runtime_unavailable',
+      source: 'submission',
+      errorType: error instanceof Error ? error.name : typeof error,
+      error: error instanceof Error ? error.message.slice(0, 200) : undefined,
+    });
+    throw new TaskQueueUnavailableError('activation-unavailable');
+  }
+}
+
+/** Host-only submission for tasks registered under the fixed core owner. */
+export async function enqueueCoreAsyncTask(
+  context: CapabilityRuntimeContext,
+  taskId: string,
+  payload: unknown,
+  options: EnqueueAsyncTaskOptions,
+): Promise<TaskEnvelope> {
+  return enqueueAsyncTaskMessage(
+    await refreshTaskRuntime(context), CORE_TASK_OWNER_ID, taskId, payload, options,
   );
+}
+
+/** Refuse delivery from a different or inactive provider before invoking handlers. */
+export async function consumeTaskBatch(
+  messages: readonly TaskMessageLike[],
+  providerId: string,
+  runtime: TaskRuntime,
+): Promise<void> {
+  if (messages.length === 0) return;
+  const queue = resolveTaskQueue(runtime.capabilityRuntime);
+  if (!queue.ok || queue.ownerPluginId !== providerId) {
+    console.warn({
+      event: 'task.queue_unavailable',
+      source: 'consumer',
+      reason: queue.ok ? 'provider-mismatch' : queue.reason,
+      messageCount: messages.length,
+    });
+    await retryTaskMessages(messages);
+    return;
+  }
+  await dispatchTaskMessages(messages, runtime);
 }

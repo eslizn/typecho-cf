@@ -69,8 +69,8 @@ export const POST: APIRoute = async ({ request }) => {
 
     // Save to DB and update runtime state
     const newIds = activationPlan.effective;
-    await setActivatedPlugins(auth.pluginCtx, newIds);
     await setOption(auth.db, 'activatedPlugins', JSON.stringify(newIds));
+    await setActivatedPlugins(auth.pluginCtx, newIds);
 
     // setOption() advanced cacheVersion above: public pages and other PoPs
     // pick up the new plugin set on their next request.

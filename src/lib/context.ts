@@ -125,10 +125,8 @@ async function buildContext(locals: InternalLocals, request: Request): Promise<R
   const options = core?.options ?? await loadOptions(db);
   const urls = computeUrls(options);
 
-  // Load activated plugins from DB options. Nothing is auto-activated: an
-  // operator must explicitly turn plugins on from /admin/plugin. This means a
-  // hostile package that happens to land in node_modules with typecho/plugin
-  // keywords cannot register hooks without a deliberate admin action.
+  // Use the persisted activation list. Plugin discovery alone grants no
+  // runtime access.
   const activatedIds = core
     ? []
     : parseActivatedPlugins(options.activatedPlugins as string | undefined);

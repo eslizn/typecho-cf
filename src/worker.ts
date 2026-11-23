@@ -1,12 +1,11 @@
 import { handle } from '@astrojs/cloudflare/handler';
 import 'virtual:typecho-plugin-registry';
-import { runScheduledTasks } from '@/lib/tasks/scheduler';
-import { consumeTaskBatch } from '@/lib/tasks/runtime';
+import { queue, scheduled } from '@/plugins/typecho-plugin-queue/worker-events';
 
 const worker = {
   fetch: handle,
-  scheduled: runScheduledTasks,
-  queue: consumeTaskBatch,
+  scheduled,
+  queue,
 };
 
 export default worker satisfies ExportedHandler<Env>;

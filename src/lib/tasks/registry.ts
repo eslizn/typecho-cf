@@ -13,6 +13,9 @@ export const DEFAULT_TASK_TIMEOUT_SECONDS = 30;
 export const MAX_TASK_TIMEOUT_SECONDS = 300;
 export const MAX_TASK_ID_LENGTH = 128;
 
+/** Reserved for tasks declared by core code, outside the plugin lifecycle. */
+export const CORE_TASK_OWNER_ID = 'typecho-core';
+
 /**
  * The compiled matcher is kept alongside the public task definition so the
  * scheduler never reparses plugin cron expressions on every Cron invocation.
@@ -105,6 +108,7 @@ export function registerScheduledTask(
   definition: ScheduledTaskDefinition,
 ): RegisteredScheduledTaskRecord {
   const pluginId = validateIdentity(pluginIdInput, 'pluginId');
+  if (pluginId === CORE_TASK_OWNER_ID) throw new TypeError('Core task owner is reserved');
   validateDefinition(definition, 'scheduled');
   const taskId = validateIdentity(definition.id, 'task id');
   const identity = taskIdentity(pluginId, taskId);
@@ -133,6 +137,20 @@ export function registerAsyncTask<TPayload = unknown>(
   definition: AsyncTaskDefinition<TPayload>,
 ): RegisteredAsyncTaskRecord<TPayload> {
   const pluginId = validateIdentity(pluginIdInput, 'pluginId');
+  if (pluginId === CORE_TASK_OWNER_ID) throw new TypeError('Core task owner is reserved');
+  return registerOwnedAsyncTask(pluginId, definition);
+}
+
+export function registerCoreAsyncTask<TPayload = unknown>(
+  definition: AsyncTaskDefinition<TPayload>,
+): RegisteredAsyncTaskRecord<TPayload> {
+  return registerOwnedAsyncTask(CORE_TASK_OWNER_ID, definition);
+}
+
+function registerOwnedAsyncTask<TPayload>(
+  pluginId: string,
+  definition: AsyncTaskDefinition<TPayload>,
+): RegisteredAsyncTaskRecord<TPayload> {
   validateDefinition(definition, 'async');
   const taskId = validateIdentity(definition.id, 'task id');
   const identity = taskIdentity(pluginId, taskId);

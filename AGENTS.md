@@ -154,6 +154,7 @@ src/lib/constants.ts   — 跨模块常量（密码最小长度、slug 后缀上
 - 存储在 `typecho_options` 表：`name = "plugin:<pluginId>"`，值为 JSON 字符串
 - 通过 `loadPluginConfig(options, pluginId)` 读取（自动合并 manifest 默认值）
 - 启用插件时自动写入默认配置；禁用插件时保留现有配置，重新启用可恢复原设置
+- 插件专属配置项（含 API 凭据、显示名、开关等）一律通过 manifest `config` 保存在 `plugin:<id>`；不要新增 Worker 环境变量、secret 或 `wrangler.jsonc` 全局 `vars` 来承载插件配置。平台资源 binding（D1 / R2 / Queue）仍由部署配置提供
 - `typecho_options.secret` 是签名密钥，跨部署必须保留，**不可重置**
 
 主题自定义配置（可选）使用同一套机制：`name = "theme:<themeId>"`，通过
@@ -168,7 +169,7 @@ src/lib/constants.ts   — 跨模块常量（密码最小长度、slug 后缀上
 |---------|------|------|
 | `DB` | D1 | 数据库 `typecho-cf-db` |
 | `BUCKET` | R2 | 文件存储 `typecho-cf-uploads` |
-| `QUEUE` | Queue | 定时与异步任务主队列 `typecho-cf-tasks` |
+| `QUEUE` | Queue | 可选，供 Cloudflare 队列 provider 使用 |
 | `ASSETS` | Fetcher | Astro 构建产物中的静态资源，由 Cloudflare adapter 管理 |
 
 ### 5.1 环境变量访问
@@ -273,12 +274,14 @@ WebDAV 插件的文件管理器是完整参考实现：`admin:page` 返回包含
 - 本地插件放在 `src/plugins/<name>/`，由 `pnpm-workspace.yaml` 的 `src/plugins/*` 纳入 workspace；在根 `package.json` 使用 `workspace:*` 依赖。本地主题同理使用 `src/themes/*` 与 `workspace:*`
 - 入口优先发现 `index.ts`，其次 `index.js` / `index.mjs` / `plugin.ts` / `plugin.js`
 - 依赖图只读取运行时 `dependencies`、`optionalDependencies` 和 `peerDependencies`（可选 peer 按可选依赖处理）；`devDependencies` 不参与生产插件发现。Typecho 插件之间的 required / optional 关系由这些包元数据递归推导，不新增 Manifest 依赖字段
+- 插件名称与描述的本地化由 `plugin-loader` 在构建时从插件包 `locales/*.json` 提取为 manifest 的 `displayLocales`，未激活时插件列表仍按当前语言展示；manifest 的 `name` / `description` 作为兜底必须独立可读。其他翻译 key 仍由激活插件的 `registerTranslations()` 注册
 
 ### 6.5.1 Capability 能力注册
 
 - Capability 是独立于 Hook、Manifest 和包依赖的新系统概念，核心只提供通用注册/解析、版本匹配、激活代次和 owner 生命周期，不硬编码具体能力
 - 插件在 `init()` 中通过 `PluginInitContext.registerCapability({ capability, version, factory })` 注册实现；owner 自动绑定当前 `pluginId`，初始化失败或停用后旧注册不可解析
 - Consumer 从请求 Hook extra 的 `capabilityRuntime` 取得上下文，通过 SDK `resolveCapability(runtime, { capability, minVersion?, ownerPluginId? })` 解析；未指定 owner 时多个实现返回 `ambiguous`，不得静默按注册顺序选择
+- Capability 默认仅用于 HTTP；注册时使用 `scope: 'any'` 可在 Cron 和消费等非 HTTP 上下文中解析。解析成功结果携带 `backgroundAvailable`（`scope: 'any'` 时为 true）；`resolveTaskQueue` 会拒绝只能在 HTTP 解析的 `tasks.queue` provider，避免入队成功但后台永远无法消费。任务 provider 使用此 scope，详见第 13 节。
 - Consumer 必须处理 `unavailable`、`ambiguous`、`version-mismatch`、`factory-failed` 和能力调用错误，并自行实现可选功能降级；Capability 不执行 Consumer 提供的工具/函数
 - 当前 AI 能力目录由 `typecho-plugin-ai` 提供：`ai.chat.generate` 负责对话生成，`ai.models.list` 发布模型清单——只发布设置了 `alias` 且已启用、支持文本对话的模型，按别名跨 Provider 合并去重（供其他插件的配置下拉与保存前校验使用，服务需实现 `listOptions()`）；Scribe 通过这两个能力消费 AI 插件，不再自带 endpoint / apiKey。`ai.image.generate`、`ai.audio.speech.generate`、`ai.audio.transcribe`、`ai.embeddings.create` 是预留 ID，不代表已有实现
 
@@ -489,7 +492,7 @@ Cloudflare Workers 单个 isolate 内的模块级状态会在异步请求间交�
 
 - 单元测试 → `tests/unit/<name>.test.ts`
 - API 集成测试 → `tests/integration/<name>.test.ts`
-- 插件测试 → `src/plugins/<name>/index.test.ts`（与入口同目录）；核心库单测一律放 `tests/unit/`（`src/lib/plugin.test.ts` 是历史遗留位置）
+- 插件测试 → `src/plugins/<name>/*.test.ts`（与入口同目录）；核心库单测一律放 `tests/unit/`（`src/lib/plugin.test.ts` 是历史遗留位置）
 - 模板渲染测试 → `tests/astro/<name>.test.ts`，用 Astro Container API（`experimental_AstroContainer`）真正渲染 `.astro` 组件并断言产出的 HTML；由独立工程 `vitest.astro.config.ts` 运行（`pnpm run test:astro`，CI 与 `pnpm run test` 一起跑）。不要在 `tests/unit/` 里用 `readFileSync` 断言模板源码——模板断言属于这一类渲染测试
 
 ### 10.3 集成测试 mock 模式
@@ -559,6 +562,7 @@ src/
 │   ├── admin-auth.ts                # 管理后台认证中间件 + 安全重定向
 │   ├── options.ts                   # 站点配置 CRUD
 │   ├── options-snapshot-generation.ts # options 快照代数失效
+│   ├── default-queue-provider.ts    # 新装默认启用的任务 Queue provider id
 │   ├── cache.ts                     # 选项缓存（Cache API + cacheVersion 版本戳）
 │   ├── fulltext.ts                  # FTS5 全文搜索（运行时索引 DDL + MATCH 表达式）
 │   ├── schema-sql.ts                # 建表 SQL 反射生成
@@ -570,7 +574,7 @@ src/
 │   ├── markdown.ts                  # Markdown 渲染 + HTML 净化
 │   ├── http.ts                      # 标准化 HTTP 响应（textError / jsonError / jsonOk）
 │   ├── constants.ts                 # 跨模块常量（密码、限速、缓存 TTL）
-│   ├── queue-observability.ts       # Queue 只读指标与账户级配置观测
+│   ├── tasks/                       # 任务声明、调度、分发和队列能力（queue.ts 解析 tasks.queue；queue-dashboard.ts 定义后台观测契约）
 │   └── url.ts                       # URL 规范化与校验
 ├── integrations/
 │   ├── plugin-loader.ts             # 构建时插件发现
@@ -592,6 +596,7 @@ src/
 │   ├── typecho-plugin-webdav/       # WebDAV 协议 + 文件管理器（参考高级插件）
 │   ├── typecho-plugin-turnstile/    # Cloudflare Turnstile 人机验证
 │   ├── typecho-plugin-scribe/       # AI 写作辅助
+│   ├── typecho-plugin-queue/ # 任务 Queue provider + 观测
 │   └── typecho-plugin-wechat-publisher/ # WechatPublisher
 └── themes/                          # 内置主题（工作区包）
     └── README.md                    # 主题开发完整规范
@@ -613,47 +618,35 @@ scripts/
 
 本节是实现和后续插件开发必须遵守的任务系统规范；若需改变架构边界，先更新本节并完成评审。
 
-### 13.1 固定架构
+### 13.1 任务核心与队列 Provider
 
-- 使用自定义 `src/worker.ts` 导出 `fetch`、`scheduled`、`queue`；HTTP 交给 Astro Cloudflare handler。
-- Cloudflare Cron 固定每分钟触发一次（`* * * * *`），只负责按当前 UTC instant 和站点 IANA timezone 找出当前 local slot，并向 Queue 投递。
-- Cloudflare Queue 是异步传输、批处理和重试边界；当前部署不配置 DLQ，达到 `max_retries` 后仍失败的消息由 Cloudflare 丢弃。Queue consumer 的 `max_concurrency = 1` 只限制外层 consumer，不代表所有任务串行。
-- 核心 dispatcher 允许不同 `{pluginId}:{taskId}` 并发；同一 task 的并发由插件声明的 `concurrency` 控制，并受核心 `globalMaxInFlight` 安全上限约束。
-- 第一阶段不新增任务专用 D1 表，不用 D1 保存任务 cursor、历史、队列状态或通用幂等记录；已有 D1 仍用于站点配置、插件激活状态和插件配置。
-- Queue 是至少一次投递；不承诺精确一次、跨 PoP 强全局互斥或错过 Cron 槽位的可靠补偿。插件必须保证任务幂等。
-- `typecho-cf-tasks` 是当前唯一的账户级 Cloudflare Queue 资源；本地/手动执行 `pnpm run deploy` 依次调用 `node scripts/ensure-queues.mjs`、`pnpm run build`、`pnpm exec wrangler deploy`。Queue 预检按 Wrangler 配置调用项目锁定版本的 `wrangler queues list/create`，缺失时创建、已存在时复用，禁止删除或重建。
-- Deploy Button / Workers Builds 已在构建前按 Wrangler 配置准备资源，且已单独执行 Build command；生产部署命令必须使用 `pnpm run deploy:ci`（等价于 `pnpm exec wrangler deploy`），不得再执行 Queue 预检或重复构建。
-- Workers Builds 的非生产分支必须使用 `wrangler versions upload`（项目命令可写为 `pnpm exec wrangler versions upload`），不得复用会执行生产 `wrangler deploy` 的手动部署路径。
-- `pnpm run deploy:dry-run` 只构建并执行 `wrangler deploy --dry-run`，不得创建 Queue；`pnpm run deploy` 中 Queue 创建失败必须终止后续构建与部署，不能用 `|| true` 吞掉权限、认证或网络错误。
-- `pnpm run deploy` 使用默认 Wrangler 配置；需要 `--env`、`--config` 或 `--cwd` 时，分别对 `node scripts/ensure-queues.mjs` 与 `wrangler deploy` 执行，不能依赖组合脚本的参数透传。
+- 任务核心负责任务注册、身份校验、消息构建、站点时区调度和任务分发。异步投递和消费依赖版本化 `tasks.queue` capability；选定唯一兼容 provider，能力缺席、不可用或冲突时禁止任务执行。
+- Cloudflare provider 封装 `QUEUE` binding、插件配置中的队列名、原生消费批次、批量投递限制和观测。队列名默认 `typecho-cf-tasks`，保存在插件配置（`typecho_options` 的 `plugin:<id>`），仅用于后台展示与漂移告警：consumer 收到不一致的队列名时记录 warning 并照常处理，不得据此拒收或丢弃消息。Worker 的 `scheduled`、`queue` 入口经平台适配转发。带队列部署的 Cron 每分钟触发一次；无队列部署省略任务 Cron、producer 和 consumer。
+- 队列传输采用至少一次投递；插件必须保证业务幂等。核心 dispatcher 维持任务级和全局并发上限。现有 Cloudflare 配置采用有限重试、无 DLQ，达到重试上限后丢弃消息。消费批次在任务运行时不可用时按有界延迟重试并记录错误详情，避免瞬时故障耗尽重试预算。
+- 新装站点在安装流程中默认启用 Queue provider；已有站点由管理员在插件页手动启用。HTTP、Cron 和消费使用权威激活与配置；管理员停用后停止提交和调度，新消费批次显式有限重试。已进入执行的调用可能完成。
+- 带队列部署保留 `typecho-cf-tasks` 和现有资源预检。无队列部署用 `TYPECHO_QUEUE_MODE=no-queue` 从同一源配置派生；资源预检、Astro 构建和 Wrangler 部署使用同一模式。预检跳过队列操作，站点仍能安装与访问。
+- Deploy Button 和 Workers Builds 生产环境使用 `pnpm run deploy:ci` 部署构建产物；非生产分支使用 `wrangler versions upload`。Dry run 构建并验证配置，资源预检失败必须终止带队列部署。
+- 任务状态、历史、通用幂等记录与 Cron 补偿不引入专用 D1 表。站点选项继续保存激活状态和插件配置。
 
 ### 13.2 插件接口约束
 
-- 定时任务和请求态异步任务必须使用不同接口：`registerScheduledTask()`、`registerAsyncTask()`、`enqueueAsyncTask()`。
-- 任务必须先注册再执行；普通请求不能通过参数选择任意插件任务或绕过插件激活状态。
-- 每条消息使用版本化 `TaskEnvelope`，包含稳定 `jobId`、`taskKey`、`idempotencyKey`、来源和时间信息；投递侧、消费侧都要校验。
-- 插件 handler 必须处理重复投递，使用业务唯一键、provider 幂等键或天然幂等操作；核心不隐式引入 D1 去重表。
-- 插件可以返回 `success`、`retry` 或 `discard`；异常和超时默认可重试，但受 Queue `max_retries` 约束；当前部署没有 DLQ，耗尽重试后消息会被丢弃。
-- payload 必须可 JSON 序列化并受大小、字段和 schema 校验；不得携带密码、Cookie、CSRF token、访问令牌或完整请求头。
-- Scheduler 使用 Queue `sendBatch` 时必须同时遵守最多 100 条与整批 256,000 bytes 上限，按先达到的条件切批；`delaySeconds` 必须在 0 到 86,400 秒之间。
-- 长耗时、多步骤、需要持久化恢复的流程不应塞入 Queue 单条消息；按设计规范升级为拆分任务、Durable Object 或 Workflow。
+- 定时和异步任务声明通过 `registerScheduledTask()`、`registerAsyncTask()`；`enqueueAsyncTask()` 绑定任务所属插件，校验任务已注册、插件激活且 provider 可用。提交校验使用 primary 激活集只读构建提交运行时，不改变当前请求的激活代次或已持有的 `capabilityRuntime`。
+- `TaskExecutionContext` 提供站点和任务上下文，不注入 `env`；handler 使用的平台资源由插件自己的平台适配提供。
+- 保留 `TaskEnvelope` v1 兼容性。投递和消费都校验任务身份、来源、时间、`jobId`、`taskKey` 和 `idempotencyKey`。payload 必须为有界 JSON，禁止携带密码、Cookie、CSRF token、访问令牌和完整请求头。
+- 任务 handler 返回 `success`、`retry` 或 `discard`。异常和超时走有限重试，业务 handler 承担重复投递的幂等。handler 请求的 `delaySeconds` 必须为 0–86,400 的整数；超出范围视为非法并回退到 5–300 秒指数退避。
+- Cloudflare provider 按最多 100 条和整批 256,000 bytes 切批，限制 `delaySeconds` 在 0 至 86,400 秒之间。长流程采用拆分任务或具有持久化恢复的机制。
 
-### 13.3 时间、生命周期与可靠性
+### 13.3 时间与生命周期
 
-- Cron 的 `controller.scheduledTime` 是 UTC instant；本地时间必须从现有 `options.timezone` 的 IANA 标识运行时计算，不能使用固定 offset。
-- 默认定时 `taskKey` 按 `{pluginId}:{taskId}:{localSlot}:{scheduledAt}` 生成，其中 `scheduledAt` 是真实 UTC instant；夏令时回拨的两个真实 instant 会分别投递，不承诺跨 isolate 合并，插件仍必须自行保证幂等。
-- 插件 loader 在构建时登记，任务注册在激活插件 `init()` 中完成；HTTP、scheduled、queue 冷启动都必须先加载 registry，再以当前激活插件集合为准。
-- 插件 `init()` 失败时，已完成的任务注册必须回滚；后续初始化重试不得因上一次失败留下的任务定义而产生重复注册冲突。
-- 插件停用后，即使当前 isolate 仍保留旧注册表条目，queue dispatch 也必须跳过其副作用。
-- 任务专用模块放在 `src/lib/tasks/`，不要继续膨胀 `src/lib/plugin.ts`；公共类型通过 `src/lib/plugin-sdk.ts` 导出。
+- 核心用真实 UTC 触发时间和 `options.timezone` 的 IANA 时区计算定时槽位。默认键为 `{pluginId}:{taskId}:{localSlot}:{scheduledAt}`，夏令时回拨的两个 instant 分别投递。
+- HTTP、Cron 和消费冷启动均先加载插件注册表。插件 init 失败或停用时清理其声明。业务插件停用后，分发跳过其任务副作用。
+- 任务核心模块放在 `src/lib/tasks/`，公共类型通过 `src/lib/plugin-sdk.ts` 导出。provider 实现放在对应的插件包。
 
 ### 13.4 队列观测后台
 
-- 管理员通过 `/admin/manage-queues` 查看任务 Queue；该页面只读，不提供消息拉取、租约、删除、重放或暂停操作。
-- 页面不新增任务专用 D1 表，也不承诺提供单条任务的运行中/已完成历史；只展示 Queue 的近实时积压指标、账户级资源配置和 consumer 配置。
-- 主 Queue 使用 Worker `QUEUE.metrics()`，不需要 API 凭据；账户级配置仅在配置 `CF_ACCOUNT_ID` 与 `CF_API_TOKEN` 后通过 Cloudflare Queue API 读取。API Token 必须是只读权限，凭据只能通过 Worker secret / 本地 `.dev.vars` 提供，不得写入页面、日志或任务 payload。
-- `QUEUE_NAME` 必须和 Wrangler producer/consumer 的 Queue 名称保持一致；多实例部署修改 Queue 名称时必须同步修改该变量。
-- 观测请求必须设置超时、限制响应体和分页范围，并在 API 失败时降级为不可用状态，不得把上游错误详情或凭据返回给管理员页面。
+- `/admin/manage-queues` 向管理员提供只读 provider 状态和观测，区分停用、不可用与可用；页面仅展示可取得的队列指标和配置。该菜单与路由仅在任务 Queue provider 已启用时开放：默认 provider 在激活列表中，或存在已注册/可解析的 provider；没有任何 provider 时菜单隐藏、路由返回 404。
+- Cloudflare provider 使用 binding 指标及可选的账户级只读 API。账户 ID、只读 API 令牌与展示用队列名均保存在插件配置（`typecho_options` 的 `plugin:<id>`），在插件设置页维护；`QUEUE` binding 仍由 Worker 平台提供。上游请求有超时、响应体和分页限制。
+- 插件配置中的队列名建议与 Wrangler producer、consumer 的队列名保持一致（用于后台展示与配置漂移告警；不一致不会丢弃任务）。
 
 ### 13.5 协作与验证约定
 

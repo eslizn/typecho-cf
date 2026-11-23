@@ -47,6 +47,7 @@
     "semver": "^7.8.6",
     "typecho-plugin-ai": "workspace:*",
     "typecho-plugin-antispam": "workspace:*",
+    "typecho-plugin-queue": "workspace:*",
     "typecho-plugin-scribe": "workspace:*",
     "typecho-plugin-turnstile": "workspace:*",
     "typecho-plugin-webdav": "workspace:*",

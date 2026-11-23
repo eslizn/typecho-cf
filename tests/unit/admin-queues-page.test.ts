@@ -1,44 +1,120 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { experimental_readRawConfig } from 'wrangler';
+import type { CapabilityRuntimeContext } from '@/lib/capability';
+import { isTaskQueueDashboardEnabled, readTaskQueueDashboard } from '@/lib/tasks/queue-dashboard';
+import { resolveTaskQueue } from '@/lib/tasks/queue';
 
-const read = (path: string) => readFileSync(join(process.cwd(), path), 'utf8');
+vi.mock('@/lib/tasks/queue', () => ({ resolveTaskQueue: vi.fn() }));
 
 describe('admin Queue page wiring', () => {
-  it('exposes the Queue page only to administrators', () => {
-    const page = read('src/pages/admin/manage-queues.astro');
-
-    expect(page).toContain("hasPermission(ctx.user!.group || 'visitor', 'administrator')");
-    expect(page).toContain('getQueueDashboardSnapshot');
-    expect(page).toContain('activeMenu="manage-queues"');
-    // The nav entry and its administrator-only visibility are asserted against
-    // the rendered layout in tests/astro/admin-layout.test.ts.
-  });
-
   it('keeps the first version read-only and does not expose message mutation controls', () => {
-    const page = read('src/pages/admin/manage-queues.astro');
-    const observability = read('src/lib/queue-observability.ts');
+    const observability = readFileSync(join(process.cwd(), 'src/plugins/typecho-plugin-queue/observability.ts'), 'utf8');
 
-    expect(page).not.toMatch(/\/api\/admin\/.*queue/i);
     expect(observability).not.toContain('/messages/pull');
     expect(observability).not.toContain('/messages/peek');
     expect(observability).not.toContain('/purge');
-    expect(page).not.toContain('deadLetterQueue');
     expect(observability).not.toContain('DLQ');
-    expect(page).toContain('queue-card');
-    expect(page).toContain('queue-metrics');
-    expect(page).toContain('queue-consumer-table');
   });
 
   it('keeps the single Queue aligned with the Wrangler resource', () => {
     const { rawConfig: config } = experimental_readRawConfig({ config: join(process.cwd(), 'wrangler.jsonc') });
 
-    expect(config.vars?.QUEUE_NAME).toBe('typecho-cf-tasks');
-    expect(config.vars).not.toHaveProperty('QUEUE_DLQ_NAME');
-    expect(config.queues?.producers).toEqual([{ binding: 'QUEUE', queue: config.vars?.QUEUE_NAME }]);
+    expect(config.vars).toBeUndefined();
+    expect(config.queues?.producers).toEqual([{ binding: 'QUEUE', queue: 'typecho-cf-tasks' }]);
     expect(config.queues?.consumers).toHaveLength(1);
-    expect(config.queues?.consumers?.[0]?.queue).toBe(config.vars?.QUEUE_NAME);
+    expect(config.queues?.consumers?.[0]?.queue).toBe(config.queues?.producers?.[0]?.queue);
     expect(config.queues?.consumers?.[0]).not.toHaveProperty('dead_letter_queue');
+  });
+});
+
+
+describe('admin Queue dashboard status', () => {
+  const runtime = {} as CapabilityRuntimeContext;
+  const providerId = 'typecho-plugin-queue';
+  const defaultProvider = { requested: true, initializationFailed: false };
+
+  it('exposes the page only when a provider is requested or registered', () => {
+    expect(isTaskQueueDashboardEnabled(undefined, { requested: false })).toBe(false);
+    expect(isTaskQueueDashboardEnabled(undefined, { requested: true })).toBe(true);
+
+    vi.mocked(resolveTaskQueue).mockReturnValueOnce({
+      ok: false, capability: 'tasks.queue', reason: 'unavailable',
+    });
+    expect(isTaskQueueDashboardEnabled(runtime, { requested: false })).toBe(false);
+
+    vi.mocked(resolveTaskQueue).mockReturnValueOnce({
+      ok: false,
+      capability: 'tasks.queue',
+      reason: 'unavailable',
+      candidates: [{ ownerPluginId: providerId, version: 1 }],
+    });
+    expect(isTaskQueueDashboardEnabled(runtime, { requested: false })).toBe(true);
+
+    vi.mocked(resolveTaskQueue).mockReturnValueOnce({
+      ok: true,
+      ownerPluginId: providerId,
+      version: 1,
+      backgroundAvailable: true,
+      value: { isAvailable: true, send: vi.fn(), sendBatch: vi.fn() },
+    });
+    expect(isTaskQueueDashboardEnabled(runtime, { requested: false })).toBe(true);
+  });
+
+  it('distinguishes the disabled provider from a deployment without a queue', async () => {
+    vi.mocked(resolveTaskQueue).mockReturnValueOnce({ ok: false, capability: 'tasks.queue', reason: 'unavailable' });
+    expect(await readTaskQueueDashboard(runtime, { ...defaultProvider, requested: false }))
+      .toEqual({ state: 'disabled', snapshot: null });
+
+    vi.mocked(resolveTaskQueue).mockReturnValueOnce({
+      ok: false,
+      capability: 'tasks.queue',
+      reason: 'unavailable',
+      candidates: [{ ownerPluginId: providerId, version: 1 }],
+    });
+    expect(await readTaskQueueDashboard(runtime, defaultProvider))
+      .toEqual({ state: 'unavailable', snapshot: null });
+  });
+
+  it('reports an initialization failure and multiple compatible providers', async () => {
+    vi.mocked(resolveTaskQueue).mockReturnValueOnce({ ok: false, capability: 'tasks.queue', reason: 'unavailable' });
+    expect((await readTaskQueueDashboard(runtime, { ...defaultProvider, initializationFailed: true })).state)
+      .toBe('initialization-failed');
+
+    vi.mocked(resolveTaskQueue).mockReturnValueOnce({ ok: false, capability: 'tasks.queue', reason: 'ambiguous' });
+    expect((await readTaskQueueDashboard(runtime, defaultProvider)).state).toBe('ambiguous');
+  });
+
+  it('preserves transport availability when the read-only snapshot fails', async () => {
+    vi.mocked(resolveTaskQueue).mockReturnValueOnce({
+      ok: true,
+      ownerPluginId: providerId,
+      version: 1,
+      backgroundAvailable: true,
+      value: {
+        isAvailable: true,
+        send: vi.fn(),
+        sendBatch: vi.fn(),
+        getDashboardSnapshot: vi.fn().mockRejectedValueOnce(new Error('monitoring failed')),
+      },
+    });
+    expect(await readTaskQueueDashboard(runtime, defaultProvider)).toEqual({ state: 'available', snapshot: null });
+  });
+
+  it('discards a provider snapshot that does not match the dashboard contract', async () => {
+    vi.mocked(resolveTaskQueue).mockReturnValueOnce({
+      ok: true,
+      ownerPluginId: providerId,
+      version: 1,
+      backgroundAvailable: true,
+      value: {
+        isAvailable: true,
+        send: vi.fn(),
+        sendBatch: vi.fn(),
+        getDashboardSnapshot: vi.fn().mockResolvedValueOnce({ queues: 'not-an-array', api: null }),
+      },
+    });
+    expect(await readTaskQueueDashboard(runtime, defaultProvider)).toEqual({ state: 'available', snapshot: null });
   });
 });

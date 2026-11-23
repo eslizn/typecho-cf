@@ -29,6 +29,34 @@ afterEach(() => {
 });
 
 describe('plugin loader declared dependencies', () => {
+  it('extracts localized names and descriptions for the plugin list', () => {
+    const root = mkdtempSync(join(tmpdir(), 'typecho-plugin-loader-'));
+    temporaryRoots.push(root);
+
+    const name = 'typecho-plugin-localized';
+    writePlugin(join(root, 'src', 'plugins', name), name);
+    const locales = join(root, 'src', 'plugins', name, 'locales');
+    mkdirSync(locales, { recursive: true });
+    writeFileSync(join(locales, 'zh-CN.json'), JSON.stringify({
+      [`plugin.${name}.name`]: '本地化插件',
+      [`plugin.${name}.description`]: '中文描述',
+      [`plugin.${name}.config.mode.label`]: '模式',
+    }));
+    writeFileSync(join(locales, 'en.json'), JSON.stringify({
+      [`plugin.${name}.description`]: 'English description',
+    }));
+    writeFileSync(join(root, 'package.json'), JSON.stringify({
+      dependencies: { [name]: `file:src/plugins/${name}` },
+    }));
+
+    const plugins = discoverPlugins(root);
+
+    expect(plugins[0].manifest.displayLocales).toEqual({
+      'zh-CN': { name: '本地化插件', description: '中文描述' },
+      en: { description: 'English description' },
+    });
+  });
+
   it('keeps local and nested imports root-relative through a symlinked checkout', () => {
     const directory = mkdtempSync(join(tmpdir(), 'typecho-plugin-loader-'));
     temporaryRoots.push(directory);

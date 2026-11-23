@@ -214,6 +214,8 @@ const response = await result.value.generate(request);
 
 `runtimeContext` comes from `capabilityRuntime` on Hook extras or from the host request context. Do not cache a handle at module scope or capture a particular request inside a Capability factory. Without `ownerPluginId`, multiple active implementations return `ambiguous` instead of being silently selected by registration order; an explicit owner is required for directed resolution. Registrations from disabled or failed plugins, and registrations from old activation generations, are not resolvable.
 
+A successful resolution result carries `backgroundAvailable`: it is `true` for implementations registered with `scope: 'any'`. Cron, queue consumption, and other background entry points can resolve only `backgroundAvailable` implementations; a `tasks.queue` provider must use `scope: 'any'`, otherwise `resolveTaskQueue` treats it as unavailable.
+
 Consumers must treat resolution and invocation failures as downgrade branches: skip the AI enhancement, use the existing rule-based path, or report a clear unavailable feature. The Capability layer never executes consumer-provided tools/functions. AI tool calls only return the function name and arguments requested by the model; the consumer executes them and submits the result in a later message.
 
 `typecho-plugin-ai` currently provides:
@@ -248,6 +250,10 @@ The AI plugin configuration page can enable an OpenAI-compatible HTTP endpoint a
 ## Scheduled and Asynchronous Tasks
 
 Tasks are integrated through the methods on `PluginInitContext`. A task must be registered during the plugin's `init()` before it can be dispatched by the scheduler or enqueued by a request. Every task handler has the `(context, payload)` signature. Registration does not run at build time; it takes effect when the plugin is initialized as an active plugin.
+
+Asynchronous submission and scheduled execution require an active, available `tasks.queue` provider. Plugins can declare tasks while the provider is unavailable. The handler context supplies a database, task metadata, and a cancellation signal. Handlers that use platform resources obtain them from their plugin’s platform adapter.
+
+A queue provider registers `tasks.queue` with `scope: 'any'` for HTTP, Cron, and consumer entry points, and implements the SDK’s `TaskQueueProvider`.
 
 ### `registerScheduledTask()`: Register a scheduled task
 
@@ -307,23 +313,37 @@ It must be paired with `enqueueAsyncTask()`. If the task is not registered, the 
 
 ### `enqueueAsyncTask()`: Enqueue from a request
 
-`enqueueAsyncTask(taskId, payload, options)` is the request-originated enqueue method on `PluginInitContext`. It can enqueue only a task already registered with `registerAsyncTask()`. The method always marks the message source as `request`; a plugin cannot forge a `scheduled` source or bypass activation through its arguments.
+`enqueueAsyncTask(capabilityRuntime, taskId, payload, options)` is the request-originated enqueue method on `PluginInitContext`. It can enqueue only a task already registered with `registerAsyncTask()`. The core binds the calling plugin and message source and validates the current activation state.
 
-`options.idempotencyKey` is required and must be a stable business-unique key. `taskKey`, `jobId`, and `delaySeconds` are optional. The method returns `{ jobId, taskKey, idempotencyKey }`. A normal request must provide an explicit stable idempotency key; do not replace it with a newly generated random value on every request:
+> Compatibility note: starting with this version, the first argument is `capabilityRuntime`, and a handler's `TaskExecutionContext` no longer provides `env`. Existing plugins must be updated accordingly; the old signature is not supported at runtime.
+
+Submission validates against the primary activation set and builds a submission-only runtime without replacing the `capabilityRuntime` already held by the current request. If the plugin has been disabled, enqueue fails with `TaskQueueUnavailableError`.
+
+`options.idempotencyKey` is a required, stable business key. `delaySeconds` is optional. The method returns `{ jobId, taskKey, idempotencyKey }` after the provider accepts the message.
 
 ```typescript
-addHook('post:afterSave', pluginId, async (post: { id?: number; modified?: number }) => {
-  if (post.id == null || post.modified == null) return;
+import { TaskQueueUnavailableError, type CapabilityRuntimeContext } from 'typecho/plugin-sdk';
 
-  await enqueueAsyncTask(
-    'reindex-post',
-    { postId: post.id, revision: post.modified },
-    {
-      idempotencyKey: 'post-reindex:' + post.id + ':' + post.modified,
-    },
-  );
+addHook('post:afterSave', pluginId, async (
+  post: { cid?: number; modified?: number },
+  extra?: { capabilityRuntime?: CapabilityRuntimeContext },
+) => {
+  if (post.cid == null || post.modified == null || !extra?.capabilityRuntime) return;
+
+  try {
+    await enqueueAsyncTask(
+      extra.capabilityRuntime,
+      'reindex-post',
+      { postId: post.cid, revision: post.modified },
+      { idempotencyKey: `post-reindex:${post.cid}:${post.modified}` },
+    );
+  } catch (error) {
+    if (!(error instanceof TaskQueueUnavailableError)) throw error;
+  }
 });
 ```
+
+Submit tasks using the `capabilityRuntime` supplied by the current hook. Map `TaskQueueUnavailableError` to `503` in HTTP endpoints that require the queue. Optional features can skip submission when the queue is unavailable.
 
 Request-originated async tasks and scheduled tasks are separate interfaces. Do not map arbitrary request parameters directly to task names, and do not use `enqueueAsyncTask()` as a replacement for scheduled registration. The core validates the versioned `TaskEnvelope` both when sending and when consuming.
 
@@ -337,7 +357,9 @@ A handler must return `TaskResult`:
 | `{ status: 'retry', reason?, delaySeconds? }` | Request a Queue retry, optionally with a delay |
 | `{ status: 'discard', reason? }` | Intentionally acknowledge and drop the message; do not retry |
 
-If a handler throws, returns an invalid result, or exceeds `timeoutSeconds`, the core treats the execution as failed and requests a Queue retry. A timeout also aborts `context.signal`; the core keeps that task identity's concurrency slot occupied for at most one second after the underlying handler promise times out, giving the plugin a short chance to stop while releasing global dispatcher capacity so other task identities can continue. If the handler is still running after that grace period, the core releases the task slot so a non-cooperative handler cannot block the whole Queue batch indefinitely; its late work may overlap the retry, so plugins must promptly honor `context.signal` and make tasks idempotent. Queue provides at-least-once delivery, batching, and retries; this deployment does not configure a DLQ, so a message that still fails after `max_retries` is discarded by Cloudflare. Do not assume exactly-once execution, and do not treat Queue as a task-history or idempotency-record store. The scheduler limits each `sendBatch` call to 100 messages and 256,000 bytes total, splitting at whichever limit is reached first. `delaySeconds` must be an integer from 0 through 86,400 seconds.
+If a handler throws, returns an invalid result, or times out, the core asks the provider to retry. On timeout the core aborts `context.signal`. Pass the signal to cancellable I/O. The underlying handler occupies its task slot and a global execution slot until it settles.
+
+The Cloudflare provider delivers messages at least once. The current deployment discards failed messages when they reach `max_retries`. The provider caps each send batch at 100 messages and 256,000 bytes and supports `delaySeconds` from 0 through 86,400. A handler-requested `delaySeconds` above 86,400 is treated as invalid and falls back to the 5–300 second exponential backoff. Pending messages follow the same retry budget while the provider is disabled.
 
 `concurrency` limits only the same `{pluginId}:{taskId}` identity within the current dispatcher. Different tasks may run in parallel, while the core applies a global limit of at most `16` in-flight tasks for the dispatcher. The Queue consumer's outer `max_concurrency = 1` does not make all tasks serial. This is not a distributed lock across PoPs or isolates; plugins that need global mutual exclusion must provide their own business mechanism.
 
@@ -372,6 +394,8 @@ export default function init({ addHook, pluginId, registerTranslations }: Plugin
 
 `registerTranslations(locale, messages, displayName?)` supports new locales, additional keys, full overrides, and partial overrides of core or other plugin keys. Merge order is core catalogs → plugin order in `options.activatedPlugins` → registration-call order within each plugin; a later registration wins for duplicate keys, with no separate translation `priority`. Only active plugins contribute to the global catalog. Missing keys continue through the current locale, language-family, and `en` fallback chain. Prefer the `plugin.<pluginId>.*` namespace; document intentional overrides of system keys.
 
+The `plugin-loader` extracts `plugin.<pluginId>.name` / `plugin.<pluginId>.description` from the plugin package's `locales/*.json` into the manifest's `displayLocales` at build time, so the plugin list renders them in the current language whether the plugin is active or not. The manifest `name` / `description` must still be readable on its own as the fallback when no locale key exists. Other keys (config form and runtime text) are registered by `registerTranslations()` only while the plugin is active.
+
 `extra.i18n` is the request-local translator for the current request. Use `i18n.t(key, variables, fallbackText)` or `i18n.tPlural(...)`. Catalog values are plain text with simple `{name}` / `{count}` interpolation; ICU is not parsed and translations do not carry HTML semantics.
 
 For inline scripts rendered by the server, do not read `navigator.language` or scan the DOM. Inject only a finite message bag resolved for the current request and serialize it with the SDK's `safeJsonForScript()`; the script should use those values directly for prompts.
@@ -401,6 +425,8 @@ addHook('comment:beforeSave', pluginId, async (commentData: { _rejected?: string
 > Plugins in the main project can also parse `extra.options[\`plugin:${pluginId}\`]` (a JSON string) directly. Standalone npm plugins should prefer the SDK-provided `loadPluginConfig`.
 
 Config storage: `typecho_options` table, `name = "plugin:<pluginId>"`, value is a JSON string.
+
+Plugin-specific settings (including API credentials, display names, and switches) belong in `typecho.plugin.config` and are stored under `plugin:<pluginId>`. Do not read custom Worker environment variables, secrets, or global `wrangler.jsonc` `vars` as plugin configuration. Platform resource bindings (such as `DB`, `BUCKET`, and `QUEUE`) still come from the deployment configuration.
 
 ---
 
@@ -562,7 +588,7 @@ The host project supplies the `typecho` package at install time, and `typecho/pl
 | Category | Exports |
 |----------|---------|
 | Types | `PluginInitContext`, `PluginRouteClaim`, `PluginRouteResolver`, `PluginRouteResolverContext`, `PluginRouteResult`, `PluginManifest`, `PluginConfigField`, `CapabilityDescriptor`, `CapabilityFactory`, `CapabilityRuntimeContext`, `CapabilityResolveResult`, `PluginActivationPlan`, `PluginDependency`, `PluginDependencyIssue`, `AttachmentMeta`, `Database`, `IanaTimezone`, `TimezoneSetting` |
-| Task types | `AsyncTaskDefinition`, `RegisteredAsyncTask`, `RegisteredScheduledTask`, `ScheduledTaskDefinition`, `ScheduledTaskKeyContext`, `ScheduledTaskPayload`, `TaskEnvelope`, `TaskExecutionContext`, `TaskHandler`, `TaskKind`, `TaskLocalSlot`, `TaskResult`, `TaskSource`, `EnqueueAsyncTaskOptions` |
+| Task types | `AsyncTaskDefinition`, `RegisteredAsyncTask`, `RegisteredScheduledTask`, `ScheduledTaskDefinition`, `ScheduledTaskKeyContext`, `ScheduledTaskPayload`, `TaskEnvelope`, `TaskExecutionContext`, `TaskHandler`, `TaskKind`, `TaskLocalSlot`, `TaskResult`, `TaskSource`, `EnqueueAsyncTaskOptions`, `TaskQueueUnavailableError` |
 | Plugin system | `HookPoints`, `parsePluginOption`, `parsePluginConfigFormData`, `loadPluginConfig`, `escapeAttr`, `resolveCapability`, `createCapabilityRuntimeContext`, `getClientIp` |
 | Auth | `canManageResource`, `hasPermission`, `verifyPassword` |
 | Content | `buildPermalink`, `formatDate`, `buildAuthorLink`, `buildCategoryLink` |

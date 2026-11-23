@@ -28,15 +28,26 @@ export type {
   TaskSource,
 } from './tasks/types';
 export type { EnqueueAsyncTaskOptions } from './tasks/enqueue';
+export type { TaskQueueProvider } from './tasks/queue';
+export type { QueueDashboardSnapshot } from './tasks/queue-dashboard';
+export {
+  TASK_QUEUE_CAPABILITY,
+  TASK_QUEUE_CAPABILITY_VERSION,
+  TaskQueueUnavailableError,
+} from './tasks/queue';
 export type { I18n, I18nMessage, MessageVariables } from './i18n';
 export type { IanaTimezone, TimezoneSetting } from './timezone';
 export type { AttachmentMeta } from './attachment';
 export type { Database } from '../db/index';
 export type {
+  BackgroundCapabilityRuntimeContext,
+  BackgroundCapabilityRuntimeContextInput,
   CapabilityDescriptor,
   CapabilityFactory,
   CapabilityFactoryContext,
+  CapabilityInvocationContext,
   CapabilityRegistration,
+  CapabilityRegistrationInput,
   CapabilityResolveFailure,
   CapabilityResolveFailureReason,
   CapabilityResolveResult,

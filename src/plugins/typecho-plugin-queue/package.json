@@ -1,0 +1,42 @@
+{
+  "name": "typecho-plugin-queue",
+  "version": "1.0.0",
+  "description": "Provide asynchronous task transport and queue monitoring through Cloudflare Queues.",
+  "keywords": ["typecho", "plugin", "cloudflare", "queue"],
+  "license": "MIT",
+  "type": "module",
+  "main": "index.ts",
+  "typecho": {
+    "plugin": {
+      "id": "typecho-plugin-queue",
+      "name": "Queue",
+      "description": "Background task transport and queue monitoring for Cloudflare Workers. Disabling stops new tasks; pending messages retry and are discarded at the retry limit.",
+      "author": "eslizn",
+      "authorUrl": "https://eslizn.com",
+      "homepage": "https://github.com/eslizn/typecho-cf/tree/master/src/plugins/typecho-plugin-queue",
+      "version": "1.0.0",
+      "license": "MIT",
+      "tags": ["cloudflare", "queue", "capability"],
+      "config": {
+        "queueName": {
+          "type": "text",
+          "label": "Queue name",
+          "default": "typecho-cf-tasks",
+          "description": "Shown on the admin Queue page and used for drift warnings. Keep it aligned with the Wrangler producer/consumer queue name."
+        },
+        "accountId": {
+          "type": "text",
+          "label": "Cloudflare account ID",
+          "default": "",
+          "description": "Optional. Enables account-level queue configuration and metrics."
+        },
+        "apiToken": {
+          "type": "password",
+          "label": "Cloudflare API token",
+          "default": "",
+          "description": "Optional. Use a token with only the Queues Read permission. Stored in the site database."
+        }
+      }
+    }
+  }
+}

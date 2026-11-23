@@ -1,14 +1,15 @@
 ---
-import { env } from 'cloudflare:workers';
 import Admin from '@/layouts/Admin.astro';
 import { createContext, requireAuth } from '@/lib/context';
 import { hasPermission } from '@/lib/auth';
+import { DEFAULT_QUEUE_PROVIDER_ID } from '@/lib/default-queue-provider';
+import { getPluginInitFailures, parseActivatedPlugins } from '@/lib/plugin';
 import {
-  getQueueDashboardSnapshot,
+  isTaskQueueDashboardEnabled,
+  readTaskQueueDashboard,
   type QueueConsumerSnapshot,
-  type QueueObservabilityEnv,
   type QueueResourceSnapshot,
-} from '@/lib/queue-observability';
+} from '@/lib/tasks/queue-dashboard';
 
 const ctx = await createContext(Astro.locals, Astro.request);
 const authCheck = requireAuth(ctx);
@@ -19,9 +20,24 @@ if (!hasPermission(ctx.user!.group || 'visitor', 'administrator')) {
 }
 
 const { options, urls, user } = ctx;
-const snapshot = await getQueueDashboardSnapshot(env as unknown as QueueObservabilityEnv);
+const defaultProvider = {
+  requested: parseActivatedPlugins(options.activatedPlugins).includes(DEFAULT_QUEUE_PROVIDER_ID),
+  initializationFailed: Object.hasOwn(getPluginInitFailures(), DEFAULT_QUEUE_PROVIDER_ID),
+};
+if (!isTaskQueueDashboardEnabled(ctx.capabilityRuntime, defaultProvider)) {
+  return new Response(null, { status: 404 });
+}
+const { state, snapshot } = await readTaskQueueDashboard(ctx.capabilityRuntime, defaultProvider);
 const t = (key: string, variables: Record<string, string | number> = {}, fallback = key): string =>
   ctx.i18n.t(key, variables, fallback);
+const providerStatus = {
+  available: t('admin.queue.providerAvailable', {}, 'The queue provider is available.'),
+  disabled: t('admin.queue.providerDisabled', {}, 'The queue provider is disabled.'),
+  unavailable: t('admin.queue.providerUnavailable', {}, 'The queue provider is enabled, but a queue resource is unavailable.'),
+  'initialization-failed': t('admin.queue.providerInitFailed', {}, 'The queue provider failed to initialize.'),
+  ambiguous: t('admin.queue.providerConflict', {}, 'More than one compatible queue provider is enabled.'),
+  'version-mismatch': t('admin.queue.providerVersionMismatch', {}, 'The enabled queue provider has an incompatible version.'),
+}[state];
 
 function formatNumber(value: number | null): string {
   if (value === null) return '-';
@@ -80,8 +96,8 @@ function consumerTypeLabel(consumer: QueueConsumerSnapshot): string {
 }
 
 function metricsSourceLabel(queue: QueueResourceSnapshot): string {
-  if (queue.metricsSource === 'binding') return t('admin.queue.workerBinding', {}, 'Worker binding');
-  if (queue.metricsSource === 'api') return t('admin.queue.cloudflareApi', {}, 'Cloudflare API');
+  if (queue.metricsSource === 'binding') return t('admin.queue.workerBinding', {}, 'Runtime binding');
+  if (queue.metricsSource === 'api') return t('admin.queue.providerApi', {}, 'Provider API');
   return t('admin.status.unavailable', {}, 'Unavailable');
 }
 
@@ -90,11 +106,11 @@ function queueTitle(): string {
 }
 
 function queueResourceStatus(queue: QueueResourceSnapshot): string {
-  if (!snapshot.api.configured) {
-    return t('admin.queue.bindingOnly', {}, 'Worker binding only');
+  if (!snapshot?.api.configured) {
+    return t('admin.queue.bindingOnly', {}, 'Runtime binding only');
   }
   if (!snapshot.api.available) {
-    return t('admin.queue.apiUnavailable', {}, 'Cloudflare Queue API unavailable');
+    return t('admin.queue.apiUnavailable', {}, 'Queue provider API unavailable');
   }
   return queue.apiResourceFound
     ? t('admin.queue.accountResource', {}, 'Account resource')
@@ -113,23 +129,28 @@ function metricValueClass(value: number | null, text = false): string {
     <div class="queue-intro">
       <div>
         <h3 class="queue-page-heading">{t('admin.queue.overview', {}, 'Queue overview')}</h3>
-        <p class="description">{t('admin.queue.statusScopeDescription', {}, 'This page shows near-realtime Queue backlog metrics and account-level configuration. It does not record per-message running or completed history. This deployment has no dead-letter Queue; messages that still fail after the retry limit are discarded.')}</p>
+        <p class="description">{t('admin.queue.statusScopeDescription', {}, 'View queue backlog and provider configuration.')}</p>
       </div>
       <span class="queue-readonly-badge">{t('admin.queue.readOnly', {}, 'Read-only')}</span>
     </div>
 
-    {!snapshot.api.configured && (
+    <div class:list={['admin-notice queue-notice', state === 'available' ? 'admin-notice--success' : 'admin-notice--warning']} role="status">
+      <p>{providerStatus}</p>
+      {state === 'available' && !snapshot && <p>{t('admin.queue.noMetrics', {}, 'No realtime metrics available')}</p>}
+    </div>
+
+    {snapshot && !snapshot.api.configured && (
       <div class="admin-notice admin-notice--warning queue-notice" role="status">
-        <p>{t('admin.queue.apiNotConfigured', {}, 'Cloudflare Queue API read-only credentials are not configured. Only realtime metrics available from the Worker binding are shown.')}</p>
+        <p>{t('admin.queue.apiNotConfigured', {}, 'The provider read-only API is unavailable without credentials. Runtime metrics may still be available.')}</p>
       </div>
     )}
-    {snapshot.api.configured && !snapshot.api.available && (
+    {snapshot?.api.configured && !snapshot.api.available && (
       <div class="admin-notice admin-notice--error queue-notice" role="alert">
-        <p>{t('admin.queue.apiUnavailable', {}, 'The Cloudflare Queue API is temporarily unavailable. Configuration and some metrics may be missing.')}</p>
+        <p>{t('admin.queue.apiUnavailable', {}, 'The queue provider API is temporarily unavailable. Configuration and some metrics may be missing.')}</p>
       </div>
     )}
 
-    {snapshot.queues.map(queue => (
+    {snapshot?.queues.map(queue => (
       <section id={`queue-${queue.key}`} class="queue-card" aria-labelledby={`queue-${queue.key}-title`}>
         <header class="queue-card-header">
           <div class="queue-card-heading">

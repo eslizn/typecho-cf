@@ -8,6 +8,7 @@
 import { describe, expect, it } from 'vitest';
 import Admin from '@/layouts/Admin.astro';
 import { createAdminErrorRedirect } from '@/lib/admin-flash';
+import { DEFAULT_QUEUE_PROVIDER_ID } from '@/lib/default-queue-provider';
 import { renderComponent, testI18n } from './helpers';
 
 const OPTIONS = {
@@ -38,14 +39,23 @@ interface RenderAdminOptions {
   group?: string;
   activeMenu?: string;
   request?: Request;
+  queueProvider?: boolean;
 }
 
-function renderAdmin({ group = 'administrator', activeMenu = 'dashboard', request }: RenderAdminOptions = {}) {
+function renderAdmin({
+  group = 'administrator',
+  activeMenu = 'dashboard',
+  request,
+  queueProvider = false,
+}: RenderAdminOptions = {}) {
   return renderComponent(Admin, {
     request: request || new Request('https://example.com/admin/'),
     props: {
       title: 'Overview',
-      options: OPTIONS,
+      options: {
+        ...OPTIONS,
+        activatedPlugins: JSON.stringify(queueProvider ? [DEFAULT_QUEUE_PROVIDER_ID] : []),
+      },
       urls: URLS,
       user: {
         uid: 7,
@@ -105,17 +115,19 @@ describe('Admin layout rendering', () => {
   });
 
   it('marks the active menu entry', async () => {
-    const html = await renderAdmin({ activeMenu: 'manage-queues' });
+    const html = await renderAdmin({ activeMenu: 'manage-queues', queueProvider: true });
 
     expect(html).toContain('<li class="focus"><a href="/admin/manage-queues">');
   });
 
-  it('only shows the queue page to administrators', async () => {
-    const adminHtml = await renderAdmin({ group: 'administrator' });
-    const contributorHtml = await renderAdmin({ group: 'contributor' });
+  it('only shows the queue page to administrators when a provider is enabled', async () => {
+    const adminHtml = await renderAdmin({ group: 'administrator', queueProvider: true });
+    const contributorHtml = await renderAdmin({ group: 'contributor', queueProvider: true });
+    const noProviderHtml = await renderAdmin({ group: 'administrator' });
 
     expect(adminHtml).toContain('href="/admin/manage-queues"');
     expect(contributorHtml).not.toContain('href="/admin/manage-queues"');
+    expect(noProviderHtml).not.toContain('href="/admin/manage-queues"');
   });
 
   it('renders the page slot inside the layout', async () => {

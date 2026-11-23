@@ -3,6 +3,7 @@
 /dist
 /node_modules
 /.wrangler
+/.typecho-wrangler-no-queue.json
 /public/themes
 /public/js
 /public/plugin-assets

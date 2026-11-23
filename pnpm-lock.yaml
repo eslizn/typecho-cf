@@ -212,6 +212,9 @@ importers:
       typecho-plugin-antispam:
         specifier: workspace:*
         version: link:src/plugins/typecho-plugin-antispam
+      typecho-plugin-queue:
+        specifier: workspace:*
+        version: link:src/plugins/typecho-plugin-queue
       typecho-plugin-scribe:
         specifier: workspace:*
         version: link:src/plugins/typecho-plugin-scribe
@@ -280,6 +283,8 @@ importers:
   src/plugins/typecho-plugin-ai: {}
 
   src/plugins/typecho-plugin-antispam: {}
+
+  src/plugins/typecho-plugin-queue: {}
 
   src/plugins/typecho-plugin-scribe: {}
 

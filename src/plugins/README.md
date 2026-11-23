@@ -150,6 +150,10 @@ export default function init({ addHook, pluginId }: PluginInitContext): void {
 
 任务通过 `PluginInitContext` 提供的接口接入。任务必须在插件 `init()` 中先注册，再由调度器或请求态入队执行；任务处理函数统一使用 `(context, payload)` 参数。任务注册不会在构建时执行，只有激活插件初始化后才会生效。
 
+异步投递和定时执行依赖启用且可用的 `tasks.queue` provider。任务声明允许在 provider 缺席时完成。handler 上下文提供数据库、任务元数据和取消信号。使用平台资源的 handler 应从插件自己的平台适配取得这些资源。
+
+供任务系统在 HTTP、Cron 与消费入口解析的 provider 使用 `scope: 'any'` 注册 `tasks.queue`，并实现 SDK 的 `TaskQueueProvider`。
+
 ### `registerScheduledTask()`：注册定时任务
 
 `registerScheduledTask(definition)` 只用于声明由全局 Cron 调度的任务：
@@ -207,23 +211,37 @@ registerAsyncTask<{ postId: number; revision: number }>({
 
 ### `enqueueAsyncTask()`：从请求态入队
 
-`enqueueAsyncTask(taskId, payload, options)` 是 `PluginInitContext` 上的请求态入队方法，只能入队已经通过 `registerAsyncTask()` 注册的任务。它固定将消息来源标记为 `request`，插件不能通过参数伪造 `scheduled` 来源或绕过激活状态。
+`enqueueAsyncTask(capabilityRuntime, taskId, payload, options)` 是 `PluginInitContext` 上的请求态入队方法，只能入队已经通过 `registerAsyncTask()` 注册的任务。核心绑定调用插件和消息来源，校验当前激活状态。
 
-`options.idempotencyKey` 是必填项，必须使用稳定的业务唯一键；`taskKey`、`jobId` 和 `delaySeconds` 可选。方法返回 `{ jobId, taskKey, idempotencyKey }`。普通请求必须显式提供幂等键，不要用每次随机生成的值代替：
+> 兼容性说明：本版本起第一个参数是 `capabilityRuntime`，且 handler 的 `TaskExecutionContext` 不再提供 `env`。已有插件需同步调整；运行时不对旧签名做兼容。
+
+提交校验以 primary 激活集为准，只读构建提交运行时，不会替换当前请求已持有的 `capabilityRuntime`；插件已停用时入队失败并抛出 `TaskQueueUnavailableError`。
+
+`options.idempotencyKey` 是必填的稳定业务键，`delaySeconds` 可选。provider 确认接收后，方法返回 `{ jobId, taskKey, idempotencyKey }`。
 
 ```typescript
-addHook('post:afterSave', pluginId, async (post: { id?: number; modified?: number }) => {
-  if (post.id == null || post.modified == null) return;
+import { TaskQueueUnavailableError, type CapabilityRuntimeContext } from 'typecho/plugin-sdk';
 
-  await enqueueAsyncTask(
-    'reindex-post',
-    { postId: post.id, revision: post.modified },
-    {
-      idempotencyKey: 'post-reindex:' + post.id + ':' + post.modified,
-    },
-  );
+addHook('post:afterSave', pluginId, async (
+  post: { cid?: number; modified?: number },
+  extra?: { capabilityRuntime?: CapabilityRuntimeContext },
+) => {
+  if (post.cid == null || post.modified == null || !extra?.capabilityRuntime) return;
+
+  try {
+    await enqueueAsyncTask(
+      extra.capabilityRuntime,
+      'reindex-post',
+      { postId: post.cid, revision: post.modified },
+      { idempotencyKey: `post-reindex:${post.cid}:${post.modified}` },
+    );
+  } catch (error) {
+    if (!(error instanceof TaskQueueUnavailableError)) throw error;
+  }
 });
 ```
+
+提交只使用当前 Hook 提供的 `capabilityRuntime`。遇到 `TaskQueueUnavailableError` 时，依赖队列的 HTTP 端点应返回 `503`，可选功能可以跳过队列操作。
 
 请求态异步任务和定时任务是两个不同的接口：不要让普通请求把任意参数直接映射成任务名，也不要用 `enqueueAsyncTask()` 代替定时注册。核心会在投递侧和消费侧校验版本化 `TaskEnvelope`。
 
@@ -237,7 +255,9 @@ handler 必须返回 `TaskResult`：
 | `{ status: 'retry', reason?, delaySeconds? }` | 请求 Queue 重试，可指定延迟 |
 | `{ status: 'discard', reason? }` | 有意丢弃并确认消息，不再重试 |
 
-handler 抛出异常、返回非法结果或超过 `timeoutSeconds` 时，核心会把执行视为失败并请求 Queue 重试；超时同时会触发 `context.signal.abort()`，核心会在底层 handler Promise settle 前最多保留该任务的并发槽位 1 秒，以便插件及时停止工作，同时释放全局 dispatcher 槽位以继续执行其他任务。若底层 handler 超过这段宽限期仍未结束，核心会释放任务槽位，避免一个不响应取消的 handler 无限阻塞整个 Queue batch；此时迟到的 handler 可能与重试重叠，因此插件必须及时响应 `context.signal` 并保证任务幂等。Queue 负责至少一次投递、批处理和重试；当前部署未配置 DLQ，达到 `max_retries` 后仍失败的消息会被 Cloudflare 丢弃。不要假设精确一次执行，也不要把 Queue 当作任务历史或幂等记录库。Scheduler 的 `sendBatch` 每批最多 100 条且总大小不超过 256,000 bytes，按先达到的限制切批；`delaySeconds` 只能是 0 到 86,400 秒的整数。
+handler 抛出异常、返回非法结果或超时时，核心会请求 provider 重试。超时会中止 `context.signal`，handler 应将这个信号传给支持取消的 I/O。底层 handler 在结束前仍占用当前任务和全局并发槽位。
+
+Cloudflare provider 提供至少一次交付。当前部署达到 `max_retries` 后丢弃失败消息。每个发送批次最多 100 条且不超过 256,000 bytes，`delaySeconds` 支持 0 到 86,400 秒。handler 返回的 `delaySeconds` 超过 86,400 秒会被视为非法值，核心回退到 5–300 秒的指数退避。provider 停用时，送达的积压按相同预算重试。
 
 `concurrency` 只限制同一个 `{pluginId}:{taskId}` 在当前 dispatcher 中的并发数；不同任务可以并行执行，核心对整个 dispatcher 施加全局最多 `16` 个 in-flight 任务。Queue consumer 的外层 `max_concurrency = 1` 不代表所有任务串行。这个限制不是跨 PoP、跨 isolate 的分布式锁；需要全局互斥时必须由插件使用自己的业务机制。
 
@@ -272,6 +292,8 @@ export default function init({ addHook, pluginId, registerTranslations }: Plugin
 
 `registerTranslations(locale, messages, displayName?)` 支持新增语言、补充已有语言、完整覆盖或部分覆盖核心/其他插件的 key。合并顺序是核心目录 → `options.activatedPlugins` 中的插件顺序 → 当前插件内的注册调用顺序；后注册的同名 key 覆盖先注册的值，不使用额外的 `priority`。只有激活插件的翻译件参与全局查找，插件未提供的 key 会继续按当前语言、语言族和 `en` 回退。推荐使用 `plugin.<pluginId>.*` 命名空间；如果有意覆盖系统 key，应在文档中说明。
 
+插件名称与描述由 `plugin-loader` 在构建时从插件包 `locales/*.json` 提取为 manifest 的 `displayLocales`，因此插件列表在插件激活或未激活时都能按当前语言显示；manifest 的 `name` / `description` 仍需独立可读，作为没有对应 locale key 时的兜底。其他 key（配置表单、运行时文案）只在插件激活时由 `registerTranslations()` 注册。
+
 Hook 的 `extra.i18n` 是当前请求的 request-local 翻译器，使用 `i18n.t(key, variables, fallbackText)` 或 `i18n.tPlural(...)`。翻译值是纯文本，只支持简单的 `{name}` / `{count}` 插值，不解析 ICU，不允许翻译件直接携带 HTML。
 
 插件生成由浏览器后续执行的内联脚本时，不要读取 `navigator.language` 或扫描 DOM。请只注入当前请求已经解析好的有限消息包，并使用 SDK 的 `safeJsonForScript()` 安全序列化；脚本直接使用这些消息生成提示。
@@ -301,6 +323,8 @@ addHook('comment:beforeSave', pluginId, async (commentData: { _rejected?: string
 > 主项目内插件也可直接解析 `extra.options[\`plugin:${pluginId}\`]`（JSON 字符串）。独立 npm 插件推荐使用 SDK 提供的 `loadPluginConfig`。
 
 配置存储：`typecho_options` 表，`name = "plugin:<pluginId>"`，值为 JSON 字符串。
+
+插件专属配置（包括 API 凭据、显示名、开关等）应通过 `typecho.plugin.config` 声明并保存在 `plugin:<pluginId>`；不要在插件中读取自定义 Worker 环境变量、secret 或全局 `wrangler.jsonc` `vars` 作为插件配置。平台资源 binding（如 `DB`、`BUCKET`、`QUEUE`）仍由部署配置提供。
 
 ### 前台动态路由
 
@@ -375,6 +399,8 @@ const response = await result.value.generate(request);
 ```
 
 `runtimeContext` 来自 Hook extra 的 `capabilityRuntime`，也可以由宿主请求上下文传给插件。不要在模块级缓存 handle，也不要在 Capability factory 中捕获某一次请求。未指定 `ownerPluginId` 时，多个活动实现会返回 `ambiguous`，不会按注册顺序静默选择；只有明确指定 owner 才会定向解析。插件停用、初始化失败或激活代次变化后，旧注册不可解析。
+
+解析成功结果携带 `backgroundAvailable`：`scope: 'any'` 的实现为 `true`。Cron、队列消费等后台入口只能解析 `backgroundAvailable` 为 `true` 的实现；`tasks.queue` provider 必须使用 `scope: 'any'`，否则 `resolveTaskQueue` 会按不可用处理。
 
 Capability Consumer 必须把解析失败和调用失败当作可降级分支处理：例如跳过 AI 增强、使用原有规则或返回清晰的功能不可用提示。Capability 不会自动执行 Consumer 提供的工具/函数；AI 工具调用只返回模型要求调用的函数名和参数，由 Consumer 自己执行并把结果作为后续消息提交。
 
@@ -558,7 +584,7 @@ import { schema } from 'typecho/db';
 | 类别 | 导出 |
 |------|------|
 | 类型 | `PluginInitContext`, `PluginRouteClaim`, `PluginRouteResolver`, `PluginRouteResolverContext`, `PluginRouteResult`, `PluginManifest`, `PluginConfigField`, `CapabilityDescriptor`, `CapabilityFactory`, `CapabilityRuntimeContext`, `CapabilityResolveResult`, `PluginActivationPlan`, `PluginDependency`, `PluginDependencyIssue`, `AttachmentMeta`, `Database`, `IanaTimezone`, `TimezoneSetting` |
-| 任务类型 | `AsyncTaskDefinition`, `RegisteredAsyncTask`, `RegisteredScheduledTask`, `ScheduledTaskDefinition`, `ScheduledTaskKeyContext`, `ScheduledTaskPayload`, `TaskEnvelope`, `TaskExecutionContext`, `TaskHandler`, `TaskKind`, `TaskLocalSlot`, `TaskResult`, `TaskSource`, `EnqueueAsyncTaskOptions` |
+| 任务类型 | `AsyncTaskDefinition`, `RegisteredAsyncTask`, `RegisteredScheduledTask`, `ScheduledTaskDefinition`, `ScheduledTaskKeyContext`, `ScheduledTaskPayload`, `TaskEnvelope`, `TaskExecutionContext`, `TaskHandler`, `TaskKind`, `TaskLocalSlot`, `TaskResult`, `TaskSource`, `EnqueueAsyncTaskOptions`, `TaskQueueUnavailableError` |
 | 插件系统 | `HookPoints`, `parsePluginOption`, `parsePluginConfigFormData`, `loadPluginConfig`, `escapeAttr`, `resolveCapability`, `createCapabilityRuntimeContext`, `getClientIp` |
 | 认证 | `canManageResource`, `hasPermission`, `verifyPassword` |
 | 内容 | `buildPermalink`, `formatDate`, `buildAuthorLink`, `buildCategoryLink` |

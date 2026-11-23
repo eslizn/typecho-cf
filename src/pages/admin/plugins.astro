@@ -4,6 +4,9 @@ import { createContext, requireAuth } from '@/lib/context';
 import { hasPermission, requireAdminCSRF } from '@/lib/auth';
 import { getAvailablePlugins, getPluginCount, getPluginInitFailures, pluginHasConfig, parseActivatedPlugins } from '@/lib/plugin';
 import { createRequestI18n } from '@/lib/i18n-runtime';
+import { createI18n } from '@/lib/i18n';
+import { createRequestCapabilityRuntime } from '@/lib/request-capability';
+import { DEFAULT_QUEUE_PROVIDER_ID } from '@/lib/default-queue-provider';
 
 const ctx = await createContext(Astro.locals, Astro.request);
 const authCheck = requireAuth(ctx);
@@ -73,9 +76,9 @@ if (Astro.request.method === 'POST') {
           // Persist the corrected effective list. Disabling a plugin keeps
           // its configuration so a later re-enable can restore it.
           const newIds = activationPlan.effective;
-          await setActivatedPlugins(ctx, newIds);
           const serialized = JSON.stringify(newIds);
           await setOption(db, 'activatedPlugins', serialized);
+          await setActivatedPlugins(ctx, newIds);
           (options as any).activatedPlugins = serialized;
           // The current response must observe the new active catalog set too;
           // otherwise a just-deactivated plugin could still translate this
@@ -85,6 +88,17 @@ if (Astro.request.method === 'POST') {
           ctx.i18n = runtime.i18n;
           ctx.resolvedLocale = runtime.resolvedLocale;
           ctx.autoLocale = runtime.autoLocale;
+          // The capability runtime embeds the activation generation, so it must
+          // be rebuilt with the new activation set as well; otherwise admin
+          // hooks rendered later in this POST resolve against the boot-time
+          // generation and see every capability as unavailable.
+          ctx.capabilityRuntime = createRequestCapabilityRuntime({
+            request: Astro.request,
+            db,
+            options,
+            activatedPlugins: ctx.activatedPlugins,
+            activationGeneration: ctx.activationGeneration,
+          });
         }
       }
     }
@@ -97,12 +111,30 @@ if (Astro.request.method === 'POST') {
 const plugins = getAvailablePlugins(ctx);
 const pluginCount = getPluginCount();
 const initFailures = getPluginInitFailures();
-const pluginName = (plugin: typeof plugins[number]): string => plugin.isActive
-  ? ctx.i18n.t(`plugin.${plugin.id}.name`, {}, plugin.manifest.name || plugin.id)
-  : (plugin.manifest.name || plugin.id);
-const pluginDescription = (plugin: typeof plugins[number]): string => plugin.isActive
-  ? ctx.i18n.t(`plugin.${plugin.id}.description`, {}, plugin.manifest.description || '')
-  : (plugin.manifest.description || '');
+const queueProviderRequested = parseActivatedPlugins(options.activatedPlugins).includes(DEFAULT_QUEUE_PROVIDER_ID);
+// Name/description catalogs are derived at build time from each plugin's
+// locales, so the list renders in the current language even for plugins that
+// are not active (their runtime translations are not registered).
+const displayCatalogs = new Map<string, Record<string, string>>();
+for (const plugin of plugins) {
+  for (const [locale, entry] of Object.entries(plugin.manifest.displayLocales ?? {})) {
+    const messages = displayCatalogs.get(locale) ?? {};
+    if (entry.name) messages[`plugin.${plugin.id}.name`] = entry.name;
+    if (entry.description) messages[`plugin.${plugin.id}.description`] = entry.description;
+    displayCatalogs.set(locale, messages);
+  }
+}
+const displayI18n = createI18n({ locale: ctx.i18n.locale, catalogs: displayCatalogs });
+const pluginName = (plugin: typeof plugins[number]): string => ctx.i18n.t(
+  `plugin.${plugin.id}.name`,
+  {},
+  displayI18n.t(`plugin.${plugin.id}.name`, {}, plugin.manifest.name || plugin.id),
+);
+const pluginDescription = (plugin: typeof plugins[number]): string => ctx.i18n.t(
+  `plugin.${plugin.id}.description`,
+  {},
+  displayI18n.t(`plugin.${plugin.id}.description`, {}, plugin.manifest.description || ''),
+);
 ---
 <Admin title={ctx.i18n.t('admin.page.plugins', {}, 'Plugin management')} options={options} urls={urls} user={user} activeMenu="plugins" pluginCtx={ctx}>
   <div class="col-mb-12" role="main">
@@ -226,7 +258,7 @@ const pluginDescription = (plugin: typeof plugins[number]): string => plugin.isA
                     <form method="post" action="/admin/plugins" class="admin-actions">
                       <input type="hidden" name="_" value={csrfToken} />
                       <input type="hidden" name="plugin" value={plugin.id} />
-                      {plugin.isActive ? (
+                      {(plugin.isActive || (queueProviderRequested && plugin.id === DEFAULT_QUEUE_PROVIDER_ID)) ? (
                         <>
                           {pluginHasConfig(plugin.id) && (
                             <a href={`/admin/plugin-config?id=${plugin.id}`} class="btn btn-s">{ctx.i18n.t('admin.action.settings', {}, 'Settings')}</a>

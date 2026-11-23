@@ -1,20 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { env } from 'cloudflare:workers';
+import { schema } from '@/db';
+import { createCapabilityRuntimeContext } from '@/lib/capability';
+import { createTestDb, disposeTestDb } from '../helpers';
 import {
   HookPoints,
+  type PluginInitContext,
   addHook,
   registerPluginInit,
   resetPluginInitState,
   setActivatedPlugins,
 } from '@/lib/plugin';
 import { findTask, listScheduledTasks } from '@/lib/tasks/registry';
-import { _resetTaskQueue } from '../__mocks__/cloudflare-workers';
+import { TASK_QUEUE_CAPABILITY } from '@/lib/tasks/queue';
+import { testQueueProvider } from '../helpers/task-provider';
 
 const noopInitContext = { addHook, HookPoints };
 
 describe('plugin task lifecycle bridge', () => {
   beforeEach(() => {
-    _resetTaskQueue();
     resetPluginInitState();
   });
 
@@ -47,31 +50,57 @@ describe('plugin task lifecycle bridge', () => {
     });
   });
 
-  it('uses a core-owned request source and current plugin identity for enqueue', async () => {
+  it('binds enqueue to its owner and observes freshly disabled providers', async () => {
+    const provider = testQueueProvider();
+    let enqueue: PluginInitContext['enqueueAsyncTask'] | undefined;
     registerPluginInit({
-      'plugin-enqueue': async ({ registerAsyncTask, enqueueAsyncTask }) => {
-        registerAsyncTask({
-          id: 'work',
-          handler: async () => ({ status: 'success' as const }),
+      'plugin-enqueue': ({ registerAsyncTask, enqueueAsyncTask }) => {
+        registerAsyncTask({ id: 'work', handler: () => ({ status: 'success' }) });
+        enqueue = enqueueAsyncTask;
+      },
+      'test-provider': ({ registerCapability }) => {
+        registerCapability?.({
+          capability: TASK_QUEUE_CAPABILITY, version: 1, scope: 'any', factory: () => provider,
         });
-        await enqueueAsyncTask('work', { value: 1 }, { idempotencyKey: 'business:1' });
       },
     }, noopInitContext);
+    const ids = ['plugin-enqueue', 'test-provider'];
+    const activeOptions = { activatedPlugins: JSON.stringify(ids) };
+    const db = await createTestDb();
+    try {
+      await db.insert(schema.options).values({
+        name: 'activatedPlugins',
+        user: 0,
+        value: activeOptions.activatedPlugins,
+      });
+      await setActivatedPlugins({ activatedPlugins: new Set() }, ids);
+      const runtime = createCapabilityRuntimeContext({
+        request: new Request('https://example.com/'),
+        db: db as never,
+        activatedPlugins: new Set(ids),
+        getPrimaryDb: () => db as never,
+      });
 
-    await setActivatedPlugins({ activatedPlugins: new Set() }, ['plugin-enqueue']);
-
-    expect(env.QUEUE.send).toHaveBeenCalledTimes(1);
-    expect(env.QUEUE.send).toHaveBeenCalledWith(
-      expect.objectContaining({
+      if (!enqueue) throw new Error('task enqueue was not initialized');
+      const accepted = await enqueue(runtime, 'work', { value: 1 }, { idempotencyKey: 'business:1' });
+      expect(accepted).toMatchObject({
         pluginId: 'plugin-enqueue',
         taskId: 'work',
         kind: 'async',
         source: 'request',
         idempotencyKey: 'business:1',
         localSlot: null,
-      }),
-      expect.objectContaining({ contentType: 'json' }),
-    );
+      });
+      expect(provider.send).toHaveBeenCalledExactlyOnceWith(accepted, undefined);
+
+      await db.update(schema.options)
+        .set({ value: '["plugin-enqueue"]' });
+      await expect(enqueue(runtime, 'work', {}, { idempotencyKey: 'business:2' }))
+        .rejects.toMatchObject({ status: 503, reason: 'unavailable' });
+      expect(provider.send).toHaveBeenCalledTimes(1);
+    } finally {
+      await disposeTestDb(db);
+    }
   });
 
   it('does not allow a plugin to register a different plugin identity', async () => {

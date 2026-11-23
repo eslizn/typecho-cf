@@ -26,7 +26,6 @@ export type TaskResult =
   | { status: 'discard'; reason?: string };
 
 export interface TaskExecutionContext {
-  env: Cloudflare.Env;
   db: Database;
   options: SiteOptions;
   pluginId: string;

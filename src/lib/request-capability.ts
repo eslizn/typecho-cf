@@ -7,7 +7,7 @@
  * snapshot cannot drift between call sites.
  */
 import { env } from 'cloudflare:workers';
-import type { Database } from '@/db';
+import { getPrimaryDb, type Database } from '@/db';
 import { createCapabilityRuntimeContext, type CapabilityRuntimeContext } from '@/lib/capability';
 import type { SiteOptions } from '@/lib/options';
 import { loadPluginConfig } from '@/lib/plugin';
@@ -30,6 +30,7 @@ export function createRequestCapabilityRuntime(
     env: env as unknown as Record<string, unknown>,
     activatedPlugins: input.activatedPlugins,
     activationGeneration: input.activationGeneration,
+    getPrimaryDb: () => getPrimaryDb(env.DB),
     getPluginConfig: pluginId => loadPluginConfig(input.options, pluginId),
   });
 }

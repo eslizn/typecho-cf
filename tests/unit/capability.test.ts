@@ -35,9 +35,37 @@ describe('generic capability registry', () => {
       minVersion: 1,
     });
 
-    expect(result).toMatchObject({ ok: true, ownerPluginId: 'provider', version: 1 });
+    expect(result).toMatchObject({
+      ok: true,
+      ownerPluginId: 'provider',
+      version: 1,
+      backgroundAvailable: false,
+    });
     expect((result as any).value).toEqual({ secret: 'owner-secret', hasPluginOption: false });
     expect(factory).toHaveBeenCalledOnce();
+  });
+
+  it('resolves background-capable factories without running HTTP-only factories', () => {
+    const requestFactory = vi.fn(({ request }) => request.url);
+    registerCapability('http-provider', {
+      capability: 'example.http', version: 1, factory: requestFactory,
+    });
+    registerCapability('shared-provider', {
+      capability: 'example.shared', version: 1, scope: 'any',
+      factory: ({ request, signal }) => ({ request, signal }),
+    });
+    const activatedPlugins = new Set(['http-provider', 'shared-provider']);
+    setCapabilityActivation(activatedPlugins, 1);
+    const signal = new AbortController().signal;
+    const background = createCapabilityRuntimeContext({ db: {} as never, activatedPlugins, signal });
+
+    expect(resolveCapability(background, { capability: 'example.http' }))
+      .toMatchObject({ ok: false, reason: 'unavailable' });
+    expect(requestFactory).not.toHaveBeenCalled();
+    expect(resolveCapability(background, { capability: 'example.shared' }))
+      .toMatchObject({ ok: true, value: { request: undefined, signal }, backgroundAvailable: true });
+    expect(resolveCapability(runtime(['http-provider']), { capability: 'example.http' }))
+      .toMatchObject({ ok: true, value: 'https://example.com/', backgroundAvailable: false });
   });
 
   it('omits plugin options and the signing secret from the shared runtime options', () => {

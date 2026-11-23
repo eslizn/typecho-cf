@@ -8,7 +8,7 @@ import {
   registerAsyncTask,
   resetTaskRegistry,
 } from '@/lib/tasks/registry';
-import type { TaskRuntime } from '@/lib/tasks/runtime';
+import type { TaskDispatchRuntime } from '@/lib/tasks/runtime';
 
 type FakeMessage = TaskMessageLike & {
   ack: ReturnType<typeof vi.fn<() => void>>;
@@ -24,11 +24,10 @@ function makeMessage(body: unknown, attempts = 1): FakeMessage {
   };
 }
 
-function makeRuntime(activePlugins: string[]): TaskRuntime {
+function makeRuntime(activePlugins: string[]): TaskDispatchRuntime {
   return {
-    env: {} as Cloudflare.Env,
-    db: {} as TaskRuntime['db'],
-    options: {} as TaskRuntime['options'],
+    db: {} as TaskDispatchRuntime['db'],
+    options: {} as TaskDispatchRuntime['options'],
     activatedPlugins: new Set(activePlugins),
     initFailures: {},
     activationDiagnostics: [],
@@ -64,13 +63,15 @@ describe('task dispatcher', () => {
 
   it('acks successful tasks and retries handler exceptions', async () => {
     const success = makeMessage(envelope('plugin-a', 'success'));
+    const handler = vi.fn((_context: unknown) => ({ status: 'success' as const }));
     registerAsyncTask('plugin-a', {
       id: 'success',
-      handler: async () => ({ status: 'success' }),
+      handler,
     });
     await dispatchTaskMessages([success], makeRuntime(['plugin-a']));
     expect(success.ack).toHaveBeenCalledTimes(1);
     expect(success.retry).not.toHaveBeenCalled();
+    expect(handler.mock.calls[0]?.[0]).not.toHaveProperty('env');
 
     const failed = makeMessage(envelope('plugin-a', 'failed'), 2);
     registerAsyncTask('plugin-a', {
@@ -435,15 +436,18 @@ describe('task dispatcher', () => {
       .rejects.toThrow('retry unavailable');
   });
 
-  it('falls back to a safe retry delay when a plugin exceeds the Queue limit', async () => {
-    registerAsyncTask('plugin-a', {
-      id: 'invalid-delay',
-      handler: async () => ({ status: 'retry', delaySeconds: 86_401 }),
-    });
-    const message = makeMessage(envelope('plugin-a', 'invalid-delay'));
+  it.each([-1, 86_401])(
+    'falls back to a safe retry delay when a plugin returns an invalid delay (%s)',
+    async delaySeconds => {
+      registerAsyncTask('plugin-a', {
+        id: 'invalid-delay',
+        handler: async () => ({ status: 'retry', delaySeconds }),
+      });
+      const message = makeMessage(envelope('plugin-a', 'invalid-delay'));
 
-    await dispatchTaskMessages([message], makeRuntime(['plugin-a']));
+      await dispatchTaskMessages([message], makeRuntime(['plugin-a']));
 
-    expect(message.retry).toHaveBeenCalledWith({ delaySeconds: 5 });
-  });
+      expect(message.retry).toHaveBeenCalledWith({ delaySeconds: 5 });
+    },
+  );
 });

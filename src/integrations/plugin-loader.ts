@@ -8,13 +8,14 @@
  * This follows the same pattern as theme-loader.ts for consistency.
  */
 import type { AstroIntegration } from 'astro';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { satisfies, valid, validRange } from 'semver';
 import {
   discoverRuntimePackageDependencies,
   type RuntimePackageDependency,
 } from './declared-packages';
+import { MAX_MESSAGE_VALUE_LENGTH, normalizeLocale } from '../lib/i18n';
 import type { PluginDependency, PluginDependencyIssue } from '../lib/plugin-dependencies';
 
 export interface DiscoveredPlugin {
@@ -186,6 +187,56 @@ function checkVersionRange(version: string, range: string): VersionCheck {
  * First checks package.json keywords for ["typecho", "plugin"],
  * then reads typecho.plugin in package.json (or plugin.json as fallback) for manifest.
  */
+/**
+ * Extract `plugin.<id>.name` / `plugin.<id>.description` from the plugin's own
+ * locale catalogs so the plugin list can render them without activating (and
+ * therefore executing) an inactive plugin.
+ */
+function readDisplayLocales(
+  packageDir: string,
+  pluginId: string,
+): Record<string, { name?: string; description?: string }> | undefined {
+  const localesDir = join(packageDir, 'locales');
+  if (!existsSync(localesDir)) return undefined;
+
+  let files: string[];
+  try {
+    files = readdirSync(localesDir);
+  } catch {
+    return undefined;
+  }
+
+  const displayLocales: Record<string, { name?: string; description?: string }> = {};
+  for (const file of files) {
+    if (!file.endsWith('.json')) continue;
+    const locale = normalizeLocale(file.slice(0, -'.json'.length));
+    if (!locale) continue;
+
+    let messages: unknown;
+    try {
+      messages = JSON.parse(readFileSync(join(localesDir, file), 'utf8'));
+    } catch (error) {
+      console.warn(`[plugin-loader] Failed to read ${pluginId} locale ${file}:`, error);
+      continue;
+    }
+    if (messages === null || typeof messages !== 'object' || Array.isArray(messages)) continue;
+    const catalog = messages as Record<string, unknown>;
+
+    const entry: { name?: string; description?: string } = {};
+    const name = catalog[`plugin.${pluginId}.name`];
+    const description = catalog[`plugin.${pluginId}.description`];
+    if (typeof name === 'string' && name.length > 0 && name.length <= MAX_MESSAGE_VALUE_LENGTH) {
+      entry.name = name;
+    }
+    if (typeof description === 'string' && description.length > 0 && description.length <= MAX_MESSAGE_VALUE_LENGTH) {
+      entry.description = description;
+    }
+    if (entry.name || entry.description) displayLocales[locale] = entry;
+  }
+
+  return Object.keys(displayLocales).length > 0 ? displayLocales : undefined;
+}
+
 function tryLoadPlugin(packageName: string, packageDir: string, importBase?: string): DiscoveredPlugin | null {
   const pkgJsonPath = join(packageDir, 'package.json');
   if (!existsSync(pkgJsonPath)) return null;
@@ -228,6 +279,9 @@ function tryLoadPlugin(packageName: string, packageDir: string, importBase?: str
 
   const id = derivePluginId(packageName, manifest);
   manifest.id = id;
+
+  const displayLocales = readDisplayLocales(packageDir, id);
+  if (displayLocales) manifest.displayLocales = displayLocales;
 
   // Find entry file
   const entryFile = findEntryFile(packageDir, manifest);

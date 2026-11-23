@@ -24,13 +24,10 @@
       "bucket_name": "typecho-cf-uploads"
     }
   ],
-  // Runtime name used by the administrator Queue page. Keep this in sync with
-  // the producer/consumer name below when deploying multiple instances.
-  "vars": {
-    "QUEUE_NAME": "typecho-cf-tasks"
-  },
   // The Queue name may be changed per installation when one Cloudflare account
-  // hosts multiple Typecho-CF instances. Keep producer and consumer names aligned.
+  // hosts multiple Typecho-CF instances. Keep producer and consumer names
+  // aligned, and set the same name in the Queue plugin settings (used by the
+  // admin Queue page and drift warnings).
   "queues": {
     "producers": [
       {

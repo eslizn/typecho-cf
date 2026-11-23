@@ -2,7 +2,11 @@ import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { isAbsolute, resolve } from 'node:path';
-import { experimental_readRawConfig } from 'wrangler';
+import {
+  QUEUE_MODE_DISABLED,
+  readQueueDeploymentMode,
+  readSourceWranglerConfig,
+} from './queue-deployment.mjs';
 
 const require = createRequire(import.meta.url);
 const SCRIPT_DIR = fileURLToPath(new URL('.', import.meta.url));
@@ -253,26 +257,26 @@ export function resolvedWorkingDirectory(rootDir, cwd) {
  * Ensure every queue referenced by the selected Wrangler config exists. A
  * second list after a failed create makes concurrent deploys safe without
  * hiding authentication, permission, or network failures.
- * @param {{ rootDir?: string, argv?: string[], runner?: Function, logger?: Console }} [options]
+ * @param {{ rootDir?: string, argv?: string[], runner?: Function, logger?: Console, queueMode?: string }} [options]
  */
 export async function ensureQueues({
   rootDir = ROOT_DIR,
   argv = [],
   runner = runWrangler,
   logger = console,
+  queueMode,
 } = {}) {
+  const mode = readQueueDeploymentMode(queueMode);
   const context = extractWranglerContext(argv);
   const cwd = resolvedWorkingDirectory(rootDir, context.cwd);
-  // Let Wrangler handle comments, trailing commas, TOML syntax and config
-  // discovery precedence. A synthetic script anchors discovery to cwd without
-  // changing process.cwd(), which could race with another caller.
-  const { rawConfig, configPath } = experimental_readRawConfig({
-    config: context.configPath ? resolve(cwd, context.configPath) : undefined,
-    script: resolve(cwd, 'worker.js'),
-  });
-  if (!configPath) throw new Error(`No Wrangler config found in ${cwd} or its parent directories`);
-  const queueNames = parseQueueNamesFromWranglerConfig(rawConfig, context.environment);
+  const { rawConfig, configPath } = readSourceWranglerConfig(cwd, context.configPath);
   const log = typeof logger?.log === 'function' ? logger.log.bind(logger) : () => {};
+  if (mode === QUEUE_MODE_DISABLED) {
+    log('[queues] skipping resource preflight in no-queue mode');
+    return { queueNames: [], created: [], configPath, environment: context.environment };
+  }
+
+  const queueNames = parseQueueNamesFromWranglerConfig(rawConfig, context.environment);
 
   log(`[queues] checking ${queueNames.length} Queue resource(s)`);
   let existing = await listExistingQueueNames({ runner, cwd, globalArgs: context.globalArgs });

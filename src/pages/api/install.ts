@@ -2,6 +2,7 @@ import type { APIRoute } from 'astro';
 import { getDb, schema } from '@/db';
 import { getOption } from '@/lib/options';
 import { resetCacheVersionMemo } from '@/lib/cache';
+import { DEFAULT_QUEUE_PROVIDER_ID } from '@/lib/default-queue-provider';
 import { hashPassword, generateRandomString, timeSafeEqual } from '@/lib/auth';
 import { env } from 'cloudflare:workers';
 import { generateCreateSQL } from '@/lib/schema-sql';
@@ -225,6 +226,7 @@ export const POST: APIRoute = async ({ request }) => {
 
       // Set default options, excluding `installed`, which is committed last.
       const defaultOptions: Record<string, string> = {
+        activatedPlugins: JSON.stringify([DEFAULT_QUEUE_PROVIDER_ID]),
         theme: 'typecho-theme-minimal',
         timezone: 'Asia/Shanghai',
         lang: '',

@@ -1,0 +1,10 @@
+{
+  "plugin.typecho-plugin-queue.name": "Queue",
+  "plugin.typecho-plugin-queue.description": "Background task transport and queue monitoring for Cloudflare Workers. Disabling stops new tasks; pending messages retry and are discarded at the retry limit.",
+  "plugin.typecho-plugin-queue.config.queueName.label": "Queue name",
+  "plugin.typecho-plugin-queue.config.queueName.description": "Shown on the admin Queue page and used for drift warnings. Keep it aligned with the Wrangler producer/consumer queue name.",
+  "plugin.typecho-plugin-queue.config.accountId.label": "Cloudflare account ID",
+  "plugin.typecho-plugin-queue.config.accountId.description": "Optional. Enables account-level queue configuration and metrics.",
+  "plugin.typecho-plugin-queue.config.apiToken.label": "Cloudflare API token",
+  "plugin.typecho-plugin-queue.config.apiToken.description": "Optional. Use a token with only the Queues Read permission. Stored in the site database."
+}

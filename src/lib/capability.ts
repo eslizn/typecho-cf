@@ -3,7 +3,7 @@
  *
  * Capabilities are deliberately independent from HookPoints, plugin manifests
  * and package dependencies. A plugin registers an implementation during init;
- * a consumer resolves one against a request-scoped runtime context.
+ * a consumer resolves one against an invocation-scoped runtime context.
  */
 import type { Database } from '@/db';
 
@@ -14,8 +14,7 @@ export interface CapabilityDescriptor {
   ownerPluginId?: string;
 }
 
-export interface CapabilityRuntimeContext {
-  readonly request: Request;
+interface CapabilityRuntimeSnapshot {
   readonly signal: AbortSignal;
   /**
    * Site options with all `plugin:*` entries and the signing `secret`
@@ -28,25 +27,41 @@ export interface CapabilityRuntimeContext {
   readonly activationGeneration: number;
 }
 
-/** Context visible only to a provider factory, not to capability consumers. */
-export interface CapabilityFactoryContext extends CapabilityRuntimeContext {
+export interface CapabilityRuntimeContext extends CapabilityRuntimeSnapshot {
+  readonly request: Request;
+}
+
+export interface BackgroundCapabilityRuntimeContext extends CapabilityRuntimeSnapshot {
+  readonly request?: undefined;
+}
+
+export type CapabilityInvocationContext = CapabilityRuntimeContext | BackgroundCapabilityRuntimeContext;
+
+interface CapabilityProviderConfig {
   /** Read the registering plugin's own configuration, including secrets. */
   readonly getOwnPluginConfig: () => Readonly<Record<string, unknown>>;
 }
 
+/** Context visible only to an HTTP capability provider factory. */
+export type CapabilityFactoryContext = CapabilityRuntimeContext & CapabilityProviderConfig;
 export type CapabilityFactory<T> = (context: CapabilityFactoryContext) => T;
 
-export interface CapabilityRegistration<T = unknown> {
+export type CapabilityRegistrationInput<T = unknown> = {
   capability: string;
   version: number;
-  ownerPluginId: string;
-  factory: CapabilityFactory<T>;
-}
+} & (
+  | { scope?: 'request'; factory: CapabilityFactory<T> }
+  | { scope: 'any'; factory: (context: CapabilityInvocationContext & CapabilityProviderConfig) => T }
+);
 
-interface RegisteredCapability<T = unknown> extends CapabilityRegistration<T> {
+export type CapabilityRegistration<T = unknown> = CapabilityRegistrationInput<T> & {
+  ownerPluginId: string;
+};
+
+type RegisteredCapability<T = unknown> = CapabilityRegistration<T> & {
   /** Generation in which this owner was active and its implementation valid. */
   generation: number;
-}
+};
 
 export type CapabilityResolveFailureReason =
   | 'unavailable'
@@ -67,12 +82,13 @@ export interface CapabilityResolveSuccess<T> {
   value: T;
   ownerPluginId: string;
   version: number;
+  /** False for request-scoped implementations, which Cron/consumer paths cannot resolve. */
+  backgroundAvailable: boolean;
 }
 
 export type CapabilityResolveResult<T> = CapabilityResolveSuccess<T> | CapabilityResolveFailure;
 
-export interface CapabilityRuntimeContextInput {
-  request: Request;
+interface CapabilityRuntimeSnapshotInput {
   options?: Readonly<Record<string, unknown>>;
   db: Database;
   env?: Readonly<Record<string, unknown>>;
@@ -80,11 +96,24 @@ export interface CapabilityRuntimeContextInput {
   activationGeneration?: number;
   /** Host-only raw config accessor used by provider factories. */
   getPluginConfig?: (pluginId: string) => Readonly<Record<string, unknown>>;
+  /** Fresh authoritative database context for an operation with side effects. */
+  getPrimaryDb?: () => Database;
+}
+
+export interface CapabilityRuntimeContextInput extends CapabilityRuntimeSnapshotInput {
+  request: Request;
+}
+
+export interface BackgroundCapabilityRuntimeContextInput extends CapabilityRuntimeSnapshotInput {
+  request?: undefined;
+  signal?: AbortSignal;
 }
 
 const INTERNAL_CONFIG_ACCESSOR = Symbol('typecho.capability.config-accessor');
-type InternalRuntimeContext = CapabilityRuntimeContext & {
+const INTERNAL_PRIMARY_DB = Symbol('typecho.capability.primary-db');
+type InternalRuntimeContext = CapabilityInvocationContext & {
   [INTERNAL_CONFIG_ACCESSOR]?: (pluginId: string) => Readonly<Record<string, unknown>>;
+  [INTERNAL_PRIMARY_DB]?: () => Database;
 };
 
 const registrations = new Map<string, RegisteredCapability[]>();
@@ -94,7 +123,7 @@ let activationGeneration = 0;
 /** Register or replace one implementation for an owner/capability pair. */
 export function registerCapability<T>(
   ownerPluginId: string,
-  registration: Omit<CapabilityRegistration<T>, 'ownerPluginId'>,
+  registration: CapabilityRegistrationInput<T>,
 ): void {
   if (!isValidCapabilityName(registration.capability)) {
     throw new TypeError('capability must be a non-empty dot-separated name');
@@ -147,7 +176,7 @@ export function getCapabilityActivationGeneration(): number {
 
 /** Resolve one implementation without silently selecting among providers. */
 export function resolveCapability<T>(
-  runtimeContext: CapabilityRuntimeContext,
+  runtimeContext: CapabilityInvocationContext,
   descriptor: CapabilityDescriptor,
 ): CapabilityResolveResult<T> {
   const capability = descriptor.capability;
@@ -164,6 +193,7 @@ export function resolveCapability<T>(
       && runtimeContext.activatedPlugins.has(entry.ownerPluginId)
       && entry.generation === activationGeneration
       && runtimeContext.activationGeneration === activationGeneration
+      && (runtimeContext.request !== undefined || entry.scope === 'any')
       && (!descriptor.ownerPluginId || descriptor.ownerPluginId === entry.ownerPluginId)
     ));
 
@@ -189,15 +219,21 @@ export function resolveCapability<T>(
   try {
     const internal = runtimeContext as InternalRuntimeContext;
     const getConfig = internal[INTERNAL_CONFIG_ACCESSOR] ?? (() => ({}));
-    const value = selected.factory({
-      ...runtimeContext,
-      getOwnPluginConfig: () => getConfig(selected.ownerPluginId),
-    });
+    const getOwnPluginConfig = () => getConfig(selected.ownerPluginId);
+    let value: unknown;
+    if (selected.scope === 'any') {
+      value = selected.factory({ ...runtimeContext, getOwnPluginConfig });
+    } else if (runtimeContext.request !== undefined) {
+      value = selected.factory({ ...runtimeContext, getOwnPluginConfig });
+    } else {
+      return { ok: false, capability, reason: 'unavailable' };
+    }
     return {
       ok: true,
       value: value as T,
       ownerPluginId: selected.ownerPluginId,
       version: selected.version,
+      backgroundAvailable: selected.scope === 'any',
     };
   } catch (error) {
     console.error(`[capability] Failed to create ${capability} from ${selected.ownerPluginId}:`, error);
@@ -206,13 +242,19 @@ export function resolveCapability<T>(
 }
 
 /**
- * Construct a request-scoped context. Raw plugin configuration is kept in a
+ * Construct an invocation-scoped context. Raw plugin configuration is kept in a
  * non-enumerable internal slot so it cannot leak through the public options
  * snapshot or be handed to consumers.
  */
 export function createCapabilityRuntimeContext(
   input: CapabilityRuntimeContextInput,
-): CapabilityRuntimeContext {
+): CapabilityRuntimeContext;
+export function createCapabilityRuntimeContext(
+  input: BackgroundCapabilityRuntimeContextInput,
+): BackgroundCapabilityRuntimeContext;
+export function createCapabilityRuntimeContext(
+  input: CapabilityRuntimeContextInput | BackgroundCapabilityRuntimeContextInput,
+): CapabilityInvocationContext {
   const options = Object.fromEntries(
     Object.entries(input.options ?? {}).filter(([key]) => (
       // Raw plugin configuration stays behind the owner-scoped accessor, and
@@ -220,22 +262,28 @@ export function createCapabilityRuntimeContext(
       !key.startsWith('plugin:') && key !== 'secret'
     )),
   );
-  const context: InternalRuntimeContext = {
-    request: input.request,
-    signal: input.request.signal,
+  const snapshot: CapabilityRuntimeSnapshot = {
+    signal: input.request === undefined
+      ? input.signal ?? new AbortController().signal
+      : input.request.signal,
     options: Object.freeze(options),
     db: input.db,
     env: input.env ?? {},
     activatedPlugins: new Set(input.activatedPlugins),
     activationGeneration: input.activationGeneration ?? activationGeneration,
   };
-  Object.defineProperty(context, INTERNAL_CONFIG_ACCESSOR, {
-    value: input.getPluginConfig ?? (() => ({})),
-    enumerable: false,
-    configurable: false,
-    writable: false,
+  const context: InternalRuntimeContext = input.request === undefined
+    ? snapshot
+    : { ...snapshot, request: input.request };
+  Object.defineProperties(context, {
+    [INTERNAL_CONFIG_ACCESSOR]: { value: input.getPluginConfig },
+    [INTERNAL_PRIMARY_DB]: { value: input.getPrimaryDb },
   });
   return Object.freeze(context);
+}
+
+export function getCapabilityPrimaryDb(context: CapabilityInvocationContext): Database | undefined {
+  return (context as InternalRuntimeContext)[INTERNAL_PRIMARY_DB]?.();
 }
 
 /** Test/runtime reset used when the plugin registry is rebuilt. */

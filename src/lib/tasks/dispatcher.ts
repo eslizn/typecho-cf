@@ -1,17 +1,18 @@
 import { parseTaskEnvelope } from './envelope';
-import { MAX_QUEUE_DELAY_SECONDS } from './limits';
-import { findTask, taskIdentity, type RegisteredTask } from './registry';
+import { CORE_TASK_OWNER_ID, findTask, taskIdentity, type RegisteredTask } from './registry';
 import type {
   TaskEnvelope,
   TaskExecutionContext,
   TaskResult,
   TaskHandler,
 } from './types';
-import type { TaskRuntime } from './runtime';
+import type { TaskDispatchRuntime } from './runtime';
 
 export const TASK_GLOBAL_MAX_IN_FLIGHT = 16;
 const DEFAULT_RETRY_DELAY_SECONDS = 5;
 const MAX_RETRY_DELAY_SECONDS = 300;
+/** Upper bound for handler-requested delays; larger values use the backoff. */
+const MAX_REQUESTED_RETRY_DELAY_SECONDS = 86_400;
 const MAX_LOG_TEXT_LENGTH = 512;
 
 export interface TaskMessageLike {
@@ -19,10 +20,6 @@ export interface TaskMessageLike {
   attempts?: number;
   ack(): void | Promise<void>;
   retry(options?: { delaySeconds?: number }): void | Promise<void>;
-}
-
-export interface TaskMessageBatchLike {
-  messages: readonly TaskMessageLike[];
 }
 
 class TaskTimeoutError extends Error {
@@ -85,7 +82,7 @@ function retryDelay(attempt: number, requested?: unknown): number {
     typeof requested === 'number'
     && Number.isSafeInteger(requested)
     && requested >= 0
-    && requested <= MAX_QUEUE_DELAY_SECONDS
+    && requested <= MAX_REQUESTED_RETRY_DELAY_SECONDS
   ) {
     return requested;
   }
@@ -162,14 +159,13 @@ function handlerFor(task: RegisteredTask): TaskHandler<unknown> {
 
 async function invokeWithTimeout(
   task: RegisteredTask,
-  runtime: TaskRuntime,
+  runtime: TaskDispatchRuntime,
   envelope: TaskEnvelope,
   attempt: number,
 ): Promise<TaskResult> {
   const controller = new AbortController();
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   const context: TaskExecutionContext = {
-    env: runtime.env,
     db: runtime.db,
     options: runtime.options,
     pluginId: envelope.pluginId,
@@ -228,7 +224,7 @@ async function executeMessage(
   message: TaskMessageLike,
   envelope: TaskEnvelope,
   task: RegisteredTask,
-  runtime: TaskRuntime,
+  runtime: TaskDispatchRuntime,
   holdTaskSlot: (completion: Promise<unknown>) => void,
 ): Promise<void> {
   const finalizer = createMessageFinalizer(message);
@@ -385,7 +381,7 @@ const isolateScheduler = new InFlightScheduler();
 
 async function processMessage(
   message: TaskMessageLike,
-  runtime: TaskRuntime,
+  runtime: TaskDispatchRuntime,
   scheduler: InFlightScheduler,
 ): Promise<void> {
   let envelope: TaskEnvelope;
@@ -410,7 +406,7 @@ async function processMessage(
     return;
   }
 
-  if (!runtime.activatedPlugins.has(envelope.pluginId)) {
+  if (envelope.pluginId !== CORE_TASK_OWNER_ID && !runtime.activatedPlugins.has(envelope.pluginId)) {
     // A consumer whose required provider failed init is removed from the
     // active set too, but that is transient — retry so the task survives the
     // provider's retry budget instead of being silently acked and lost.
@@ -446,12 +442,21 @@ async function processMessage(
 /** Dispatch a complete Queue batch with bounded task-level concurrency. */
 export async function dispatchTaskMessages(
   messages: readonly TaskMessageLike[],
-  runtime: TaskRuntime,
+  runtime: TaskDispatchRuntime,
 ): Promise<void> {
   if (messages.length === 0) return;
-  const results = await Promise.allSettled(
-    messages.map(message => processMessage(message, runtime, isolateScheduler)),
-  );
+  await settleMessages(messages.map(message => processMessage(message, runtime, isolateScheduler)));
+}
+
+/** Let the provider apply its configured retry budget when dispatch is unavailable. */
+export async function retryTaskMessages(messages: readonly TaskMessageLike[]): Promise<void> {
+  await settleMessages(messages.map(message => (
+    createMessageFinalizer(message).retry(retryDelay(attemptNumber(message)))
+  )));
+}
+
+async function settleMessages(pending: readonly Promise<void>[]): Promise<void> {
+  const results = await Promise.allSettled(pending);
   for (const result of results) {
     if (result.status === 'rejected') throw result.reason;
   }

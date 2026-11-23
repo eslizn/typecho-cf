@@ -1,0 +1,10 @@
+{
+  "plugin.typecho-plugin-queue.name": "Queue",
+  "plugin.typecho-plugin-queue.description": "为 Cloudflare Workers 提供后台任务传输与队列监控。停用会停止接收新任务；积压消息会重试，达到上限后由队列丢弃。",
+  "plugin.typecho-plugin-queue.config.queueName.label": "队列名称",
+  "plugin.typecho-plugin-queue.config.queueName.description": "用于后台队列页展示与配置漂移告警，应与 Wrangler 中 producer/consumer 的队列名一致。",
+  "plugin.typecho-plugin-queue.config.accountId.label": "Cloudflare 账户 ID",
+  "plugin.typecho-plugin-queue.config.accountId.description": "可选。用于读取账户级队列配置与指标。",
+  "plugin.typecho-plugin-queue.config.apiToken.label": "Cloudflare API Token",
+  "plugin.typecho-plugin-queue.config.apiToken.description": "可选。仅需 Queues Read 权限，保存在站点数据库的插件配置中。"
+}

@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -8,6 +8,7 @@ import {
   parseQueueListOutput,
   parseQueueNamesFromWranglerConfig,
 } from '../../scripts/ensure-queues.mjs';
+import { getQueueBuildConfigPath, readQueueDeploymentMode } from '../../scripts/queue-deployment.mjs';
 
 const QUEUE_TABLE = `
 ┌────┬───────────────────────┬────────────────────┬────────────────────┬───────────┬────────────┐
@@ -48,6 +49,59 @@ afterEach(() => {
 });
 
 describe('ensure queues deployment helper', () => {
+  it('derives a queue-free build config from the same project that skips resource preflight', async () => {
+    const rootDir = createConfigFixture({
+      'wrangler.jsonc': `{
+        // Relative assets and migrations paths must keep their meaning.
+        "name": "example",
+        "main": "./src/worker.ts",
+        "assets": { "directory": "./dist", "binding": "ASSETS" },
+        "d1_databases": [{ "binding": "DB", "migrations_dir": "./drizzle" }],
+        "r2_buckets": [{ "binding": "BUCKET" }],
+        "vars": { "SITE_TITLE": "Test" },
+        "queues": {
+          "producers": [{ "binding": "QUEUE", "queue": "tasks" }],
+          "consumers": [{ "queue": "tasks" }]
+        },
+        "triggers": { "crons": ["* * * * *"] },
+        "env": {
+          "preview": {
+            "vars": { "SITE_TITLE": "Preview" },
+            "queues": { "consumers": [{ "queue": "tasks-preview" }] }
+          }
+        }
+      }`,
+    });
+    const runner = vi.fn(() => commandResult(0));
+    const logger = { log: vi.fn() } as unknown as Console;
+    const result = await ensureQueues({ rootDir, runner, logger, queueMode: 'no-queue' });
+    expect(result).toMatchObject({ queueNames: [], created: [], configPath: join(rootDir, 'wrangler.jsonc') });
+    expect(runner).not.toHaveBeenCalled();
+
+    const buildConfigPath = getQueueBuildConfigPath(rootDir, 'no-queue');
+    expect(buildConfigPath).toBe(join(rootDir, '.typecho-wrangler-no-queue.json'));
+    const buildConfig = JSON.parse(readFileSync(buildConfigPath!, 'utf8'));
+    expect(buildConfig).toEqual({
+      name: 'example',
+      main: './src/worker.ts',
+      assets: { directory: './dist', binding: 'ASSETS' },
+      d1_databases: [{ binding: 'DB', migrations_dir: './drizzle' }],
+      r2_buckets: [{ binding: 'BUCKET' }],
+      vars: { SITE_TITLE: 'Test' },
+      triggers: { crons: [] },
+      env: { preview: { vars: { SITE_TITLE: 'Preview' }, triggers: { crons: [] } } },
+    });
+    expect(getQueueBuildConfigPath(rootDir, 'with-queue')).toBeUndefined();
+    expect(readFileSync(result.configPath, 'utf8')).toContain('"queues"');
+  });
+
+  it('selects no-queue mode only through an explicit valid value', async () => {
+    expect(readQueueDeploymentMode('with-queue')).toBe('with-queue');
+    expect(readQueueDeploymentMode('no-queue')).toBe('no-queue');
+    const runner = vi.fn(() => commandResult(0));
+    await expect(ensureQueues({ runner, queueMode: 'noqueue' })).rejects.toThrow('TYPECHO_QUEUE_MODE');
+    expect(runner).not.toHaveBeenCalled();
+  });
   it('extracts only Queue names and ignores legacy DLQ declarations', () => {
     const config = {
       queues: {

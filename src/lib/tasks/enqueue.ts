@@ -1,107 +1,46 @@
 import { createTaskEnvelope } from './envelope';
 import { defaultScheduledTaskKey } from './identity';
-import { MAX_QUEUE_DELAY_SECONDS } from './limits';
-import { findTask, type RegisteredScheduledTaskRecord } from './registry';
+import { resolveTaskQueue, TaskQueueUnavailableError } from './queue';
+import {
+  CORE_TASK_OWNER_ID,
+  findTask,
+  type RegisteredScheduledTaskRecord,
+} from './registry';
+import type { TaskRuntime } from './runtime';
 import type { TaskEnvelope, TaskLocalSlot } from './types';
 
-export interface TaskQueueSendOptions {
-  contentType?: 'json';
-  delaySeconds?: number;
-}
-
-export interface TaskQueueBinding {
-  send(body: unknown, options?: TaskQueueSendOptions): unknown;
-}
-
-/** Options shared by request and scheduled task enqueue operations. */
-export interface TaskEnqueueOptions {
-  /** Stable business idempotency key. Async callers must provide it. */
-  idempotencyKey?: string;
-  /** Override the default task identity key (useful for scheduled fan-out). */
-  taskKey?: string;
-  /** Override the randomly generated envelope job id. */
-  jobId?: string;
-  /** Cloudflare Queue delivery delay. */
-  delaySeconds?: number;
-  /** Unix seconds used for deterministic tests and scheduler invocations. */
-  nowSeconds?: number;
-}
-
-export interface AsyncTaskEnqueueOptions extends TaskEnqueueOptions {
+export interface EnqueueAsyncTaskOptions {
+  /** Stable business idempotency key. */
   idempotencyKey: string;
+  /** Optional delivery delay in seconds. The provider applies its transport limits. */
+  delaySeconds?: number;
 }
 
-/** Public SDK spelling retained as the canonical plugin-facing name. */
-export type EnqueueAsyncTaskOptions = AsyncTaskEnqueueOptions;
-
-export interface ScheduledTaskEnqueueOptions extends TaskEnqueueOptions {}
-
-type TaskEnvironment = Cloudflare.Env & { QUEUE: TaskQueueBinding };
-
-function getQueue(env: Cloudflare.Env): TaskQueueBinding {
-  const queue = (env as TaskEnvironment).QUEUE;
-  if (!queue || typeof queue.send !== 'function') {
-    throw new TypeError('QUEUE binding is not available');
+function requireDeliveryDelay(delaySeconds: number | undefined): void {
+  if (delaySeconds !== undefined && (!Number.isSafeInteger(delaySeconds) || delaySeconds < 0)) {
+    throw new RangeError('delaySeconds must be a non-negative safe integer');
   }
-  return queue;
 }
 
-function unixSeconds(value: number | undefined, field: string): number {
-  const result = value === undefined ? Math.floor(Date.now() / 1000) : value;
-  if (!Number.isSafeInteger(result) || result < 0) {
-    throw new TypeError(`${field} must be a non-negative Unix timestamp in seconds`);
-  }
-  return result;
-}
-
-function delaySeconds(value: number | undefined): number | undefined {
-  if (value === undefined) return undefined;
-  if (!Number.isSafeInteger(value) || value < 0 || value > MAX_QUEUE_DELAY_SECONDS) {
-    throw new RangeError(
-      `delaySeconds must be an integer between 0 and ${MAX_QUEUE_DELAY_SECONDS}`,
-    );
-  }
-  return value;
-}
-
-function requireRegisteredScheduledTask(
-  task: RegisteredScheduledTaskRecord,
-): RegisteredScheduledTaskRecord {
-  const registered = findTask(task.pluginId, task.id, 'scheduled');
-  if (!registered || registered !== task) {
-    throw new Error(`Scheduled task ${task.pluginId}:${task.id} is not registered`);
-  }
-  return registered;
-}
-
-async function sendTaskEnvelope(
-  env: Cloudflare.Env,
-  envelope: TaskEnvelope,
-  requestedDelaySeconds: number | undefined,
-): Promise<TaskEnvelope> {
-  const options: TaskQueueSendOptions = { contentType: 'json' };
-  const delay = delaySeconds(requestedDelaySeconds);
-  if (delay !== undefined) options.delaySeconds = delay;
-  // Queue's JSON content type serializes the envelope for transport while
-  // preserving an object body for the consumer. Do not double-encode it.
-  await getQueue(env).send(envelope, options);
-  return envelope;
-}
-
-/** Enqueue a request-originated async task. */
+/** Enqueue a request-originated async task owned by the caller. */
 export async function enqueueAsyncTaskMessage(
-  env: Cloudflare.Env,
-  pluginId: string,
+  runtime: TaskRuntime,
+  ownerId: string,
   taskId: string,
   payload: unknown,
-  options: AsyncTaskEnqueueOptions,
+  options: EnqueueAsyncTaskOptions,
 ): Promise<TaskEnvelope> {
-  const task = findTask(pluginId, taskId, 'async');
-  if (!task) {
-    throw new Error(`Async task ${pluginId}:${taskId} is not registered`);
+  if (ownerId !== CORE_TASK_OWNER_ID && !runtime.activatedPlugins.has(ownerId)) {
+    throw new TaskQueueUnavailableError('activation-unavailable');
   }
+  const task = findTask(ownerId, taskId, 'async');
+  if (!task) throw new Error(`Async task ${ownerId}:${taskId} is not registered`);
+  requireDeliveryDelay(options.delaySeconds);
 
-  const nowSeconds = unixSeconds(options.nowSeconds, 'nowSeconds');
+  const queue = resolveTaskQueue(runtime.capabilityRuntime);
+  if (!queue.ok) throw new TaskQueueUnavailableError(queue.reason);
+
+  const nowSeconds = Math.floor(Date.now() / 1000);
   const envelope = createTaskEnvelope({
     pluginId: task.pluginId,
     taskId: task.id,
@@ -111,42 +50,46 @@ export async function enqueueAsyncTaskMessage(
     payload,
     scheduledAt: nowSeconds,
     enqueuedAt: nowSeconds,
-    jobId: options.jobId,
-    taskKey: options.taskKey,
     localSlot: null,
   });
-  return sendTaskEnvelope(env, envelope, options.delaySeconds);
+  try {
+    await queue.value.send(envelope, options.delaySeconds);
+  } catch (error) {
+    console.error({
+      event: 'task.enqueue_failed',
+      ownerId,
+      taskId,
+      errorType: error instanceof Error ? error.name : typeof error,
+      error: error instanceof Error ? error.message.slice(0, 200) : undefined,
+    });
+    if (error instanceof RangeError) throw error;
+    throw new TaskQueueUnavailableError('transport-failed');
+  }
+  return envelope;
 }
 
-/** Enqueue one scheduled task for a concrete local-time slot. */
-export async function enqueueScheduledTaskMessage(
-  env: Cloudflare.Env,
-  taskInput: RegisteredScheduledTaskRecord,
+/** Build one scheduled message for a concrete local-time slot. */
+export function createScheduledTaskMessage(
+  task: RegisteredScheduledTaskRecord,
   localSlot: TaskLocalSlot,
   scheduledAt: number,
-  options: ScheduledTaskEnqueueOptions = {},
-): Promise<TaskEnvelope> {
-  const task = requireRegisteredScheduledTask(taskInput);
-  const normalizedScheduledAt = unixSeconds(scheduledAt, 'scheduledAt');
-  const taskKey = options.taskKey
-    ?? task.getTaskKey?.({ scheduledAt: normalizedScheduledAt, localSlot })
-    ?? defaultScheduledTaskKey(task.pluginId, task.id, localSlot, normalizedScheduledAt);
-  const enqueuedAt = unixSeconds(options.nowSeconds, 'nowSeconds');
-  const envelope = createTaskEnvelope({
+  enqueuedAt: number,
+): TaskEnvelope {
+  if (findTask(task.pluginId, task.id, 'scheduled') !== task) {
+    throw new Error(`Scheduled task ${task.pluginId}:${task.id} is not registered`);
+  }
+  const taskKey = task.getTaskKey?.({ scheduledAt, localSlot: { ...localSlot } })
+    ?? defaultScheduledTaskKey(task.pluginId, task.id, localSlot, scheduledAt);
+  return createTaskEnvelope({
     pluginId: task.pluginId,
     taskId: task.id,
     kind: 'scheduled',
     source: 'scheduled',
-    idempotencyKey: options.idempotencyKey ?? `schedule:${taskKey}`,
-    payload: {
-      localSlot,
-      scheduledAt: normalizedScheduledAt,
-    },
-    scheduledAt: normalizedScheduledAt,
+    idempotencyKey: `schedule:${taskKey}`,
+    payload: { localSlot, scheduledAt },
+    scheduledAt,
     enqueuedAt,
-    jobId: options.jobId,
     taskKey,
     localSlot,
   });
-  return sendTaskEnvelope(env, envelope, options.delaySeconds);
 }

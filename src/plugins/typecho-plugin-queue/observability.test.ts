@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
+import { DEFAULT_TASK_QUEUE_NAME } from './binding';
 import {
-  DEFAULT_TASK_QUEUE_NAME,
   getQueueDashboardSnapshot,
   parseQueueMetrics,
-} from '@/lib/queue-observability';
+} from './observability';
 
 function jsonResponse(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), {
@@ -79,9 +79,9 @@ describe('queue observability', () => {
     });
 
     const snapshot = await getQueueDashboardSnapshot({
-      QUEUE_NAME: 'main-queue',
-      CF_ACCOUNT_ID: 'account-id',
-      CF_API_TOKEN: 'read-only-token',
+      queueName: 'main-queue',
+      accountId: 'account-id',
+      apiToken: 'read-only-token',
     }, { fetch, now: () => 456 });
 
     expect(snapshot.api).toEqual({ configured: true, available: true });
@@ -115,8 +115,8 @@ describe('queue observability', () => {
 
     const snapshot = await getQueueDashboardSnapshot({
       QUEUE: { metrics: vi.fn(async () => ({ backlogCount: 1, backlogBytes: 64 })) },
-      CF_ACCOUNT_ID: 'account-id',
-      CF_API_TOKEN: 'token',
+      accountId: 'account-id',
+      apiToken: 'token',
     }, { fetch });
 
     expect(snapshot.api).toEqual({ configured: true, available: false });
@@ -137,8 +137,8 @@ describe('queue observability', () => {
     const fetch = vi.fn(async () => new Response('x'.repeat(1_000_001), { status: 200 }));
 
     const snapshot = await getQueueDashboardSnapshot({
-      CF_ACCOUNT_ID: 'account-id',
-      CF_API_TOKEN: 'token',
+      accountId: 'account-id',
+      apiToken: 'token',
     }, { fetch });
 
     expect(snapshot.api).toEqual({ configured: true, available: false });

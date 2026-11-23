@@ -12,7 +12,6 @@ import { renderContent } from '@/lib/markdown';
 import {
   applyFilterSafely,
   parseActivatedPlugins,
-  loadPluginConfig,
   setActivatedPlugins,
   type HookContext,
 } from '@/lib/plugin';
@@ -20,7 +19,7 @@ import { getDb } from '@/db';
 import { computeUrls, loadOptions } from '@/lib/options';
 import { getRequestCoreContextFromLocals } from '@/lib/context';
 import { env } from 'cloudflare:workers';
-import { createCapabilityRuntimeContext } from '@/lib/capability';
+import { createRequestCapabilityRuntime } from '@/lib/request-capability';
 
 export const FEED_ITEMS_DEFAULT = 10;
 export const FEED_ITEMS_MIN = 5;
@@ -42,14 +41,12 @@ export async function getFeedRuntime(locals: App.Locals, request?: Request) {
       pluginCtx,
       parseActivatedPlugins(options.activatedPlugins as string | undefined),
     );
-    pluginCtx.capabilityRuntime = createCapabilityRuntimeContext({
+    pluginCtx.capabilityRuntime = createRequestCapabilityRuntime({
       request: request || new Request(urls.feedUrl || 'http://localhost/feed'),
       db,
       options,
-      env: env as unknown as Record<string, unknown>,
       activatedPlugins: pluginCtx.activatedPlugins,
       activationGeneration: pluginCtx.activationGeneration,
-      getPluginConfig: pluginId => loadPluginConfig(options, pluginId),
     });
   }
   const runtime = core?.i18n && core.resolvedLocale

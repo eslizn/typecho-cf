@@ -62,6 +62,19 @@ pnpm run dev
 
 仓库中的 `wrangler.jsonc` 只声明绑定名（D1 `DB` / R2 `BUCKET` / Queue `QUEUE`），不含账号专属 ID。本地 `pnpm run dev` 使用 Miniflare 模拟存储，不必改这个文件。密钥写在 `.dev.vars`（已 gitignore）。
 
+### 不使用队列的 Cloudflare 部署
+
+部署时设置 `TYPECHO_QUEUE_MODE=no-queue`。构建从 `wrangler.jsonc` 生成无队列配置，保留 D1、R2 和静态资源，省略队列绑定和任务 Cron。部署预检会跳过队列资源查询与创建。这个配置下站点仍可安装和访问，后台会显示队列不可用。
+
+```bash
+TYPECHO_QUEUE_MODE=no-queue pnpm run deploy
+TYPECHO_QUEUE_MODE=no-queue pnpm run deploy:dry-run
+```
+
+如需为无队列 Worker 接入 Workers Builds，请先用命令行完成首次部署，再连接仓库。在 Workers Builds 的构建环境变量中设置 `TYPECHO_QUEUE_MODE=no-queue`，继续使用 `pnpm run build` 和 `pnpm run deploy:ci`。本地也可以用同一环境变量启动 `pnpm run dev`。
+
+把已有带队列 Worker 切换到该模式会清除已部署的任务 Cron。账户上原有的 Queue 资源和 consumer 订阅可在 Cloudflare 中管理。 [Cloudflare Cron 配置](https://developers.cloudflare.com/workers/configuration/cron-triggers/#delete-a-cron-trigger) · [Cloudflare consumer 管理](https://developers.cloudflare.com/workers/wrangler/commands/queues/#queues-consumer-worker-remove)
+
 ### 命令行部署到 Cloudflare
 
 不必先 `d1 create` / 填写 `database_id`。Wrangler 会按绑定名自动创建 D1（`typecho-cf-db`）和 R2（`typecho-cf-uploads`），并记在你的 Cloudflare 账号上。
@@ -84,20 +97,19 @@ pnpm run deploy
 只会把参数传给最后一个命令。
 
 如需在同一 Cloudflare 账户部署多个实例，请手动修改 `wrangler.jsonc` 中 producer 的
-`queue`、consumer 的 `queue` 以及 `vars` 中的 `QUEUE_NAME`，为当前实例设置唯一名称，
-并保持 producer 与 consumer 使用同一个任务 Queue。本地 `pnpm run deploy`、Workers
-Builds 的 `pnpm run deploy:ci` 和 Button 都会按修改后的 Wrangler 配置工作。
+`queue` 与 consumer 的 `queue`，为当前实例设置唯一的任务 Queue 并保持两者一致；随后在
+「插件 → Queue → 设置」中把「Queue name」改为同一个名称（用于后台展示和配置漂移告警，
+不一致不会导致任务被丢弃）。本地 `pnpm run deploy`、Workers Builds 的
+`pnpm run deploy:ci` 和 Button 都会按修改后的 Wrangler 配置工作。
 
-登录后台后，管理员可在「管理 → 队列」查看任务 Queue 的近实时积压指标。默认通过 Worker
-`QUEUE` binding 读取，不需要 API 凭据。若要查看账户级 Queue 配置和 consumer 配置，可在
-Cloudflare 中创建仅含 Queues Read 权限的 API Token，并以 secret 配置账户 ID 和令牌：
+新装站点默认启用 Queue 插件（Cloudflare Queues provider），管理员可手动停用。已有站点需在插件页手动启用。停用会停止提交与调度，后续收到的积压消息会按现有预算重试。
 
-```bash
-pnpm exec wrangler secret put CF_ACCOUNT_ID
-pnpm exec wrangler secret put CF_API_TOKEN
-```
+登录后台后，管理员可在「管理 → 队列」（仅 Queue 插件启用时可见）查看 provider 状态和近实时积压指标。Queue 插件通过 Worker
+`QUEUE` binding 读取指标，无需 API 凭据。若要查看账户级 Queue 配置和 consumer 配置，可在
+Cloudflare 中创建仅含 Queues Read 权限的 API Token，并在「插件 → Queue → 设置」中填写
+Cloudflare account ID 与 API token；这些值保存在站点数据库的插件配置中，API token 在页面上会掩码显示。
 
-这两个 secret 均为可选；未配置时页面仍可显示 `QUEUE` binding 的实时指标。当前部署未配置
+这两项均为可选；未配置时页面仍可显示 `QUEUE` binding 的实时指标。当前部署未配置
 死信队列，消息达到最大重试次数后会被 Cloudflare 丢弃。页面不拉取、租约、删除或重放消息，
 也不记录单条任务的运行中/已完成历史。
 

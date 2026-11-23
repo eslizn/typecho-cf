@@ -28,12 +28,13 @@ import {
   stagePluginTranslation,
 } from '@/lib/i18n-registry';
 import type { I18n, ResolvedLocale } from '@/lib/i18n';
-import { env as runtimeEnv } from 'cloudflare:workers';
 import {
   enqueueAsyncTaskMessage,
   type EnqueueAsyncTaskOptions,
 } from '@/lib/tasks/enqueue';
+import { TaskQueueUnavailableError } from '@/lib/tasks/queue';
 import {
+  CORE_TASK_OWNER_ID,
   registerAsyncTask,
   registerScheduledTask,
   resetTaskRegistrations,
@@ -56,7 +57,7 @@ import {
   setCapabilityActivation,
   unregisterCapabilityOwner,
 } from '@/lib/capability';
-import type { CapabilityRegistration, CapabilityRuntimeContext } from '@/lib/capability';
+import type { CapabilityRegistrationInput, CapabilityRuntimeContext } from '@/lib/capability';
 import type { addHook, HookPoints } from '@/lib/hooks';
 import { applyFilterSafely, removePluginHooks } from '@/lib/hooks';
 import {
@@ -136,6 +137,12 @@ export interface PluginManifest {
    * Stored as JSON in options table under key "plugin:<id>".
    */
   config?: Record<string, PluginConfigField>;
+  /**
+   * Build-time display translations derived by the plugin loader from
+   * `locales/*.json`. Used by the plugin list so names and descriptions render
+   * in the current language even while the plugin is inactive.
+   */
+  displayLocales?: Record<string, { name?: string; description?: string }>;
 }
 
 export interface PluginInfo {
@@ -195,7 +202,7 @@ export interface PluginInitContext {
   registerAdminPath: (path: string) => void;
   /** Register a generic capability implementation owned by this plugin. */
   registerCapability?: <T>(
-    registration: Omit<CapabilityRegistration<T>, 'ownerPluginId'>,
+    registration: CapabilityRegistrationInput<T>,
   ) => void;
   registerTranslations: (
     locale: string,
@@ -207,6 +214,7 @@ export interface PluginInitContext {
     definition: AsyncTaskDefinition<TPayload>,
   ) => void;
   enqueueAsyncTask: <TPayload = unknown>(
+    capabilityRuntime: CapabilityRuntimeContext,
     taskId: string,
     payload: TPayload,
     options: EnqueueAsyncTaskOptions,
@@ -363,7 +371,7 @@ export function registerPluginLoaders(
 ): void {
   pluginInitContext = ctx;
   for (const [id, loader] of Object.entries(loaders)) {
-    pluginInitLoaders.set(id, loader);
+    if (id !== CORE_TASK_OWNER_ID) pluginInitLoaders.set(id, loader);
   }
 }
 
@@ -382,6 +390,7 @@ export function registerPlugin(
   } = {},
 ): void {
   const id = manifest.id || packageName;
+  if (id === CORE_TASK_OWNER_ID) return;
   pluginRegistry.set(id, {
     id,
     packageName,
@@ -525,7 +534,7 @@ export async function setActivatedPlugins(ctx: HookContext, ids: string[]): Prom
           registerAdminPath: (path: string) => {
             if (isCurrentInitialisation()) registerPluginAdminPath(id, path);
           },
-          registerCapability: <T>(registration: Omit<CapabilityRegistration<T>, 'ownerPluginId'>) => {
+          registerCapability: <T>(registration: CapabilityRegistrationInput<T>) => {
             if (isCurrentInitialisation()) registerOwnedCapability(id, registration);
           },
           registerTranslations: (locale, messages, displayName) => {
@@ -537,13 +546,20 @@ export async function setActivatedPlugins(ctx: HookContext, ids: string[]): Prom
           registerAsyncTask: <TPayload>(definition: AsyncTaskDefinition<TPayload>) => {
             if (isCurrentInitialisation()) registerAsyncTask(id, definition);
           },
-          enqueueAsyncTask: <TPayload>(
+          enqueueAsyncTask: async <TPayload>(
+            capabilityRuntime: CapabilityRuntimeContext,
             taskId: string,
             payload: TPayload,
             options: EnqueueAsyncTaskOptions,
           ) => {
             if (!isCurrentInitialisation()) throw new Error(`Plugin ${id} is no longer active`);
-            return enqueueAsyncTaskMessage(runtimeEnv, id, taskId, payload, options);
+            if (!initialisedPlugins.has(id)) {
+              throw new Error(`Plugin ${id} cannot enqueue tasks during initialization`);
+            }
+            const { refreshTaskRuntime } = await import('@/lib/tasks/runtime');
+            const runtime = await refreshTaskRuntime(capabilityRuntime);
+            if (!isCurrentInitialisation()) throw new TaskQueueUnavailableError('activation-unavailable');
+            return enqueueAsyncTaskMessage(runtime, id, taskId, payload, options);
           },
         });
       })
